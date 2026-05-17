@@ -11,7 +11,8 @@
    - ✅ `TopicRanking` 状态：`queued` → `running` → `completed` | `failed`  
    - ✅ **Transactional Outbox**：快照提交事务内写入 `OutboxEvent`；`OutboxPublisherService` 定时发往 Kafka 兼容 broker（默认 topic `ranking.snapshot.completed`）。未配置 `KAFKA_BROKERS` 时仅积累 outbox 并打日志。  
    - ✅ 本地 **Redpanda**：`docker compose` 中 `redpanda`，宿主机端口 **19092**（`.env` 中 `KAFKA_BROKERS=localhost:19092`）  
-   - ⏳ 爬虫 checkpoint、多实例 outbox `SKIP LOCKED` 抢单（后续）
+   - ✅ 多实例 **Outbox**：`leasedUntil` 租约 + `FOR UPDATE SKIP LOCKED` 抢占，避免并行重复发布  
+   - ⏳ 爬虫 checkpoint（后续）
 
 3. **P2 — Analytics & search**  
    ClickHouse、Elasticsearch、Redis 热榜缓存

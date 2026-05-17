@@ -38,10 +38,13 @@ model OutboxEvent {
   payload     Json
   createdAt   DateTime  @default(now())
   publishedAt DateTime?
+  /// 多实例发布时租约；到期或未设置才可被 SKIP LOCKED 抢到
+  leasedUntil DateTime?
   attempts    Int       @default(0)
   lastError   String?   @db.Text
 
   @@index([publishedAt, id])
+  @@index([publishedAt, leasedUntil, id])
   @@index([type])
 }
 

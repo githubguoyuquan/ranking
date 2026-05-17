@@ -77,6 +77,14 @@ export class IngestionService {
     });
   }
 
+  async listSources(limit = 50) {
+    const take = Math.min(Math.max(limit, 1), 100);
+    return this.prisma.source.findMany({
+      orderBy: { id: 'desc' },
+      take,
+    });
+  }
+
   async getCrawlTask(id: bigint) {
     const task = await this.prisma.crawlTask.findUnique({
       where: { id },

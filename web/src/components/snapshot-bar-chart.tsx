@@ -1,6 +1,8 @@
 "use client";
 
 import * as echarts from "echarts";
+import { unifiedSearchAdminPathFromQuery } from "@/lib/unified-search-admin-path";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
 
 export type SnapshotChartItem = {
@@ -11,6 +13,7 @@ export type SnapshotChartItem = {
 
 export function SnapshotBarChart({ items }: { items: SnapshotChartItem[] }) {
   const ref = useRef<HTMLDivElement>(null);
+  const router = useRouter();
 
   useEffect(() => {
     const el = ref.current;
@@ -38,6 +41,7 @@ export function SnapshotBarChart({ items }: { items: SnapshotChartItem[] }) {
       series: [
         {
           type: "bar",
+          cursor: "pointer",
           data: sorted.map((i) => i.popularityScore ?? 0),
           itemStyle: {
             color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
@@ -50,13 +54,29 @@ export function SnapshotBarChart({ items }: { items: SnapshotChartItem[] }) {
       ],
     });
 
+    const onClick = (raw: unknown) => {
+      const p = raw as {
+        componentType?: string;
+        seriesType?: string;
+        dataIndex?: number;
+      };
+      if (p.componentType !== "series" || p.seriesType !== "bar") return;
+      const idx = p.dataIndex;
+      if (typeof idx !== "number" || idx < 0 || idx >= sorted.length) return;
+      const name = sorted[idx]?.entity?.canonicalName?.trim();
+      if (!name) return;
+      router.push(unifiedSearchAdminPathFromQuery(name));
+    };
+    chart.on("click", onClick);
+
     const ro = new ResizeObserver(() => chart.resize());
     ro.observe(el);
     return () => {
+      chart.off("click", onClick);
       ro.disconnect();
       chart.dispose();
     };
-  }, [items]);
+  }, [items, router]);
 
   if (items.length === 0) {
     return (
@@ -64,5 +84,11 @@ export function SnapshotBarChart({ items }: { items: SnapshotChartItem[] }) {
     );
   }
 
-  return <div ref={ref} className="h-[min(420px,50vh)] w-full min-h-[280px]" />;
+  return (
+    <div
+      ref={ref}
+      className="h-[min(420px,50vh)] w-full min-h-[280px]"
+      aria-label="得分分布柱状图：横向为分数，纵向为实体；鼠标点击柱条可打开该实体的聚合搜索"
+    />
+  );
 }

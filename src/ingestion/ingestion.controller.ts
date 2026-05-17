@@ -140,6 +140,13 @@ export class IngestionController {
     );
   }
 
+  @Get('sources')
+  async listSources(@Query('limit') limitRaw?: string) {
+    const limit = limitRaw !== undefined ? Number(limitRaw) : 50;
+    const lim = Number.isFinite(limit) ? limit : 50;
+    return toPlainJson(await this.ingestion.listSources(lim));
+  }
+
   @Get('sources/:sourceId/urls')
   async listCrawledUrls(
     @Param('sourceId') sourceId: string,

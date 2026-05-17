@@ -1,16 +1,24 @@
-import { dirname } from "path";
-import { fileURLToPath } from "url";
-import { FlatCompat } from "@eslint/eslintrc";
+import nextCoreWebVitals from "eslint-config-next/core-web-vitals";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-const compat = new FlatCompat({
-  baseDirectory: __dirname,
-});
-
+/** `eslint-config-next` v16 已是 flat config，勿再用 FlatCompat 包一层（会触发循环结构校验错误）。 */
 const eslintConfig = [
-  ...compat.extends("next/core-web-vitals", "next/typescript"),
+  ...nextCoreWebVitals,
+  /**
+   * react-hooks v7：与常见「searchParams → useState」水合、`edit` 行选中同步表单等模式冲突；
+   * 关闭后仍以 hooks 规则主体（exhaustive-deps 等）为准。
+   */
+  {
+    rules: {
+      "react-hooks/set-state-in-effect": "off",
+      "react-hooks/refs": "off",
+    },
+  },
+  {
+    files: ["eslint.config.mjs"],
+    rules: {
+      "import/no-anonymous-default-export": "off",
+    },
+  },
 ];
 
 export default eslintConfig;

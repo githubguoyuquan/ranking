@@ -1,5 +1,7 @@
 "use client";
 
+import { AdminFooterNav } from "@/components/admin-footer-nav";
+import { CopyTextButton } from "@/components/copy-snapshot-id-button";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -10,8 +12,36 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { getApiBase } from "@/lib/api";
-import { useEffect, useState } from "react";
+import {
+  SEARCH_CRAWL_STATUS_MAX_LEN,
+  SEARCH_SOURCE_ID_QUERY_MAX_LEN,
+  UNIFIED_SEARCH_LIMIT_INPUT_MAX_LEN,
+  UNIFIED_SEARCH_LIMIT_MAX,
+  UNIFIED_SEARCH_Q_MAX_LEN,
+} from "@/lib/admin-input-limits";
+import {
+  DECIMAL_BIGINT_ID_MAX_DIGITS,
+  isDecimalBigIntIdString,
+} from "@/lib/decimal-id";
+import {
+  entitiesAdminPrefillPath,
+} from "@/lib/entities-admin-path";
+import { NEST_V1 } from "@/lib/nest-api-paths";
+import {
+  nestSearchCrawledUrlsEsUrl,
+  nestSearchCrawledUrlsUrl,
+  nestSearchEntitiesUrl,
+  nestSearchHealthUrl,
+  nestSearchUrl,
+} from "@/lib/nest-api-urls";
+import {
+  buildUnifiedSearchWebPath,
+  unifiedSearchAdminPathFromQuery,
+} from "@/lib/unified-search-admin-path";
+import { useAdminAppUrl } from "@/hooks/use-admin-app-url";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useMemo, useState } from "react";
 
 type SearchEsHealth = {
   ok: boolean;
@@ -80,6 +110,42 @@ function isPgCrawledRow(x: unknown): x is PgCrawledRow {
   return "urlFingerprint" in o || ("id" in o && !("crawledUrlId" in o));
 }
 
+function parseIndexModeFromQuery(
+  v: string | null,
+): "auto" | "es" | "pg" | null {
+  if (v === "auto" || v === "es" || v === "pg") return v;
+  return null;
+}
+
+/** 与 `NEST_V1.search`（聚合搜索 API）的 `limit` 校验一致（上限见 `UNIFIED_SEARCH_LIMIT_MAX`） */
+function clampUnifiedSearchLimit(raw: string): string {
+  const t = raw.trim();
+  if (t === "") return "12";
+  const n = Math.trunc(Number(t));
+  if (!Number.isFinite(n) || n < 1) return "12";
+  return String(Math.min(n, UNIFIED_SEARCH_LIMIT_MAX));
+}
+
+function crawlRefineSearchHref(args: {
+  q: string;
+  limit: string;
+  crawlIndex: "auto" | "es" | "pg";
+  entityIndex: "auto" | "es" | "pg";
+  status: string;
+  hitSourceId: string;
+}) {
+  const params = new URLSearchParams({
+    q: args.q.trim(),
+    limit: clampUnifiedSearchLimit(args.limit),
+    crawlIndex: args.crawlIndex,
+    entityIndex: args.entityIndex,
+  });
+  params.set("sourceId", args.hitSourceId);
+  const st = args.status.trim();
+  if (st) params.set("status", st);
+  return buildUnifiedSearchWebPath(params);
+}
+
 const selectClass =
   "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
@@ -102,7 +168,10 @@ function HighlightedHtml({
   );
 }
 
-export default function SearchPage() {
+function SearchPageInner() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { abs } = useAdminAppUrl();
   const [q, setQ] = useState("Swift");
   const [limit, setLimit] = useState("12");
   const [crawlIndex, setCrawlIndex] = useState<"auto" | "es" | "pg">("auto");
@@ -116,9 +185,114 @@ export default function SearchPage() {
   const [esHealthErr, setEsHealthErr] = useState<string>("");
 
   useEffect(() => {
+    const qp = searchParams.get("q");
+    if (qp !== null) {
+      setQ(
+        qp.length <= UNIFIED_SEARCH_Q_MAX_LEN
+          ? qp
+          : qp.slice(0, UNIFIED_SEARCH_Q_MAX_LEN),
+      );
+    }
+
+    const lp = searchParams.get("limit");
+    if (lp != null && lp.trim() !== "") {
+      setLimit(clampUnifiedSearchLimit(lp));
+    }
+
+    const ei = parseIndexModeFromQuery(searchParams.get("entityIndex"));
+    if (ei) setEntityIndex(ei);
+
+    const ci = parseIndexModeFromQuery(searchParams.get("crawlIndex"));
+    if (ci) setCrawlIndex(ci);
+
+    const sid = searchParams.get("sourceId");
+    if (sid !== null) {
+      setSourceId(
+        sid.length <= SEARCH_SOURCE_ID_QUERY_MAX_LEN
+          ? sid
+          : sid.slice(0, SEARCH_SOURCE_ID_QUERY_MAX_LEN),
+      );
+    }
+
+    const st = searchParams.get("status");
+    if (st !== null) {
+      setStatus(
+        st.length <= SEARCH_CRAWL_STATUS_MAX_LEN
+          ? st
+          : st.slice(0, SEARCH_CRAWL_STATUS_MAX_LEN),
+      );
+    }
+  }, [searchParams]);
+
+  const unifiedSearchParams = useMemo(() => {
+    const params = new URLSearchParams({
+      q: q.trim(),
+      limit: clampUnifiedSearchLimit(limit),
+      crawlIndex,
+      entityIndex,
+    });
+    const sid = sourceId.trim();
+    const st = status.trim();
+    if (sid) params.set("sourceId", sid);
+    if (st) params.set("status", st);
+    return params;
+  }, [q, limit, crawlIndex, entityIndex, sourceId, status]);
+
+  const searchApiUrl = useMemo(
+    () => nestSearchUrl(unifiedSearchParams),
+    [unifiedSearchParams],
+  );
+
+  const searchAdminPath = useMemo(
+    () => buildUnifiedSearchWebPath(unifiedSearchParams),
+    [unifiedSearchParams],
+  );
+
+  const searchEntitiesSubUrl = useMemo(() => {
+    const qt = q.trim();
+    if (!qt) return "";
+    const params = new URLSearchParams({
+      q: qt,
+      limit: clampUnifiedSearchLimit(limit),
+      engine: entityIndex,
+    });
+    return nestSearchEntitiesUrl(params);
+  }, [q, limit, entityIndex]);
+
+  const crawledSubSearchParams = useMemo(() => {
+    const qt = q.trim();
+    if (qt.length < 2) return null;
+    const params = new URLSearchParams({
+      q: qt,
+      limit: clampUnifiedSearchLimit(limit),
+    });
+    const sid = sourceId.trim();
+    const st = status.trim();
+    if (sid) params.set("sourceId", sid);
+    if (st) params.set("status", st);
+    return params;
+  }, [q, limit, sourceId, status]);
+
+  const searchCrawledUrlsSubUrl = useMemo(
+    () =>
+      crawledSubSearchParams
+        ? nestSearchCrawledUrlsUrl(crawledSubSearchParams)
+        : "",
+    [crawledSubSearchParams],
+  );
+
+  const searchCrawledUrlsEsSubUrl = useMemo(
+    () =>
+      crawledSubSearchParams
+        ? nestSearchCrawledUrlsEsUrl(crawledSubSearchParams)
+        : "",
+    [crawledSubSearchParams],
+  );
+
+  useEffect(() => {
     void (async () => {
       try {
-        const res = await fetch(`${getApiBase()}/v1/search/health`, {
+        const res = await fetch(nestSearchHealthUrl(), {
           cache: "no-store",
         });
         const text = await res.text();
@@ -141,21 +315,19 @@ export default function SearchPage() {
     setResult(null);
     setRawError("");
     try {
-      const params = new URLSearchParams({
-        q: q.trim(),
-        limit: limit.trim() || "12",
-        crawlIndex,
-        entityIndex,
-      });
       const sid = sourceId.trim();
-      const st = status.trim();
-      if (sid) params.set("sourceId", sid);
-      if (st) params.set("status", st);
+      if (sid && !isDecimalBigIntIdString(sid)) {
+        setRawError(
+          `sourceId 若填写须为十进制 Crawl Source 主键（至多 ${DECIMAL_BIGINT_ID_MAX_DIGITS} 位数字），与后端 BigInt 解析一致。`,
+        );
+        return;
+      }
 
-      const res = await fetch(
-        `${getApiBase()}/v1/search?${params.toString()}`,
-        { cache: "no-store" },
-      );
+      router.replace(buildUnifiedSearchWebPath(unifiedSearchParams), {
+        scroll: false,
+      });
+
+      const res = await fetch(nestSearchUrl(unifiedSearchParams), { cache: "no-store" });
       const text = await res.text();
       if (!res.ok) {
         setRawError(`HTTP ${res.status}\n${text}`);
@@ -174,7 +346,7 @@ export default function SearchPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">搜索</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          <code className="rounded bg-muted px-1">GET /v1/search</code>
+          <code className="rounded bg-muted px-1">GET {NEST_V1.search}</code>
           ：实体（
           <code className="rounded bg-muted px-1">entityIndex</code>）与爬取（
           <code className="rounded bg-muted px-1">crawlIndex</code>）；未配 ES 时
@@ -185,7 +357,7 @@ export default function SearchPage() {
         </p>
         <p className="mt-2 text-xs text-muted-foreground">
           Elasticsearch{" "}
-          <code className="rounded bg-muted px-1">GET /v1/search/health</code>
+          <code className="rounded bg-muted px-1">GET {NEST_V1.searchHealth}</code>
           ：
           {esHealthErr ? (
             <span className="text-destructive"> {esHealthErr}</span>
@@ -204,6 +376,22 @@ export default function SearchPage() {
           ) : (
             " …"
           )}
+          {" · "}
+          <span className="inline-flex flex-wrap items-center gap-1.5 align-middle">
+            <a
+              href={nestSearchHealthUrl()}
+              target="_blank"
+              rel="noreferrer"
+              className="text-primary underline-offset-2 hover:underline"
+            >
+              新标签打开 JSON
+            </a>
+            <CopyTextButton
+              text={nestSearchHealthUrl()}
+              idleLabel="复制 ES health URL"
+              className="h-6"
+            />
+          </span>
         </p>
       </div>
 
@@ -212,7 +400,19 @@ export default function SearchPage() {
           <CardTitle className="text-base">查询</CardTitle>
           <CardDescription>
             实体默认 auto：有 <code className="text-xs">ELASTICSEARCH_NODE</code>{" "}
-            用 ES，否则用 PG；也可用 entityIndex 强制。
+            用 ES，否则用 PG；也可用 entityIndex 强制。<code className="text-xs">q</code> 最长{" "}
+            <code className="text-xs">{UNIFIED_SEARCH_Q_MAX_LEN}</code> 字符。<code className="text-xs">limit</code> 与{" "}
+            <code className="text-xs">GET {NEST_V1.search}</code> 一致为 1–
+            <code className="text-xs">{UNIFIED_SEARCH_LIMIT_MAX}</code>（非法或过大时前端会钳制）。<code className="text-xs">sourceId</code>{" "}
+            若填写须为十进制（至多 {DECIMAL_BIGINT_ID_MAX_DIGITS} 位，与 <code className="text-xs">BigInt</code>
+            一致），字符串最长 <code className="text-xs">{SEARCH_SOURCE_ID_QUERY_MAX_LEN}</code>；<code className="text-xs">status</code>{" "}
+            最长 <code className="text-xs">{SEARCH_CRAWL_STATUS_MAX_LEN}</code> 字符。在有 <code className="text-xs">q</code>{" "}
+            的前提下，limit / sourceId / status 框内也可按{" "}
+            <kbd className="rounded border border-border bg-muted px-1 text-[10px]">Enter</kbd>{" "}
+            搜索。表单下方可新标签打开与当前参数一致的{" "}
+            <code className="text-xs">{NEST_V1.searchEntities}</code>、
+            <code className="text-xs">{NEST_V1.searchCrawledUrls}</code> /{" "}
+            <code className="text-xs">{NEST_V1.searchCrawledUrlsEs}</code>（爬取分项须 q≥2 字符）。
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
@@ -221,10 +421,12 @@ export default function SearchPage() {
               <Label htmlFor="q">q</Label>
               <Input
                 id="q"
+                maxLength={UNIFIED_SEARCH_Q_MAX_LEN}
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") void runSearch();
+                  if (e.key !== "Enter" || loading || !q.trim()) return;
+                  void runSearch();
                 }}
               />
             </div>
@@ -233,8 +435,14 @@ export default function SearchPage() {
               <Input
                 id="limit"
                 inputMode="numeric"
+                maxLength={UNIFIED_SEARCH_LIMIT_INPUT_MAX_LEN}
+                placeholder={`1–${UNIFIED_SEARCH_LIMIT_MAX}`}
                 value={limit}
                 onChange={(e) => setLimit(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter" || loading || !q.trim()) return;
+                  void runSearch();
+                }}
               />
             </div>
             <div className="space-y-2">
@@ -271,20 +479,118 @@ export default function SearchPage() {
               <Label htmlFor="sourceId">sourceId（可选）</Label>
               <Input
                 id="sourceId"
+                inputMode="numeric"
+                maxLength={SEARCH_SOURCE_ID_QUERY_MAX_LEN}
                 placeholder="例如 1"
                 value={sourceId}
                 onChange={(e) => setSourceId(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter" || loading || !q.trim()) return;
+                  void runSearch();
+                }}
               />
             </div>
             <div className="space-y-2">
               <Label htmlFor="status">status（可选）</Label>
               <Input
                 id="status"
-                placeholder="例如 fetched"
+                maxLength={SEARCH_CRAWL_STATUS_MAX_LEN}
                 value={status}
                 onChange={(e) => setStatus(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter" || loading || !q.trim()) return;
+                  void runSearch();
+                }}
               />
             </div>
+          </div>
+
+          <div className="space-y-2 text-xs text-muted-foreground">
+            <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <a
+                href={searchApiUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-primary underline-offset-4 hover:underline"
+              >
+                新标签打开当前参数（GET {NEST_V1.search}）
+              </a>
+              <CopyTextButton
+                text={searchApiUrl}
+                idleLabel="复制 API URL"
+                className="h-6"
+              />
+              <CopyTextButton
+                text={abs(searchAdminPath)}
+                idleLabel="复制本页链接"
+                className="h-6"
+              />
+            </p>
+            <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              {searchEntitiesSubUrl ? (
+                <>
+                  <a
+                    href={searchEntitiesSubUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-primary underline-offset-4 hover:underline"
+                  >
+                    实体子检索（GET {NEST_V1.searchEntities}，q / limit / engine）
+                  </a>
+                  <CopyTextButton
+                    text={searchEntitiesSubUrl}
+                    idleLabel="复制实体子检索 URL"
+                    className="h-6"
+                  />
+                </>
+              ) : (
+                <span className="text-muted-foreground/90">
+                  实体子检索需非空 <code className="text-[10px]">q</code>
+                </span>
+              )}
+            </p>
+            <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              {searchCrawledUrlsSubUrl ? (
+                <>
+                  <a
+                    href={searchCrawledUrlsSubUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-primary underline-offset-4 hover:underline"
+                  >
+                    爬取 PG（GET {NEST_V1.searchCrawledUrls}）
+                  </a>
+                  <CopyTextButton
+                    text={searchCrawledUrlsSubUrl}
+                    idleLabel="复制爬取 PG URL"
+                    className="h-6"
+                  />
+                </>
+              ) : null}
+              {searchCrawledUrlsEsSubUrl ? (
+                <>
+                  <a
+                    href={searchCrawledUrlsEsSubUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-primary underline-offset-4 hover:underline"
+                  >
+                    爬取 ES（GET {NEST_V1.searchCrawledUrlsEs}）
+                  </a>
+                  <CopyTextButton
+                    text={searchCrawledUrlsEsSubUrl}
+                    idleLabel="复制爬取 ES URL"
+                    className="h-6"
+                  />
+                </>
+              ) : null}
+              {!searchCrawledUrlsSubUrl && !searchCrawledUrlsEsSubUrl ? (
+                <span className="text-muted-foreground/90">
+                  爬取分项 API 需 <code className="text-[10px]">q</code> 至少 2 字符（与后端{" "}
+                  <code className="text-[10px]">MinLength(2)</code> 一致）
+                </span>
+              ) : null}
+            </p>
           </div>
 
           <Button disabled={loading || !q.trim()} onClick={() => void runSearch()}>
@@ -322,13 +628,19 @@ export default function SearchPage() {
                           key={h.entityId}
                           className="rounded-md border border-border/60 bg-muted/30 px-3 py-2"
                         >
-                          <div className="font-medium">
+                          <Link
+                            href={unifiedSearchAdminPathFromQuery(h.canonicalName)}
+                            className="block font-medium text-primary underline-offset-2 hover:underline"
+                          >
                             {h.highlights?.canonicalName?.[0] ? (
-                              <HighlightedHtml html={h.highlights.canonicalName[0]} />
+                              <HighlightedHtml
+                                className="[&_em]:rounded-md [&_em]:bg-amber-500/20 [&_em]:px-0.5 [&_em]:not-italic"
+                                html={h.highlights.canonicalName[0]}
+                              />
                             ) : (
                               h.canonicalName
                             )}
-                          </div>
+                          </Link>
                           {h.highlights?.aliases?.[0] ? (
                             <div className="mt-1 text-xs text-muted-foreground">
                               别名：<HighlightedHtml html={h.highlights.aliases[0]} />
@@ -339,6 +651,32 @@ export default function SearchPage() {
                             {result.entities.source === "postgresql"
                               ? "（PG 无相关性分数）"
                               : ""}
+                          </div>
+                          <p className="mt-1.5 text-xs">
+                            <Link
+                              href={entitiesAdminPrefillPath(h.canonicalName)}
+                              className="text-primary underline-offset-2 hover:underline"
+                            >
+                              在实体列表打开
+                            </Link>
+                          </p>
+                          <div className="mt-1.5 flex flex-wrap gap-x-2 gap-y-1">
+                            <CopyTextButton
+                              text={abs(
+                                unifiedSearchAdminPathFromQuery(
+                                  h.canonicalName,
+                                ),
+                              )}
+                              idleLabel="复制搜索页"
+                              className="h-5 px-2 text-[10px]"
+                            />
+                            <CopyTextButton
+                              text={abs(
+                                entitiesAdminPrefillPath(h.canonicalName),
+                              )}
+                              idleLabel="复制实体页"
+                              className="h-5 px-2 text-[10px]"
+                            />
                           </div>
                         </li>
                       ))}
@@ -370,23 +708,51 @@ export default function SearchPage() {
                     <ul className="max-h-[28rem] space-y-2 overflow-y-auto pr-1">
                       {result.crawledUrls.hits.map((row, i) => {
                         if (isEsCrawledHit(row)) {
+                          const refineHref = crawlRefineSearchHref({
+                            q: result.query,
+                            limit,
+                            crawlIndex,
+                            entityIndex,
+                            status,
+                            hitSourceId: String(row.sourceId),
+                          });
                           return (
                             <li
                               key={row.crawledUrlId}
                               className="rounded-md border border-border/60 bg-muted/30 px-3 py-2"
                             >
-                              <a
-                                href={row.url}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="break-all text-sm font-medium text-primary underline-offset-2 hover:underline"
-                              >
-                                {row.url}
-                              </a>
-                              <div className="mt-1 text-xs text-muted-foreground">
-                                source #{row.sourceId} · {row.status} ·{" "}
-                                {row.mimeType ?? "—"} · score{" "}
-                                {row.score.toFixed(2)}
+                              <div className="flex flex-wrap items-start gap-x-2 gap-y-1">
+                                <a
+                                  href={row.url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="min-w-0 flex-1 break-all text-sm font-medium text-primary underline-offset-2 hover:underline"
+                                >
+                                  {row.url}
+                                </a>
+                                <CopyTextButton
+                                  text={row.url}
+                                  idleLabel="复制页面 URL"
+                                  className="h-6 shrink-0"
+                                />
+                              </div>
+                              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                                <span>
+                                  source #{row.sourceId} · {row.status} ·{" "}
+                                  {row.mimeType ?? "—"} · score{" "}
+                                  {row.score.toFixed(2)}
+                                </span>
+                                <Link
+                                  href={refineHref}
+                                  className="shrink-0 text-primary underline-offset-2 hover:underline"
+                                >
+                                  限定该 source
+                                </Link>
+                                <CopyTextButton
+                                  text={abs(refineHref)}
+                                  idleLabel="复制限定搜索"
+                                  className="h-5 px-2 text-[10px]"
+                                />
                               </div>
                               {row.snippet.includes("<em>") ? (
                                 <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
@@ -403,25 +769,53 @@ export default function SearchPage() {
                         if (isPgCrawledRow(row)) {
                           const id = String(row.id);
                           const preview = row.textPreview?.slice(0, 360);
+                          const refineHref = crawlRefineSearchHref({
+                            q: result.query,
+                            limit,
+                            crawlIndex,
+                            entityIndex,
+                            status,
+                            hitSourceId: String(row.sourceId),
+                          });
                           return (
                             <li
                               key={id}
                               className="rounded-md border border-border/60 bg-muted/30 px-3 py-2"
                             >
-                              <a
-                                href={row.url}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="break-all text-sm font-medium text-primary underline-offset-2 hover:underline"
-                              >
-                                {row.url}
-                              </a>
-                              <div className="mt-1 text-xs text-muted-foreground">
-                                #{id} · source {String(row.sourceId)} ·{" "}
-                                {row.status}
-                                {row.source?.name
-                                  ? ` · ${row.source.name}`
-                                  : ""}
+                              <div className="flex flex-wrap items-start gap-x-2 gap-y-1">
+                                <a
+                                  href={row.url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="min-w-0 flex-1 break-all text-sm font-medium text-primary underline-offset-2 hover:underline"
+                                >
+                                  {row.url}
+                                </a>
+                                <CopyTextButton
+                                  text={row.url}
+                                  idleLabel="复制页面 URL"
+                                  className="h-6 shrink-0"
+                                />
+                              </div>
+                              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                                <span>
+                                  #{id} · source {String(row.sourceId)} ·{" "}
+                                  {row.status}
+                                  {row.source?.name
+                                    ? ` · ${row.source.name}`
+                                    : ""}
+                                </span>
+                                <Link
+                                  href={refineHref}
+                                  className="shrink-0 text-primary underline-offset-2 hover:underline"
+                                >
+                                  限定该 source
+                                </Link>
+                                <CopyTextButton
+                                  text={abs(refineHref)}
+                                  idleLabel="复制限定搜索"
+                                  className="h-5 px-2 text-[10px]"
+                                />
                               </div>
                               {preview ? (
                                 <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
@@ -453,6 +847,22 @@ export default function SearchPage() {
           ) : null}
         </CardContent>
       </Card>
+
+      <AdminFooterNav />
     </div>
+  );
+}
+
+export default function SearchPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="mx-auto max-w-3xl p-6 text-sm text-muted-foreground">
+          加载搜索表单…
+        </div>
+      }
+    >
+      <SearchPageInner />
+    </Suspense>
   );
 }

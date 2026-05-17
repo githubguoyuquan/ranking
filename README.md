@@ -19,8 +19,8 @@
    - ✅ **Elasticsearch（骨架）**：compose、`SearchModule`、**双索引** `ranking_entities`（实体）与 **`ranking_crawled_urls`（爬取 URL + textPreview）**；启用 ES 时实体写入走 Outbox（`elasticsearch.entity.sync`），**爬取任务**在 PG 事务内写入 **`elasticsearch.crawled_url.sync`**，由 **`ElasticCrawledUrlOutboxFlusherService`** 异步 upsert/delete；`GET /v1/search/crawled-urls-es`、`POST /admin/reindex-crawl-docs`；`admin/entities`、`seed-demo` 已接入实体侧；未配 `ELASTICSEARCH_NODE` 时仅 PG、无相关 Outbox 刷 ES
 
 4. **P3 — Agents & UI**  
-   - ✅ **管理前端**：`web/` — Next.js、快照图表、**搜索**（页眉拉取 `GET /v1/search/health`）/ **索引**（`POST /admin/reindex-*`）/ **实体 / 爬虫**（异步任务 + 轮询 `GET /v1/crawl/tasks/:id`）、快照页 **Agent 简报**按钮  
-   - ✅ **Agent（最小）**：`POST /admin/snapshots/:id/analyze` → `AiAnalysis`；`GET /v1/snapshots/:id/analyses`；可选 `OPENAI_API_KEY` 调 GPT；生产需鉴权、配额与审计  
+   - ✅ **管理前端**：`web/` — Next.js、快照图表、**搜索**（页眉 `GET /v1/search/health`；`/search?q=&limit=&entityIndex=&crawlIndex=&sourceId=&status=` 预填表单；**`limit` 前端钳制 1–30 与 DTO 一致**；**提交检索后地址栏与请求参数对齐**；**命中实体名可再点进同名检索**；**ES health 新标签 JSON**；**与表单一致的 GET /v1/search 新标签**、**复制 API URL**；**q 为空时主检索框 Enter 不提交**（与「搜索」按钮一致）；**limit/sourceId/status 在已有 q 时 Enter 触发搜索**（**sourceId 非空须十进制 ≤38 位**）/ **索引**（`POST /admin/reindex-*`；**`/reindex` 页脚 `GET /v1/search/health` 新标签**）/ **实体 / 爬虫**（`/entities?q=` 预填；列表 **q 最多 200 字符**（与聚合搜索一致）；**新标签打开当前 `GET /admin/entities`**；**新建/编辑 Enter 提交**；**canonicalName 为空时不 POST/PATCH**；**PATCH/DELETE 路径 id 须十进制（前端预校验）**；名称列→搜索；**爬虫**页 **数据源列表加载后自动选用首条**（避免空库误请求 id=1）、**新标签** `GET /v1/crawl/sources` / **当前 source urls**；**新建源 Enter**：**name/baseUrl 均非空**；**可选 trustTier 1–5（与 DTO 一致，表列 tier）、topicId（十进制，可空）**；**任务区**：**sourceId（十进制 ≤38 位）与 seedUrl 均非空**方可提交（与按钮一致）；异步 + 轮询 `GET /v1/crawl/tasks/:id`（**轮询前校验任务 id 为十进制**）、**话题**（热榜区 **复制 snapshotId / topicVersionId**；**新标签**当前 **versions / leaderboard**；**热榜 windowStart 非空时校验 ISO**；**slug/version/timeWindow/windowStart 框与 URL 预填截断（160/64/16/80）**）、**演示数据**（slug **Enter** · **复制**快照 ids / topicVersionId；成功写入后页脚 **首张快照**、**本批对比** 与 **索引/爬虫/Outbox** 等链）、**运行排行**（**topicVersionId** 未填不提交；**填写时校验十进制 id（≤38 位，与 BigInt 一致）**；**timeWindow / ISO 框 maxLength 16/80**；**提交前校验** `timeWindow` 枚举与 **ISO** 窗口时间；**演示数据**链至 **`/rankings/run?topicVersionId=`**；各框 **Enter** · **复制 POST 体**；**异步** **GET job / ranking status** 新标签与 **复制 id**）、**Outbox limit/type Enter**、根级 **loading / error**、快照 **Agent 简报**  
+   - ✅ **Agent（最小）**：`POST /admin/snapshots/:id/analyze` → `AiAnalysis`；body 可选 **`agent`（≤120）**、**`topN`（1–50）**；`GET /v1/snapshots/:id/analyses`；可选 `OPENAI_API_KEY` 调 GPT；生产需鉴权、配额与审计；管理台快照详情 **Agent 区**提供 **可选表单（与 DTO 一致）**、**新标签打开 analyses**、**复制 GET / POST URL**、`aria-live` 状态；得分分布图容器带 **简要 `aria-label`（读屏）**  
    - ✅ **Playwright 爬取**：`CRAWL_USE_PLAYWRIGHT` 或 `Source.kind=http-playwright`；依赖 `playwright` + `npx playwright install chromium`  
    - ✅ **Elasticsearch 高亮**：实体与 `ranking_crawled_urls` 检索返回 `<em>` 高亮片段（管理台搜索页展示）
 
@@ -42,10 +42,17 @@ npm install
 npm run dev   # 默认 http://localhost:3001
 ```
 
+根布局导出 **`viewport`**（`width=device-width`）以移动端缩放一致。
+
 后端需开启 CORS（根目录 `.env` 已示例 `CORS_ORIGIN`，默认允许 `http://localhost:3001`）。先启动 API（`npm run start:dev` 在仓库根目录），再启动 `web`。
+
+运营台与 Nest 之间的 **HTTP 路径别名**（相对路径）：`web/src/lib/nest-api-paths.ts`（`/v1`）、`web/src/lib/backend-api-paths.ts`（`/health` 与 `/admin`）；请求 URL 封装在 `nest-api-urls.ts`、`backend-api-urls.ts`（均经 `apiUrl()`）。
+
+各管理子页（**含概览 /**）**页脚**由组件 **`AdminFooterNav`**（语义为 **`nav[aria-label=管理台页脚导航]`**）渲染，顺序为：**运行排行** → **索引维护** → **爬虫** → **Outbox** → **聚合搜索** → **实体** → **话题版本** → **快照对比** → **演示数据**；概览传 `showBackToHome={false}`（不缀「返回概览」）。其余子页在末尾多 **← 返回概览**。支持 **`leading`** 插槽（如快照 JSON 链、索引页 ES health）、**`/reindex` / `crawl` / `outbox` 页脚**带 `text-muted-foreground`。**全局 404、`/snapshots/:id` 未找到、根 `error.tsx`** 底部也挂同一导航以便逃生。**`loading.tsx`** 在加载态同样渲染页脚（无「返回概览」）。**`#admin-main`** 具 **`aria-label="正文内容"`**；键盘 **Tab** 先聚焦 **「跳到正文」** 再进入该区域。侧栏带 **`aria-label`**，底部 **API 基址**与 **`getApiBase()`** 一致；数据表列标题普遍使用 **`scope="col"`**，首个标识列（实体 id、Outbox id、数据源 id、排行名次、话题 version、快照对比实体名等）使用 **`scope="row"`** 且 **`font-normal`** 抵消默认表头加粗；**实体 / 爬虫**等表单字段普遍 **`Label` 与 `Input`/`select` 用 `htmlFor`/`id` 成对**。**复制类按钮**在**无可复制文本**时 **禁用**；否则带 **`aria-label`** 与截断 **`title`（悬停预览全文）**。
 
 ## Prereqs
 
+- **Lint / TypeScript**：**`npm run lint:all`**：依次执行 **Nest `eslint`（`src/**/*.ts`）**、**web ESLint** 与 **`web` `tsc --noEmit`**。也可单独：**`npm run lint`**（根）、**`npm run lint:web`**、**`npm run typecheck --prefix web`**。
 - Docker：Postgres、Redis（**BullMQ + 快照读缓存**）、**Redpanda**（Kafka 协议）、可选 **ClickHouse**、可选 **Elasticsearch**（`9200`）
 
 ### 快照读缓存（Redis）
@@ -70,7 +77,7 @@ npm run dev   # 默认 http://localhost:3001
 - 流程：**Outbox（推荐）**—— 启用 ES 时，`POST/PATCH /admin/entities` 与 `seed-demo` 在 PG 事务内写入 `OutboxEvent`（`elasticsearch.entity.sync`），进程内 **`ElasticEntityOutboxFlusherService`**（与 `OUTBOX_FLUSH_MS` 同频）在**提交后** upsert/delete 实体索引；`DELETE /admin/entities` 先写 `delete` Outbox 再删 PG 行。**爬取**：每条 `CrawledUrl` 写入（桩/失败/成功）同事务插入 **`elasticsearch.crawled_url.sync`**，由 **`ElasticCrawledUrlOutboxFlusherService`** 维护 `ranking_crawled_urls`（仅 `status=fetched` 时为正文 upsert，否则删 ES）。**兜底**——旁路写库后执行 `POST /admin/reindex-entities` 或 **`POST /admin/reindex-crawl-docs`**。  
 - `POST /admin/entities` 在启用 ES 时**不再同步直写**，创建成功与索引最终一致；搜索可能有秒级延迟。  
 - 其它代码路径变更 `Entity` 时，请在同一事务内调用 `elasticEntitySyncOutboxCreate(id, 'upsert'|'delete')` 写入 Outbox（见 `src/search/elastic-entity-outbox.ts`），避免未提交数据出现在 ES。变更 **`CrawledUrl`** 收录逻辑时沿用 `elasticCrawledUrlSyncOutboxCreate`（`src/search/elastic-crawled-url-outbox.ts`）。  
-- **`GET /v1/search`**：一次返回 **实体**与 **爬取 URL**。实体：`entityIndex=auto|es|pg`（默认 auto：有 ES 用全文索引，**否则 PostgreSQL** `canonicalName` + JSON `aliases` 子串）；`entityIndex=pg` 强制 PG。爬取：`crawlIndex`、可选 `sourceId` / `status`；爬取 `q` 需 ≥2 字符。  
+- **`GET /v1/search`**：一次返回 **实体**与 **爬取 URL**；`q` 必填（1–200 字符）；**`limit` 可选、整数 1–30**（管理台表单与复制 URL 会将非法或过大的 `limit` 钳到该范围）。实体：`entityIndex=auto|es|pg`（默认 auto：有 ES 用全文索引，**否则 PostgreSQL** `canonicalName` + JSON `aliases` 子串）；`entityIndex=pg` 强制 PG。爬取：`crawlIndex`、可选 `sourceId`（若传须为十进制、与 `BigInt` 解析一致；`@MaxLength(64)`）/ `status`（≤64 字符）；爬取 `q` 需 ≥2 字符。管理台在 **提交前**校验可选 `sourceId` 为十进制（与 `BigInt` 一致）。管理台搜索页在 **爬取 URL** 命中上提供 **「限定该 source」**（以本次检索的 `q` + 该行的 `sourceId` 预填）；实体命中可链至 **`/entities?q=`** 打开后台列表。  
 - **`GET /v1/search/entities`**：`engine=es|pg|auto`（默认 **es**：未配 ES 仍 **503**）；**pg** 与聚合里的 PG 实体逻辑一致；**auto** 同 `entityIndex=auto`。响应含 **`engine`**：`elasticsearch` | `postgresql`。  
 - `GET /v1/search/health`：集群探活；未配置 `ELASTICSEARCH_NODE` 时返回 `ok: false`。  
 - **`GET /v1/search/crawled-urls`**（PostgreSQL）：`url` / `textPreview` 子串；可选 `sourceId`、`status`；`q` 至少 2 字符。  
@@ -82,7 +89,7 @@ npm run dev   # 默认 http://localhost:3001
 - 可选：`KAFKA_TOPIC_RANKING_SNAPSHOT_COMPLETED`、`KAFKA_CLIENT_ID`  
 - 消息体：`{ type, payload, meta: { outboxId, createdAt } }`，`payload` 内含 `snapshotId`、`topicRankingId`、`topicVersionId` 等（字符串化 ID）  
 - `OutboxEvent.type` 另有 `clickhouse.ranking.snapshot.ingest`、`elasticsearch.entity.sync`、`elasticsearch.crawled_url.sync` 等，由各自 **进程内 Flusher** 消费，**不会**随 Kafka 发布。  
-- **运维排查**：`GET /admin/outbox?limit=50&pendingOnly=true&type=...` 只读列出积压行（无鉴权，勿暴露公网）。  
+- **运维排查**：`GET /admin/outbox?limit=50&pendingOnly=true&type=...` 只读列出积压行（无鉴权，勿暴露公网）。管理台 Outbox 页提供 **ES 实体 / ES 爬取 type 快捷按钮**、**清空 type**、**limit/type 框 Enter 加载**、**新标签打开与当前筛选一致的查询 URL**、**复制该 GET URL**（**无可复制文本时复制按钮禁用**；**limit 非法或非正按 40、超过 200 按 200**，与接口校验上限一致；**type 框 maxLength 120**，与 DTO `@MaxLength` 一致）。  
 - `OUTBOX_FLUSH_MS`：发布轮询间隔（毫秒，默认 2000）
 
 ## Run locally
@@ -97,6 +104,18 @@ npm run start:dev
 
 环境变量：`DATABASE_URL`、`REDIS_URL`（或 `REDIS_HOST` / `REDIS_PORT`）。**根目录须有 `.env`**（可从 `.env.example` 复制）；`npx prisma` 会自动读 `.env`，**跑应用**也会通过 `src/main.ts` 里的 `dotenv` 加载同一文件。
 
+### 探活与就绪
+
+- `GET /health`：进程存活（liveness）。  
+- `GET /health/ready`：**PostgreSQL + Redis** 均可连；任一侧失败时 **HTTP 503**（readiness / 依赖检查）。管理台 **概览** 提供 **新标签探活直链**（`/health`、`/health/ready`、`/health/db` 等）及 **快速入口**。  
+- 分项：`GET /health/db`、`GET /health/redis`、`GET /health/kafka`；搜索与 OLAP：`GET /v1/search/health`（管理台 **搜索** 页可新标签打开 JSON）、`GET /v1/analytics/clickhouse/health`（**概览** 快速入口亦提供新标签链）。
+
+相对路径的字面量与 `web/src/lib/backend-api-paths.ts`（`/health`、`/admin`）、`web/src/lib/nest-api-paths.ts`（`/v1`）对齐；下述 `curl` 默认仍为 `http://localhost:3000` 便于本地复制。
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" http://localhost:3000/health/ready
+```
+
 ## Demo API
 
 ```bash
@@ -105,7 +124,7 @@ curl -s -X POST http://localhost:3000/admin/seed-demo -H 'Content-Type: applicat
 
 ### 同步排行（小包络）
 
-`POST /v1/rankings/run`，body 不含 `async` 或 `"async": false`。
+`POST /v1/rankings/run`，body 不含 `async` 或 `"async": false`。管理台 **`/rankings/run`** 在成功物化快照时展示 **打开快照** 快捷链（覆盖：同步 JSON 的 `id`、异步 **completed** 的 `returnvalue.id`、**dedup** 的 `snapshotId`、以及 job **404** 后依 DB `status=completed` 从 `snapshots[0].id` 解析）。
 
 ### 异步排行（生产路径）
 
@@ -119,13 +138,21 @@ curl -s http://localhost:3000/v1/jobs/ranking/<jobId>
 curl -s http://localhost:3000/v1/rankings/<topicRankingId>/status
 ```
 
-快照详情：`GET /v1/snapshots/{id}`（bigint 已转字符串）。
+快照详情：`GET /v1/snapshots/{id}`（bigint 已转字符串）。管理台 `/snapshots/:id` **路径 id 非法（非十进制等）时不请求 API，直接提示**；快照详情与 **快照对比** 表中的实体名可点进 **`/search?q=`**；得分分布 **ECharts 柱图点击柱条** 亦可跳到同名聚合搜索；**复制 snapshot id**、**复制 topicVersionId**、**复制 topicRankingId**、**新标签打开** **`GET /v1/snapshots/:id`**、**`GET /v1/snapshots/:id/analyses`** 与 **`GET /v1/rankings/:id/status`**。
+
+同一 **`TopicRanking`** 下多张快照并列对比：`POST /v1/snapshots/compare`，body 为 `{"snapshotIds":["1","2"]}`（**2–10** 个 id，可去重）。管理台 **`/snapshots/compare`**（支持 `?ids=`；**无查询串时不预填示例 id**；**2–10 个十进制 id（≤38 位）才允许对比/复制 POST 与路径**；**对比成功后地址栏与 ids 对齐**；**复制 POST 体**、**复制对比页路径**；页脚链至 **运行排行 / 索引 / 爬虫 / Outbox** 等）。侧栏在 **`/snapshots/:id` 详情**时同步高亮 **「快照对比」** 以便返回同类操作。
+
+```bash
+curl -s -X POST http://localhost:3000/v1/snapshots/compare \
+  -H 'Content-Type: application/json' \
+  -d '{"snapshotIds":["1","2"]}'
+```
 
 ### 热榜聚合（按 slug）
 
 默认：该话题**最新 effectiveFrom** 的 `TopicVersion` + **最近完成的** `TopicRanking`（含快照）+ 该 ranking 下**最新 snapshotTime** 的快照。
 
-可选查询串：`version`、`timeWindow`、`windowStart`（若带 `windowStart` 必须同时带 `timeWindow`）。响应为 `{ resolved, snapshot }`，其中 `snapshot` 与快照详情 API 同形。
+可选查询串：`version`、`timeWindow`、`windowStart`（若带 `windowStart` 必须同时带 `timeWindow`）。响应为 `{ resolved, snapshot }`，其中 `snapshot` 与快照详情 API 同形。管理台 **话题版本** 页（**slug 留空时仍按演示默认 `global-female-singers` 请求**，避免 `/topics//versions`）；**slug / 热榜 version 输入分别 maxLength 160 / 64**；**`timeWindow` / `windowStart` 输入 maxLength 16 / 80**；URL 预填超长 query 时同步截断；**热榜请求前校验** `timeWindow` 须在 Prisma 枚举内；**`windowStart` 非空时校验 ISO**；在加载热榜后会展示解析表，并支持 URL 预填：`?slug=`、`?version=`、`?timeWindow=`、`?windowStart=`；**Enter** 可在 slug / 热榜参数框内快捷触发请求；表格中 **实体名可点进 `/search?q=`**，并可打开 **`/entities?q=`**；热榜预览区可 **复制 snapshotId / topicVersionId**；**新标签**打开与当前 slug、热榜参数一致的 **`GET /v1/topics/:slug/versions`** 与 **`/leaderboard`**。
 
 ```bash
 curl -s 'http://localhost:3000/v1/topics/global-female-singers/leaderboard'
@@ -134,7 +161,7 @@ curl -s 'http://localhost:3000/v1/topics/global-female-singers/leaderboard?timeW
 
 ### 实体搜索（Elasticsearch + PG）
 
-需 ES 运行且 `.env` 配置 `ELASTICSEARCH_NODE` 时，`/v1/search/entities` 默认走 ES 并返回 **`highlights`**（`<em>` 包裹命中词）。`GET /admin/entities` 列出实体（运营台与脚本）。
+需 ES 运行且 `.env` 配置 `ELASTICSEARCH_NODE` 时，`/v1/search/entities` 默认走 ES 并返回 **`highlights`**（`<em>` 包裹命中词）。`GET /admin/entities` 列出实体（运营台与脚本）。管理台 **`/entities`** 支持 **`?q=`** 预填列表筛选框并刷新；**新标签打开与当前筛选一致的列表 API**（`limit=50` + 可选 `q`）。新建/编辑表单 **`canonicalName` 输入框 `maxLength=500`**、**`type` 为 120**，与 **POST/PATCH DTO** 一致。
 
 ```bash
 curl -s 'http://localhost:3000/v1/search?q=Swift&limit=12&entityIndex=auto'
@@ -163,9 +190,11 @@ curl -s -X POST http://localhost:3000/admin/reindex-crawl-docs -H 'Content-Type:
 - **默认**：`seedUrls` 仅写入 `CrawledUrl`，`status=fetched_stub`（无网络）。  
 - **真 HTTP**：`.env` 设 `CRAWL_HTTP_FETCH=true`，或创建数据源时 `"kind":"http-fetch"`；任务对每条 URL 执行 GET，计算 body **SHA256** 写入 `contentHash`，`status=fetched`；失败为 `fetch_failed`，被 SSRF 规则拦截为 `fetch_blocked`。可选：`CRAWL_FETCH_TIMEOUT_MS`、`CRAWL_MAX_RESPONSE_BYTES`、`CRAWL_USER_AGENT`。  
 - 成功行写入 `mimeType`、去标签后的 **`textPreview`**（仅文本类 MIME；长度见 `CRAWL_TEXT_PREVIEW_CHARS`），便于检索与后续接 ES。  
+- `GET /v1/crawl/sources?limit=50` 列出 `Source`（id 降序，默认至多 50 条，最大 100）。  
 - `GET /v1/crawl/sources/:sourceId/urls?limit=50` 查看最新 `CrawledUrl` 行（含摘要）。
 
 ```bash
+curl -s 'http://localhost:3000/v1/crawl/sources?limit=50'
 curl -s -X POST http://localhost:3000/v1/crawl/sources \
   -H 'Content-Type: application/json' \
   -d '{"name":"Example","baseUrl":"https://example.com","kind":"http-fetch"}'

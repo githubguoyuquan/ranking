@@ -30,6 +30,49 @@ export class KafkaProducerService implements OnModuleDestroy {
     return logLevel.NOTHING;
   }
 
+  /**
+   * 运维探活：独立 admin 连接，短超时；未配置 `KAFKA_BROKERS` 时 `configured: false`。
+   */
+  async ping(): Promise<{
+    ok: boolean;
+    configured: boolean;
+    detail?: string;
+  }> {
+    const brokers = this.brokers();
+    if (brokers.length === 0) {
+      return {
+        ok: false,
+        configured: false,
+        detail: 'KAFKA_BROKERS not set',
+      };
+    }
+    const kafka = new Kafka({
+      clientId: `${process.env.KAFKA_CLIENT_ID ?? 'ranking-platform'}-health`,
+      brokers,
+      logLevel: logLevel.NOTHING,
+      connectionTimeout: 3000,
+      requestTimeout: 5000,
+    });
+    const admin = kafka.admin();
+    try {
+      await admin.connect();
+      await admin.describeCluster();
+      return { ok: true, configured: true };
+    } catch (e) {
+      return {
+        ok: false,
+        configured: true,
+        detail: e instanceof Error ? e.message : String(e),
+      };
+    } finally {
+      try {
+        await admin.disconnect();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
   private async resetProducer(): Promise<void> {
     const p = this.producer;
     this.producer = null;

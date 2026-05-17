@@ -9,7 +9,16 @@ import {
   Query,
 } from '@nestjs/common';
 import { Transform } from 'class-transformer';
-import { IsArray, IsBoolean, IsDateString, IsEnum, IsOptional, IsString } from 'class-validator';
+import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
+  IsBoolean,
+  IsDateString,
+  IsEnum,
+  IsOptional,
+  IsString,
+} from 'class-validator';
 import { TimeWindow } from '@prisma/client';
 import { toPlainJson } from '../lib/json';
 import { RankingsService } from './rankings.service';
@@ -47,6 +56,8 @@ export class SeedDemoDto {
 
 export class CompareSnapshotsDto {
   @IsArray()
+  @ArrayMinSize(2)
+  @ArrayMaxSize(10)
   @IsString({ each: true })
   snapshotIds!: string[];
 }
@@ -132,6 +143,23 @@ export class RankingsController {
     const snap = await this.rankings.getSnapshotForApi(BigInt(id));
     if (!snap) throw new NotFoundException();
     return snap;
+  }
+
+  /** 同一 `TopicRanking` 下至少 2 张、至多 10 张快照的 rank 并列对比 */
+  @Post('v1/snapshots/compare')
+  async compareSnapshots(@Body() body: CompareSnapshotsDto) {
+    let ids: bigint[];
+    try {
+      ids = body.snapshotIds.map((s) => BigInt(s.trim()));
+    } catch {
+      throw new BadRequestException('invalid snapshot id');
+    }
+    try {
+      return toPlainJson(await this.rankings.compareSnapshots(ids));
+    } catch (e) {
+      if (e instanceof BadRequestException) throw e;
+      throw e;
+    }
   }
 
   @Get('v1/topics/:slug/leaderboard')

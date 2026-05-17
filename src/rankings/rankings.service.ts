@@ -431,7 +431,7 @@ export class RankingsService {
   /** 同步：适合测试与小数据量 */
   async runRanking(args: RunRankingArgs) {
     const topicVersion = await this.loadTopicVersionOrThrow(args.topicVersionId);
-    await this.assertEntitiesPresent(topicVersion, args);
+    await this.assertEntitiesPresent(topicVersion);
 
     const now = new Date();
     const topicRanking = await this.prisma.topicRanking.upsert({
@@ -485,7 +485,7 @@ export class RankingsService {
     snapshotId?: string;
   }> {
     const topicVersion = await this.loadTopicVersionOrThrow(args.topicVersionId);
-    const entityIds = await this.resolveEntityIds(topicVersion, args.topicVersionId);
+    const entityIds = await this.resolveEntityIds(topicVersion);
     if (entityIds.length === 0) throw new BadRequestException('no entities to rank');
 
     const snapshotTime = args.asOf ?? args.windowEnd;
@@ -642,18 +642,12 @@ export class RankingsService {
     return topicVersion;
   }
 
-  private async assertEntitiesPresent(
-    topicVersion: { id: bigint; policyJson: unknown },
-    args: { topicVersionId: bigint },
-  ) {
-    const ids = await this.resolveEntityIds(topicVersion, args.topicVersionId);
+  private async assertEntitiesPresent(topicVersion: { id: bigint; policyJson: unknown }) {
+    const ids = await this.resolveEntityIds(topicVersion);
     if (ids.length === 0) throw new BadRequestException('no entities to rank');
   }
 
-  private async resolveEntityIds(
-    topicVersion: { policyJson: unknown },
-    _topicVersionId: bigint,
-  ): Promise<bigint[]> {
+  private async resolveEntityIds(topicVersion: { policyJson: unknown }): Promise<bigint[]> {
     const policy = topicVersion.policyJson as unknown as PolicyJson;
     let entityIds = (policy.entityIds ?? []).map((x) => BigInt(x));
     if (entityIds.length === 0) {
@@ -680,7 +674,7 @@ export class RankingsService {
     const weights = policy.weights ?? defaultWeights;
     const required = new Set(policy.requiredSignalKeys ?? Object.keys(weights));
 
-    const entityIds = await this.resolveEntityIds(topicVersion, topicVersion.id);
+    const entityIds = await this.resolveEntityIds(topicVersion);
     if (entityIds.length === 0) throw new BadRequestException('no entities to rank');
 
     const existing = await this.prisma.topicRankSnapshot.findUnique({
@@ -1017,6 +1011,105 @@ export class RankingsService {
         include: { items: { include: { entity: true }, orderBy: { rank: 'asc' } } },
       });
     });
+  }
+
+  /**
+   * 并列对比若干快照的名次（须同属一个 TopicRanking）；`snapshotIds` 先去重并保持顺序。
+   */
+  async compareSnapshots(rawIds: bigint[]) {
+    const seen = new Set<string>();
+    const snapshotIds: bigint[] = [];
+    for (const id of rawIds) {
+      const k = id.toString();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      snapshotIds.push(id);
+    }
+    if (snapshotIds.length < 2) {
+      throw new BadRequestException('need at least 2 distinct snapshot ids');
+    }
+    if (snapshotIds.length > 10) {
+      throw new BadRequestException('at most 10 snapshots');
+    }
+
+    const snaps = await this.prisma.topicRankSnapshot.findMany({
+      where: { id: { in: snapshotIds } },
+      include: {
+        items: { include: { entity: true }, orderBy: { rank: 'asc' } },
+      },
+    });
+    if (snaps.length !== snapshotIds.length) {
+      throw new BadRequestException('one or more snapshots not found');
+    }
+
+    const snapById = new Map(snaps.map((s) => [s.id.toString(), s]));
+    const ordered = snapshotIds.map((id) => {
+      const s = snapById.get(id.toString());
+      if (!s) throw new BadRequestException('snapshot not found');
+      return s;
+    });
+
+    const topicRankingId = ordered[0].topicRankingId;
+    for (const s of ordered) {
+      if (s.topicRankingId !== topicRankingId) {
+        throw new BadRequestException(
+          'all snapshots must belong to the same TopicRanking',
+        );
+      }
+    }
+
+    type EntityRow = {
+      entityId: string;
+      canonicalName: string;
+      bySnapshot: Record<
+        string,
+        {
+          rank: number;
+          popularityScore: number;
+          rankChange: number | null;
+        }
+      >;
+    };
+    const entityMap = new Map<string, EntityRow>();
+
+    for (const snap of ordered) {
+      const sid = snap.id.toString();
+      for (const it of snap.items) {
+        const eid = it.entityId.toString();
+        let row = entityMap.get(eid);
+        if (!row) {
+          row = {
+            entityId: eid,
+            canonicalName: it.entity.canonicalName,
+            bySnapshot: {},
+          };
+          entityMap.set(eid, row);
+        }
+        row.bySnapshot[sid] = {
+          rank: it.rank,
+          popularityScore: it.popularityScore,
+          rankChange: it.rankChange,
+        };
+      }
+    }
+
+    const firstSid = ordered[0].id.toString();
+    const rows = Array.from(entityMap.values()).sort((a, b) => {
+      const rA = a.bySnapshot[firstSid]?.rank ?? 99999;
+      const rB = b.bySnapshot[firstSid]?.rank ?? 99999;
+      return rA - rB;
+    });
+
+    return {
+      topicRankingId: topicRankingId.toString(),
+      snapshots: ordered.map((s) => ({
+        id: s.id.toString(),
+        snapshotTime: s.snapshotTime.toISOString(),
+        snapshotVersion: s.snapshotVersion,
+      })),
+      rowCount: rows.length,
+      rows,
+    };
   }
 
   private serializeSnapshot(s: TopicRankSnapshot & { items: unknown }) {

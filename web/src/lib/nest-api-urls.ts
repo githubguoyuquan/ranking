@@ -1,0 +1,109 @@
+import { apiUrl } from "@/lib/api";
+import {
+  NEST_V1,
+  nestV1CrawlCheckpointPath,
+  nestV1CrawlSourceUrlsPath,
+  nestV1CrawlSourcesListPath,
+  nestV1CrawlTaskPath,
+  nestV1PathWithQuery,
+  nestV1RankingJobPath,
+  nestV1RankingStatusPath,
+  nestV1SnapshotAnalysesPath,
+  nestV1SnapshotPath,
+  nestV1TopicLeaderboardPath,
+  nestV1TopicVersionsPath,
+} from "@/lib/nest-api-paths";
+
+const nestAbs = apiUrl;
+
+export function nestSearchHealthUrl(): string {
+  return nestAbs(NEST_V1.searchHealth);
+}
+
+export function nestClickhouseHealthUrl(): string {
+  return nestAbs(NEST_V1.clickhouseHealth);
+}
+
+/** GET `NEST_V1.search` — pass the same `URLSearchParams` you use for the admin URL bar. */
+export function nestSearchUrl(params: URLSearchParams): string {
+  return nestAbs(nestV1PathWithQuery(NEST_V1.search, params));
+}
+
+/** GET `NEST_V1.searchEntities` */
+export function nestSearchEntitiesUrl(params: URLSearchParams): string {
+  return nestAbs(nestV1PathWithQuery(NEST_V1.searchEntities, params));
+}
+
+/** GET `NEST_V1.searchCrawledUrls`（PostgreSQL 子串检索） */
+export function nestSearchCrawledUrlsUrl(params: URLSearchParams): string {
+  return nestAbs(nestV1PathWithQuery(NEST_V1.searchCrawledUrls, params));
+}
+
+/** GET `NEST_V1.searchCrawledUrlsEs`（需 ES） */
+export function nestSearchCrawledUrlsEsUrl(params: URLSearchParams): string {
+  return nestAbs(nestV1PathWithQuery(NEST_V1.searchCrawledUrlsEs, params));
+}
+
+export function nestRankingStatusUrl(topicRankingId: string): string {
+  return nestAbs(nestV1RankingStatusPath(topicRankingId));
+}
+
+export function nestRankingRunUrl(): string {
+  return nestAbs(NEST_V1.rankingsRun);
+}
+
+export function nestRankingJobUrl(jobId: string): string {
+  return nestAbs(nestV1RankingJobPath(jobId));
+}
+
+export function nestSnapshotV1Url(snapshotId: string): string {
+  return nestAbs(nestV1SnapshotPath(snapshotId));
+}
+
+export function nestSnapshotAnalysesUrl(snapshotId: string): string {
+  return nestAbs(nestV1SnapshotAnalysesPath(snapshotId));
+}
+
+export function nestSnapshotCompareUrl(): string {
+  return nestAbs(NEST_V1.snapshotsCompare);
+}
+
+export function nestTopicVersionsUrl(topicSlug: string): string {
+  return nestAbs(nestV1TopicVersionsPath(topicSlug));
+}
+
+export function nestTopicLeaderboardUrl(
+  topicSlug: string,
+  query?: URLSearchParams,
+): string {
+  return nestAbs(nestV1TopicLeaderboardPath(topicSlug, query));
+}
+
+export function nestCrawlSourcesListUrl(limit: number): string {
+  return nestAbs(nestV1CrawlSourcesListPath(limit));
+}
+
+export function nestCrawlSourcesUrl(): string {
+  return nestAbs(NEST_V1.crawlSources);
+}
+
+export function nestCrawlSourceUrlsUrl(sourceId: string, limit: number): string {
+  return nestAbs(nestV1CrawlSourceUrlsPath(sourceId, limit));
+}
+
+export function nestCrawlTasksUrl(): string {
+  return nestAbs(NEST_V1.crawlTasks);
+}
+
+export function nestCrawlTaskUrl(taskId: string): string {
+  return nestAbs(nestV1CrawlTaskPath(taskId));
+}
+
+export function nestCrawlCheckpointUrl(crawlerName: string): string {
+  return nestAbs(nestV1CrawlCheckpointPath(crawlerName));
+}
+
+/** `POST` **`NEST_V1.crawlUrls`**（注册 seed URL 等） */
+export function nestCrawlUrlsRegisterUrl(): string {
+  return nestAbs(NEST_V1.crawlUrls);
+}

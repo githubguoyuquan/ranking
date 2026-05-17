@@ -37,7 +37,7 @@ npm run dev   # 默认 http://localhost:3001
 
 ### Kafka / Outbox
 
-- `KAFKA_BROKERS`：例如 `localhost:19092`（Redpanda external 端口）  
+- `KAFKA_BROKERS`：可**留空**则仅写 Outbox、不连 broker（无 Redpanda 时不报错）。需要发布时再设为例如 `localhost:19092`。可选 `KAFKAJS_LOG_LEVEL=WARN` 排查连接。
 - 可选：`KAFKA_TOPIC_RANKING_SNAPSHOT_COMPLETED`、`KAFKA_CLIENT_ID`  
 - 消息体：`{ type, payload, meta: { outboxId, createdAt } }`，`payload` 内含 `snapshotId`、`topicRankingId`、`topicVersionId` 等（字符串化 ID）  
 - `OUTBOX_FLUSH_MS`：发布轮询间隔（毫秒，默认 2000）

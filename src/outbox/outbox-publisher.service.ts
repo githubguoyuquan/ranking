@@ -13,6 +13,8 @@ export class OutboxPublisherService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(OutboxPublisherService.name);
   private warnedNoKafka = false;
   private interval: ReturnType<typeof setInterval> | null = null;
+  /** 节流：broker 不可达时的提示 */
+  private lastBrokerWarnAt = 0;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -86,7 +88,15 @@ export class OutboxPublisherService implements OnModuleInit, OnModuleDestroy {
         });
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
-        this.logger.error(`Outbox ${row.id} publish failed: ${msg}`);
+        const now = Date.now();
+        if (now - this.lastBrokerWarnAt > 30_000) {
+          this.lastBrokerWarnAt = now;
+          this.logger.warn(
+            `Outbox publish failed (${msg}). Broker unreachable or down. ` +
+              `Fix: start Redpanda (\`docker compose up -d redpanda\`) or remove/comment KAFKA_BROKERS in .env to disable publishing. ` +
+              `Outbox row ${row.id} not marked published; will retry.`,
+          );
+        }
         await this.prisma.outboxEvent.update({
           where: { id: row.id },
           data: {
@@ -94,6 +104,8 @@ export class OutboxPublisherService implements OnModuleInit, OnModuleDestroy {
             lastError: msg.slice(0, 4000),
           },
         });
+        /** 本轮剩余条目不重试，避免对断开的 producer 连续报错 */
+        break;
       }
     }
   }

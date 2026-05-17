@@ -245,6 +245,7 @@ model Source {
   topicId   BigInt?
   name      String
   baseUrl   String
+  /// demo | http-fetch | http-playwright：后两者在开启真抓取时分别用 fetch 或 Playwright
   kind      String
   trustTier Int     @default(3)
 
@@ -280,6 +281,10 @@ model CrawledUrl {
   url            String
   urlFingerprint String   @unique
   contentHash    String?
+  /// Response Content-Type 主类型（不含 charset）
+  mimeType       String?  @db.VarChar(255)
+  /// 文本类响应的规范化摘录（供检索/摘要；非文本则为 null）
+  textPreview    String?  @db.Text
   status         String
   fetchedAt      DateTime?
 

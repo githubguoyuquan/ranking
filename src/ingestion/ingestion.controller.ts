@@ -6,6 +6,7 @@ import {
   Param,
   Post,
   Put,
+  Query,
 } from '@nestjs/common';
 import {
   IsArray,
@@ -136,6 +137,18 @@ export class IngestionController {
         trustTier: body.trustTier,
         topicId: body.topicId ? BigInt(body.topicId) : undefined,
       }),
+    );
+  }
+
+  @Get('sources/:sourceId/urls')
+  async listCrawledUrls(
+    @Param('sourceId') sourceId: string,
+    @Query('limit') limitRaw?: string,
+  ) {
+    const limit = limitRaw !== undefined ? Number(limitRaw) : 50;
+    const lim = Number.isFinite(limit) ? limit : 50;
+    return toPlainJson(
+      await this.ingestion.listCrawledUrlsForSource(BigInt(sourceId), lim),
     );
   }
 

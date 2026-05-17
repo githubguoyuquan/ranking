@@ -1,6 +1,7 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { bullMqConnectionFromEnv } from './config/redis';
+import { AgentModule } from './agent/agent.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { HealthController } from './health.controller';
 import { IngestionModule } from './ingestion/ingestion.module';
@@ -17,6 +18,7 @@ import { SearchModule } from './search/search.module';
     PrismaModule,
     AnalyticsModule,
     OutboxModule,
+    AgentModule,
     IngestionModule,
     RankingsModule,
     SearchModule,

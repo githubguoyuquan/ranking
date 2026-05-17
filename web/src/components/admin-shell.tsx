@@ -2,6 +2,11 @@ import Link from "next/link";
 
 const links = [
   { href: "/", label: "概览" },
+  { href: "/search", label: "搜索" },
+  { href: "/reindex", label: "索引" },
+  { href: "/entities", label: "实体" },
+  { href: "/crawl", label: "爬虫" },
+  { href: "/outbox", label: "Outbox" },
   { href: "/seed", label: "演示数据" },
   { href: "/rankings/run", label: "运行排行" },
   { href: "/topics", label: "话题版本" },

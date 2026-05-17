@@ -1,0 +1,91 @@
+import { createHash } from 'crypto';
+import { chromium } from 'playwright';
+import {
+  buildTextPreview,
+  crawlMaxBytes,
+  crawlTimeoutMs,
+  crawlUrlViolation,
+  textPreviewMaxChars,
+  type FetchCrawlResult,
+} from './http-fetch';
+
+const UA =
+  process.env.CRAWL_USER_AGENT ??
+  'RankingPlatformCrawler/0.1 (+https://github.com/example/ranking; research)';
+
+function sha256Hex(buf: Buffer): string {
+  return createHash('sha256').update(buf).digest('hex');
+}
+
+/** 使用无头 Chromium 渲染后再取 HTML / innerText；需 `playwright` 与浏览器缓存（`npx playwright install chromium`）。 */
+export async function fetchUrlForCrawlPlaywright(urlStr: string): Promise<FetchCrawlResult> {
+  const viol = crawlUrlViolation(urlStr);
+  if (viol) {
+    return { ok: false, bytes: 0, error: viol };
+  }
+
+  const max = crawlMaxBytes();
+  const timeout = crawlTimeoutMs();
+  let browser;
+  try {
+    browser = await chromium.launch({ headless: true });
+    const ctx = await browser.newContext({ userAgent: UA });
+    const page = await ctx.newPage();
+    const res = await page.goto(urlStr, {
+      waitUntil: 'domcontentloaded',
+      timeout,
+    });
+    const statusCode = res?.status() ?? 200;
+    if (!res?.ok()) {
+      await ctx.close();
+      return {
+        ok: false,
+        statusCode,
+        bytes: 0,
+        error: `HTTP ${statusCode}`,
+      };
+    }
+
+    const html = await page.content();
+    const buf = Buffer.from(html, 'utf8');
+    if (buf.length > max) {
+      await ctx.close();
+      return {
+        ok: false,
+        statusCode,
+        bytes: buf.length,
+        error: `response larger than ${max} bytes`,
+      };
+    }
+
+    let textPreview: string | null = null;
+    try {
+      const inner = await page.evaluate(() => document.body?.innerText ?? '');
+      const t = inner.replace(/\s+/g, ' ').trim();
+      if (t) {
+        const lim = textPreviewMaxChars();
+        textPreview = t.length <= lim ? t : `${t.slice(0, lim)}…`;
+      }
+    } catch {
+      textPreview = buildTextPreview('text/html', buf);
+    }
+    if (!textPreview) {
+      textPreview = buildTextPreview('text/html', buf);
+    }
+
+    await ctx.close();
+    return {
+      ok: true,
+      statusCode,
+      bytes: buf.length,
+      contentHash: sha256Hex(buf),
+      mimeType: 'text/html',
+      textPreview,
+    };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, bytes: 0, error: msg };
+  } finally {
+    await browser?.close().catch(() => undefined);
+  }
+}

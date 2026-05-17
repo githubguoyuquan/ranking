@@ -5,6 +5,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { SnapshotAnalyzeActions } from "@/components/snapshot-analyze-actions";
 import { SnapshotBarChart } from "@/components/snapshot-bar-chart";
 import { getApiBase } from "@/lib/api";
 import Link from "next/link";
@@ -140,6 +141,8 @@ export default async function SnapshotPage({
           </div>
         </CardContent>
       </Card>
+
+      <SnapshotAnalyzeActions snapshotId={id} />
 
       <Link href="/" className="text-sm text-primary underline-offset-4 hover:underline">
         ← 返回概览

@@ -27,6 +27,7 @@
     "dotenv": "^17.4.2",
     "ioredis": "^5.10.1",
     "kafkajs": "^2.2.4",
+    "playwright": "^1.60.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"
   },

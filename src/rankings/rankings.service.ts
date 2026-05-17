@@ -32,6 +32,8 @@ import {
   OUTBOX_TYPE_RANKING_SNAPSHOT_COMPLETED,
 } from '../outbox/outbox.constants';
 import { toPlainJson } from '../lib/json';
+import { elasticEntitySyncOutboxCreate } from '../search/elastic-entity-outbox';
+import { ElasticService } from '../search/elastic.service';
 
 type PolicyJson = {
   entityIds?: string[];
@@ -80,6 +82,7 @@ export class RankingsService {
     private readonly prisma: PrismaService,
     @InjectQueue(RANKING_QUEUE) private readonly rankingQueue: Queue<RankingJobPayload>,
     private readonly rankingCache: RankingCacheService,
+    private readonly elastic: ElasticService,
     @Optional() private readonly clickhouse?: ClickhouseService,
   ) {}
 
@@ -146,25 +149,54 @@ export class RankingsService {
     const now = new Date();
     const entities: Entity[] = [];
 
-    for (const def of entityDefs) {
-      const entity = await this.prisma.entity.create({
-        data: {
-          type: 'PERSON',
-          canonicalName: def.name,
-        },
-      });
-      entities.push(entity);
+    if (this.elastic.isEnabled()) {
+      await this.prisma.$transaction(async (tx) => {
+        for (const def of entityDefs) {
+          const entity = await tx.entity.create({
+            data: {
+              type: 'PERSON',
+              canonicalName: def.name,
+            },
+          });
+          entities.push(entity);
 
-      await this.prisma.entityMetric.createMany({
-        data: def.metrics.map((m) => ({
-          entityId: entity.id,
-          metricKey: m.key,
-          value: m.value,
-          unit: 'index',
-          sourceTier: m.tier,
-          observedAt: new Date(now.getTime() - 2 * 86_400_000),
-        })),
+          await tx.entityMetric.createMany({
+            data: def.metrics.map((m) => ({
+              entityId: entity.id,
+              metricKey: m.key,
+              value: m.value,
+              unit: 'index',
+              sourceTier: m.tier,
+              observedAt: new Date(now.getTime() - 2 * 86_400_000),
+            })),
+          });
+
+          await tx.outboxEvent.create({
+            data: elasticEntitySyncOutboxCreate(entity.id, 'upsert'),
+          });
+        }
       });
+    } else {
+      for (const def of entityDefs) {
+        const entity = await this.prisma.entity.create({
+          data: {
+            type: 'PERSON',
+            canonicalName: def.name,
+          },
+        });
+        entities.push(entity);
+
+        await this.prisma.entityMetric.createMany({
+          data: def.metrics.map((m) => ({
+            entityId: entity.id,
+            metricKey: m.key,
+            value: m.value,
+            unit: 'index',
+            sourceTier: m.tier,
+            observedAt: new Date(now.getTime() - 2 * 86_400_000),
+          })),
+        });
+      }
     }
 
     const entityIds = entities.map((e) => e.id.toString());

@@ -4,10 +4,10 @@ import {
   OnModuleDestroy,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { Client } from '@elastic/elasticsearch';
-import { Prisma } from '@prisma/client';
+import { Client, errors } from '@elastic/elasticsearch';
+import { CrawledUrl, Entity, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { ELASTIC_INDEX_ENTITIES } from './elastic.constants';
+import { ELASTIC_INDEX_CRAWLED_URLS, ELASTIC_INDEX_ENTITIES } from './elastic.constants';
 
 function aliasesToText(aliases: Prisma.JsonValue | null | undefined): string {
   if (aliases === null || aliases === undefined) return '';
@@ -18,16 +18,80 @@ function aliasesToText(aliases: Prisma.JsonValue | null | undefined): string {
   return String(aliases);
 }
 
+type EntityEsSource = {
+  entityId: string;
+  type: string;
+  canonicalName: string;
+  aliases: string;
+};
+
+function entityToEsDoc(e: Pick<Entity, 'id' | 'type' | 'canonicalName' | 'aliases'>): EntityEsSource {
+  return {
+    entityId: e.id.toString(),
+    type: e.type,
+    canonicalName: e.canonicalName,
+    aliases: aliasesToText(e.aliases),
+  };
+}
+
+type CrawledUrlEsSource = {
+  crawledUrlId: string;
+  sourceId: string;
+  url: string;
+  mimeType: string | null;
+  textPreview: string | null;
+  status: string;
+  fetchedAt: string | null;
+};
+
+export type EntitySearchHit = {
+  entityId: string;
+  score: number;
+  canonicalName: string;
+  type: string;
+  /** Elasticsearch `highlight` 字段：含 `<em>...</em>`，便于前端展示 */
+  highlights?: Record<string, string[]>;
+};
+
+export type CrawledUrlSearchHit = {
+  crawledUrlId: string;
+  score: number;
+  url: string;
+  sourceId: string;
+  mimeType: string | null;
+  status: string;
+  snippet: string;
+  highlights?: Record<string, string[]>;
+};
+
+function crawledUrlToEsDoc(
+  r: Pick<
+    CrawledUrl,
+    'id' | 'sourceId' | 'url' | 'mimeType' | 'textPreview' | 'status' | 'fetchedAt'
+  >,
+): CrawledUrlEsSource {
+  return {
+    crawledUrlId: r.id.toString(),
+    sourceId: r.sourceId.toString(),
+    url: r.url,
+    mimeType: r.mimeType,
+    textPreview: r.textPreview,
+    status: r.status,
+    fetchedAt: r.fetchedAt ? r.fetchedAt.toISOString() : null,
+  };
+}
+
 @Injectable()
 export class ElasticService implements OnModuleDestroy {
   private readonly logger = new Logger(ElasticService.name);
   private client: Client | null = null;
-  private indexReady = false;
+  private entityIndexReady = false;
+  private crawledUrlIndexReady = false;
 
   constructor(private readonly prisma: PrismaService) {
     const node = process.env.ELASTICSEARCH_NODE?.trim();
     if (!node) {
-      this.logger.warn('ELASTICSEARCH_NODE not set — entity search disabled');
+      this.logger.warn('ELASTICSEARCH_NODE not set — Elasticsearch features disabled');
       return;
     }
     this.client = new Client({ node, requestTimeout: 30_000 });
@@ -56,7 +120,7 @@ export class ElasticService implements OnModuleDestroy {
 
   async ensureEntityIndex(): Promise<void> {
     if (!this.client) return;
-    if (this.indexReady) return;
+    if (this.entityIndexReady) return;
 
     const exists = await this.client.indices.exists({ index: ELASTIC_INDEX_ENTITIES });
     if (!exists) {
@@ -77,10 +141,88 @@ export class ElasticService implements OnModuleDestroy {
       });
       this.logger.log(`Created index ${ELASTIC_INDEX_ENTITIES}`);
     }
-    this.indexReady = true;
+    this.entityIndexReady = true;
   }
 
-  /** 全量从 PG 重建实体索引（开发/运维；生产可改为 CDC/增量） */
+  async ensureCrawledUrlIndex(): Promise<void> {
+    if (!this.client) return;
+    if (this.crawledUrlIndexReady) return;
+
+    const exists = await this.client.indices.exists({ index: ELASTIC_INDEX_CRAWLED_URLS });
+    if (!exists) {
+      await this.client.indices.create({
+        index: ELASTIC_INDEX_CRAWLED_URLS,
+        mappings: {
+          properties: {
+            crawledUrlId: { type: 'keyword' },
+            sourceId: { type: 'keyword' },
+            url: {
+              type: 'text',
+              analyzer: 'standard',
+              fields: { keyword: { type: 'keyword', ignore_above: 2048 } },
+            },
+            mimeType: { type: 'keyword' },
+            textPreview: { type: 'text', analyzer: 'standard' },
+            status: { type: 'keyword' },
+            fetchedAt: { type: 'date' },
+          },
+        },
+      });
+      this.logger.log(`Created index ${ELASTIC_INDEX_CRAWLED_URLS}`);
+    }
+    this.crawledUrlIndexReady = true;
+  }
+
+  /** 单条写入；未配置 ES 时为 no-op；ES 报错时抛出 */
+  async upsertEntityFromRow(e: Entity): Promise<void> {
+    if (!this.client) return;
+    await this.ensureEntityIndex();
+    try {
+      await this.client.index({
+        index: ELASTIC_INDEX_ENTITIES,
+        id: e.id.toString(),
+        document: entityToEsDoc(e),
+        refresh: true,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Elasticsearch upsert entity ${e.id}: ${msg}`);
+      throw new ServiceUnavailableException(`Elasticsearch upsert failed: ${msg}`);
+    }
+  }
+
+  /** PG 已删行后调用；ES 失败只打日志（避免 5xx 掩盖已成功的 PG 删除） */
+  async deleteEntityFromIndexForFlusher(id: bigint): Promise<void> {
+    if (!this.client) return;
+    await this.ensureEntityIndex();
+    try {
+      await this.client.delete({
+        index: ELASTIC_INDEX_ENTITIES,
+        id: id.toString(),
+        refresh: true,
+      });
+    } catch (e: unknown) {
+      if (e instanceof errors.ResponseError && e.statusCode === 404) return;
+      throw e;
+    }
+  }
+
+  /** PG 已删行后调用；ES 失败只打日志（避免 5xx 掩盖已成功的 PG 删除） */
+  async removeEntityFromIndex(id: bigint): Promise<void> {
+    if (!this.client) return;
+    try {
+      await this.client.delete({
+        index: ELASTIC_INDEX_ENTITIES,
+        id: id.toString(),
+        refresh: true,
+      });
+    } catch (e: unknown) {
+      if (e instanceof errors.ResponseError && e.statusCode === 404) return;
+      const msg = e instanceof Error ? e.message : String(e);
+      this.logger.warn(`Elasticsearch delete entity ${id} (non-fatal): ${msg}`);
+    }
+  }
+
   async reindexAllEntitiesFromDb(): Promise<number> {
     if (!this.client) {
       throw new ServiceUnavailableException('Elasticsearch not configured (ELASTICSEARCH_NODE)');
@@ -94,12 +236,7 @@ export class ElasticService implements OnModuleDestroy {
       operations.push({
         index: { _index: ELASTIC_INDEX_ENTITIES, _id: e.id.toString() },
       });
-      operations.push({
-        entityId: e.id.toString(),
-        type: e.type,
-        canonicalName: e.canonicalName,
-        aliases: aliasesToText(e.aliases),
-      });
+      operations.push(entityToEsDoc(e));
     }
 
     const res = await this.client.bulk({ operations, refresh: true });
@@ -115,7 +252,7 @@ export class ElasticService implements OnModuleDestroy {
   async searchEntities(
     q: string,
     limit: number,
-  ): Promise<Array<{ entityId: string; score: number; canonicalName: string; type: string }>> {
+  ): Promise<EntitySearchHit[]> {
     if (!this.client) {
       throw new ServiceUnavailableException('Elasticsearch not configured (ELASTICSEARCH_NODE)');
     }
@@ -136,6 +273,14 @@ export class ElasticService implements OnModuleDestroy {
         },
         size,
         _source: ['entityId', 'canonicalName', 'type'],
+        highlight: {
+          fields: {
+            canonicalName: { number_of_fragments: 0 },
+            aliases: { number_of_fragments: 2, fragment_size: 140 },
+          },
+          pre_tags: ['<em>'],
+          post_tags: ['</em>'],
+        },
       });
     } catch (e) {
       this.logger.warn(`searchEntities: ${e instanceof Error ? e.message : String(e)}`);
@@ -144,17 +289,181 @@ export class ElasticService implements OnModuleDestroy {
       );
     }
 
-    const out: Array<{ entityId: string; score: number; canonicalName: string; type: string }> =
-      [];
+    const out: EntitySearchHit[] = [];
     for (const hit of res.hits.hits) {
       const src = hit._source as
         | { entityId?: string; canonicalName?: string; type?: string }
         | undefined;
+      const rawHl = hit.highlight as Record<string, string[]> | undefined;
+      const highlights =
+        rawHl && Object.keys(rawHl).length > 0
+          ? Object.fromEntries(
+              Object.entries(rawHl).filter(([, v]) => Array.isArray(v) && v.length > 0),
+            )
+          : undefined;
       out.push({
         entityId: src?.entityId ?? String(hit._id ?? ''),
         score: hit._score ?? 0,
         canonicalName: src?.canonicalName ?? '',
         type: src?.type ?? '',
+        ...(highlights && Object.keys(highlights).length > 0 ? { highlights } : {}),
+      });
+    }
+    return out;
+  }
+
+  /** Flusher：仅索引 `status=fetched`；否则删 ES 文档 */
+  async upsertCrawledUrlFromRowForFlusher(r: CrawledUrl): Promise<void> {
+    if (!this.client) return;
+    await this.ensureCrawledUrlIndex();
+    if (r.status !== 'fetched') {
+      await this.deleteCrawledUrlFromIndexForFlusher(r.id);
+      return;
+    }
+    try {
+      await this.client.index({
+        index: ELASTIC_INDEX_CRAWLED_URLS,
+        id: r.id.toString(),
+        document: crawledUrlToEsDoc(r),
+        refresh: true,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Elasticsearch upsert crawled url ${r.id}: ${msg}`);
+      throw new ServiceUnavailableException(`Elasticsearch upsert failed: ${msg}`);
+    }
+  }
+
+  async deleteCrawledUrlFromIndexForFlusher(id: bigint): Promise<void> {
+    if (!this.client) return;
+    await this.ensureCrawledUrlIndex();
+    try {
+      await this.client.delete({
+        index: ELASTIC_INDEX_CRAWLED_URLS,
+        id: id.toString(),
+        refresh: true,
+      });
+    } catch (e: unknown) {
+      if (e instanceof errors.ResponseError && e.statusCode === 404) return;
+      throw e;
+    }
+  }
+
+  async reindexFetchedCrawlDocsFromDb(): Promise<number> {
+    if (!this.client) {
+      throw new ServiceUnavailableException('Elasticsearch not configured (ELASTICSEARCH_NODE)');
+    }
+    await this.ensureCrawledUrlIndex();
+    const rows = await this.prisma.crawledUrl.findMany({ where: { status: 'fetched' } });
+    if (rows.length === 0) return 0;
+
+    const operations: object[] = [];
+    for (const r of rows) {
+      operations.push({
+        index: { _index: ELASTIC_INDEX_CRAWLED_URLS, _id: r.id.toString() },
+      });
+      operations.push(crawledUrlToEsDoc(r));
+    }
+
+    const res = await this.client.bulk({ operations, refresh: true });
+    if (res.errors) {
+      const first = res.items.find((i) => 'index' in i && i.index?.error);
+      const errMsg = first && 'index' in first ? first.index?.error?.reason : 'bulk errors';
+      this.logger.error(`Elasticsearch crawled-url bulk: ${errMsg}`);
+      throw new ServiceUnavailableException(`Elasticsearch bulk failed: ${errMsg}`);
+    }
+    return rows.length;
+  }
+
+  async searchCrawledUrlDocs(
+    q: string,
+    limit: number,
+    filters?: { sourceId?: bigint; status?: string },
+  ): Promise<CrawledUrlSearchHit[]> {
+    if (!this.client) {
+      throw new ServiceUnavailableException('Elasticsearch not configured (ELASTICSEARCH_NODE)');
+    }
+    await this.ensureCrawledUrlIndex();
+
+    const size = Math.min(Math.max(limit, 1), 50);
+    const filter: object[] = [];
+    if (filters?.sourceId !== undefined) {
+      filter.push({ term: { sourceId: filters.sourceId.toString() } });
+    }
+    if (filters?.status !== undefined && filters.status.length > 0) {
+      filter.push({ term: { status: filters.status } });
+    }
+
+    let res;
+    try {
+      res = await this.client.search({
+        index: ELASTIC_INDEX_CRAWLED_URLS,
+        query: {
+          bool: {
+            must: [
+              {
+                multi_match: {
+                  query: q,
+                  fields: ['url^2', 'textPreview'],
+                  type: 'best_fields',
+                  fuzziness: 'AUTO',
+                },
+              },
+            ],
+            filter: filter.length ? filter : undefined,
+          },
+        },
+        size,
+        _source: ['crawledUrlId', 'url', 'sourceId', 'mimeType', 'status', 'textPreview'],
+        highlight: {
+          fields: {
+            url: { number_of_fragments: 1, fragment_size: 180 },
+            textPreview: { number_of_fragments: 2, fragment_size: 220 },
+          },
+          pre_tags: ['<em>'],
+          post_tags: ['</em>'],
+        },
+      });
+    } catch (e) {
+      this.logger.warn(`searchCrawledUrlDocs: ${e instanceof Error ? e.message : String(e)}`);
+      throw new ServiceUnavailableException(
+        `Elasticsearch query failed: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+
+    const out: CrawledUrlSearchHit[] = [];
+    for (const hit of res.hits.hits) {
+      const src = hit._source as
+        | {
+            crawledUrlId?: string;
+            url?: string;
+            sourceId?: string;
+            mimeType?: string | null;
+            status?: string;
+            textPreview?: string | null;
+          }
+        | undefined;
+      const preview = src?.textPreview ?? '';
+      const rawHl = hit.highlight as Record<string, string[]> | undefined;
+      const highlights =
+        rawHl && Object.keys(rawHl).length > 0
+          ? Object.fromEntries(
+              Object.entries(rawHl).filter(([, v]) => Array.isArray(v) && v.length > 0),
+            )
+          : undefined;
+      const snippetRaw =
+        rawHl?.textPreview?.[0] ??
+        rawHl?.url?.[0] ??
+        (preview.length > 280 ? `${preview.slice(0, 280)}…` : preview);
+      out.push({
+        crawledUrlId: src?.crawledUrlId ?? String(hit._id ?? ''),
+        score: hit._score ?? 0,
+        url: src?.url ?? '',
+        sourceId: src?.sourceId ?? '',
+        mimeType: src?.mimeType ?? null,
+        status: src?.status ?? '',
+        snippet: snippetRaw,
+        ...(highlights && Object.keys(highlights).length > 0 ? { highlights } : {}),
       });
     }
     return out;

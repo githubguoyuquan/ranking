@@ -3,6 +3,8 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { ElasticService } from '../search/elastic.service';
+import { elasticCrawledUrlSyncOutboxCreate } from '../search/elastic-crawled-url-outbox';
 import {
   buildCrawlJobId,
   CRAWL_JOB_NAME,
@@ -10,11 +12,14 @@ import {
   type CrawlJobPayload,
   urlFingerprint,
 } from './crawl-job';
+import { crawlUrlViolation, fetchUrlForCrawl } from './http-fetch';
+import { fetchUrlForCrawlPlaywright } from './http-fetch-playwright';
 
 @Injectable()
 export class IngestionService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly elastic: ElasticService,
     @InjectQueue(CRAWL_QUEUE) private readonly crawlQueue: Queue<CrawlJobPayload>,
   ) {}
 
@@ -81,6 +86,16 @@ export class IngestionService {
     return task;
   }
 
+  async listCrawledUrlsForSource(sourceId: bigint, limit = 50) {
+    await this.ensureSource(sourceId);
+    const take = Math.min(Math.max(limit, 1), 100);
+    return this.prisma.crawledUrl.findMany({
+      where: { sourceId },
+      orderBy: { id: 'desc' },
+      take,
+    });
+  }
+
   /**
    * 登记 URL（幂等：urlFingerprint 唯一）
    */
@@ -103,6 +118,8 @@ export class IngestionService {
         url,
         urlFingerprint: fp,
         contentHash: contentHash ?? null,
+        mimeType: null,
+        textPreview: null,
         status: 'registered',
         fetchedAt: null,
       },
@@ -161,7 +178,7 @@ export class IngestionService {
     return this.getCrawlTask(task.id);
   }
 
-  /** Worker / 同步调用：桩抓取（写入 CrawledUrl + 更新 checkpoint） */
+  /** Worker / 同步：默认桩写入；`CRAWL_HTTP_FETCH=true` 或 Source.kind=http-fetch 时真 GET + SHA256（见 `http-fetch.ts`） */
   async processCrawlJob(payload: CrawlJobPayload): Promise<void> {
     const taskId = BigInt(payload.crawlTaskId);
     const sourceId = BigInt(payload.sourceId);
@@ -174,24 +191,122 @@ export class IngestionService {
     try {
       const urls = payload.seedUrls ?? [];
       const now = new Date();
+      const useHttp = await this.useHttpFetch(sourceId);
+      const usePw = useHttp && (await this.usePlaywrightFetch(sourceId));
+      let fetchErrors = 0;
+
       for (const u of urls) {
         const fp = urlFingerprint(u);
-        await this.prisma.crawledUrl.upsert({
-          where: { urlFingerprint: fp },
-          create: {
-            sourceId,
-            url: u,
-            urlFingerprint: fp,
-            status: 'fetched_stub',
-            fetchedAt: now,
-          },
-          update: {
-            status: 'fetched_stub',
-            fetchedAt: now,
-          },
-        });
+        if (!useHttp) {
+          await this.prisma.$transaction(async (tx) => {
+            const row = await tx.crawledUrl.upsert({
+              where: { urlFingerprint: fp },
+              create: {
+                sourceId,
+                url: u,
+                urlFingerprint: fp,
+                status: 'fetched_stub',
+                fetchedAt: now,
+                mimeType: null,
+                textPreview: null,
+              },
+              update: {
+                status: 'fetched_stub',
+                fetchedAt: now,
+                mimeType: null,
+                textPreview: null,
+              },
+            });
+            await this.enqueueCrawledUrlEsOutbox(tx, row);
+          });
+          continue;
+        }
+
+        const viol = crawlUrlViolation(u);
+        if (viol) {
+          fetchErrors += 1;
+          await this.prisma.$transaction(async (tx) => {
+            const row = await tx.crawledUrl.upsert({
+              where: { urlFingerprint: fp },
+              create: {
+                sourceId,
+                url: u,
+                urlFingerprint: fp,
+                status: 'fetch_blocked',
+                contentHash: null,
+                fetchedAt: now,
+                mimeType: null,
+                textPreview: null,
+              },
+              update: {
+                status: 'fetch_blocked',
+                contentHash: null,
+                fetchedAt: now,
+                mimeType: null,
+                textPreview: null,
+              },
+            });
+            await this.enqueueCrawledUrlEsOutbox(tx, row);
+          });
+          continue;
+        }
+
+        const fetched = usePw
+          ? await fetchUrlForCrawlPlaywright(u)
+          : await fetchUrlForCrawl(u);
+        if (fetched.ok) {
+          await this.prisma.$transaction(async (tx) => {
+            const row = await tx.crawledUrl.upsert({
+              where: { urlFingerprint: fp },
+              create: {
+                sourceId,
+                url: u,
+                urlFingerprint: fp,
+                status: 'fetched',
+                contentHash: fetched.contentHash,
+                mimeType: fetched.mimeType,
+                textPreview: fetched.textPreview,
+                fetchedAt: now,
+              },
+              update: {
+                status: 'fetched',
+                contentHash: fetched.contentHash,
+                mimeType: fetched.mimeType,
+                textPreview: fetched.textPreview,
+                fetchedAt: now,
+              },
+            });
+            await this.enqueueCrawledUrlEsOutbox(tx, row);
+          });
+        } else {
+          fetchErrors += 1;
+          await this.prisma.$transaction(async (tx) => {
+            const row = await tx.crawledUrl.upsert({
+              where: { urlFingerprint: fp },
+              create: {
+                sourceId,
+                url: u,
+                urlFingerprint: fp,
+                status: 'fetch_failed',
+                contentHash: null,
+                fetchedAt: now,
+                mimeType: null,
+                textPreview: null,
+              },
+              update: {
+                status: 'fetch_failed',
+                contentHash: null,
+                fetchedAt: now,
+                mimeType: null,
+                textPreview: null,
+              },
+            });
+            await this.enqueueCrawledUrlEsOutbox(tx, row);
+          });
+        }
       }
 
+      const metaKind = !useHttp ? 'stub' : usePw ? 'http-playwright' : 'http-fetch';
       await this.prisma.crawlCheckpoint.upsert({
         where: { crawlerName: payload.crawlerName },
         create: {
@@ -200,8 +315,9 @@ export class IngestionService {
           lastUrl: urls[urls.length - 1] ?? null,
           lastProcessed: now,
           meta: {
-            kind: 'stub',
+            kind: metaKind,
             urlCount: urls.length,
+            fetchErrors: useHttp ? fetchErrors : undefined,
             crawlTaskId: payload.crawlTaskId,
           } as Prisma.InputJsonValue,
         },
@@ -210,8 +326,9 @@ export class IngestionService {
           lastUrl: urls[urls.length - 1] ?? undefined,
           lastProcessed: now,
           meta: {
-            kind: 'stub',
+            kind: metaKind,
             urlCount: urls.length,
+            fetchErrors: useHttp ? fetchErrors : undefined,
             crawlTaskId: payload.crawlTaskId,
           } as Prisma.InputJsonValue,
         },
@@ -233,5 +350,29 @@ export class IngestionService {
   private async ensureSource(id: bigint) {
     const s = await this.prisma.source.findUnique({ where: { id } });
     if (!s) throw new NotFoundException('Source not found');
+  }
+
+  /** 全局开关或 Source.kind === http-fetch / http-playwright 时使用真抓取（GET 或 Playwright） */
+  private async useHttpFetch(sourceId: bigint): Promise<boolean> {
+    if (process.env.CRAWL_HTTP_FETCH === 'true') return true;
+    if (process.env.CRAWL_USE_PLAYWRIGHT === 'true') return true;
+    const s = await this.prisma.source.findUnique({ where: { id: sourceId } });
+    return s?.kind === 'http-fetch' || s?.kind === 'http-playwright';
+  }
+
+  /** 全局 `CRAWL_USE_PLAYWRIGHT=true` 或 `Source.kind=http-playwright` 时用 Chromium 渲染抓取 */
+  private async usePlaywrightFetch(sourceId: bigint): Promise<boolean> {
+    if (process.env.CRAWL_USE_PLAYWRIGHT === 'true') return true;
+    const s = await this.prisma.source.findUnique({ where: { id: sourceId } });
+    return s?.kind === 'http-playwright';
+  }
+
+  private async enqueueCrawledUrlEsOutbox(
+    tx: Prisma.TransactionClient,
+    row: { id: bigint; status: string },
+  ): Promise<void> {
+    if (!this.elastic.isEnabled()) return;
+    const action = row.status === 'fetched' ? 'upsert' : 'delete';
+    await tx.outboxEvent.create({ data: elasticCrawledUrlSyncOutboxCreate(row.id, action) });
   }
 }

@@ -160,6 +160,20 @@ curl -s 'http://localhost:3000/v1/entities/1/rank-history?topicSlug=global-femal
 
 `timeWindow` 可选；`limit` 默认 100、最大 500（按时间倒序取最近若干点，响应内 `points` 已按时间升序）。`summary` 含该窗口内**历史最好/最差名次**，以及**末端连续上升 / 连续下降步数**（`endStreakRankImproving` / `endStreakRankDeclining`）。
 
+按话题 slug 列出近期 **快照级** `TrendAnalysis`（默认 20 条，最大 100）：
+
+```bash
+curl -s 'http://localhost:3000/v1/topics/global-female-singers/trend-analyses?limit=15'
+# 可选 &timeWindow=WEEK
+```
+
+按话题 slug 列出近期 **`TopicRankSnapshot`**（默认 30 条，最大 100，按 `snapshotTime` 倒序）：
+
+```bash
+curl -s 'http://localhost:3000/v1/topics/global-female-singers/snapshots?limit=25'
+# 可选 &timeWindow=WEEK
+```
+
 ### 热榜聚合（按 slug）
 
 默认：该话题**最新 effectiveFrom** 的 `TopicVersion` + **最近完成的** `TopicRanking`（含快照）+ 该 ranking 下**最新 snapshotTime** 的快照。
@@ -173,7 +187,7 @@ curl -s 'http://localhost:3000/v1/topics/global-female-singers/leaderboard?timeW
 
 ### 实体搜索（Elasticsearch + PG）
 
-需 ES 运行且 `.env` 配置 `ELASTICSEARCH_NODE` 时，`/v1/search/entities` 默认走 ES 并返回 **`highlights`**（`<em>` 包裹命中词）。`GET /admin/entities` 列出实体（运营台与脚本）。管理台 **`/entities`** 支持 **`?q=`** 预填列表筛选框并刷新；**新标签打开与当前筛选一致的列表 API**（`limit=50` + 可选 `q`）。新建/编辑表单 **`canonicalName` 输入框 `maxLength=500`**、**`type` 为 120**，与 **POST/PATCH DTO** 一致。
+需 ES 运行且 `.env` 配置 `ELASTICSEARCH_NODE` 时，`/v1/search/entities` 默认走 ES 并返回 **`highlights`**（`<em>` 包裹命中词）。`GET /admin/entities` 列出实体（运营台与脚本）。管理台 **`/entities`** 支持 **`?q=`** 预填列表筛选框并刷新；**新标签打开与当前筛选一致的列表 API**（`limit=50` + 可选 `q`）；**排行 topicSlug** 输入框控制每行 **rank-history**（`GET /v1/entities/:id/rank-history`）链接与复制。新建/编辑表单 **`canonicalName` 输入框 `maxLength=500`**、**`type` 为 120**，与 **POST/PATCH DTO** 一致。
 
 ```bash
 curl -s 'http://localhost:3000/v1/search?q=Swift&limit=12&entityIndex=auto'

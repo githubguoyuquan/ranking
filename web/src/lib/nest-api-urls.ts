@@ -6,11 +6,14 @@ import {
   nestV1CrawlSourcesListPath,
   nestV1CrawlTaskPath,
   nestV1PathWithQuery,
+  nestV1EntityRankHistoryPath,
   nestV1RankingJobPath,
   nestV1RankingStatusPath,
   nestV1SnapshotAnalysesPath,
   nestV1SnapshotPath,
   nestV1TopicLeaderboardPath,
+  nestV1TopicSnapshotsPath,
+  nestV1TopicTrendAnalysesPath,
   nestV1TopicVersionsPath,
 } from "@/lib/nest-api-paths";
 
@@ -77,6 +80,27 @@ export function nestTopicLeaderboardUrl(
   query?: URLSearchParams,
 ): string {
   return nestAbs(nestV1TopicLeaderboardPath(topicSlug, query));
+}
+
+export function nestTopicTrendAnalysesUrl(
+  topicSlug: string,
+  query?: URLSearchParams,
+): string {
+  return nestAbs(nestV1TopicTrendAnalysesPath(topicSlug, query));
+}
+
+export function nestTopicSnapshotsUrl(
+  topicSlug: string,
+  query?: URLSearchParams,
+): string {
+  return nestAbs(nestV1TopicSnapshotsPath(topicSlug, query));
+}
+
+export function nestEntityRankHistoryUrl(
+  entityId: string,
+  query: URLSearchParams,
+): string {
+  return nestAbs(nestV1EntityRankHistoryPath(entityId, query));
 }
 
 export function nestCrawlSourcesListUrl(limit: number): string {

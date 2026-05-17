@@ -1105,6 +1105,130 @@ export class RankingsService {
   }
 
   /**
+   * 某话题近期快照级趋势摘要（`TrendAnalysis.entityId` 为 null）。
+   */
+  async listTrendAnalysesForTopicSlug(
+    slug: string,
+    timeWindow?: TimeWindow,
+    limit = 20,
+  ) {
+    const s = slug.trim();
+    const topic = await this.prisma.topic.findUnique({
+      where: { slug: s },
+      select: { id: true, slug: true, title: true },
+    });
+    if (!topic) throw new NotFoundException('topic not found');
+
+    const take = Math.min(Math.max(limit, 1), 100);
+    const rows = await this.prisma.trendAnalysis.findMany({
+      where: {
+        topicId: topic.id,
+        entityId: null,
+        ...(timeWindow ? { window: timeWindow } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      take,
+      select: {
+        id: true,
+        window: true,
+        payload: true,
+        createdAt: true,
+      },
+    });
+
+    return toPlainJson({
+      topic: {
+        id: topic.id.toString(),
+        slug: topic.slug,
+        title: topic.title,
+      },
+      filter: { timeWindow: timeWindow ?? null, limit: take },
+      count: rows.length,
+      analyses: rows.map((r) => ({
+        id: r.id.toString(),
+        window: r.window,
+        createdAt: r.createdAt.toISOString(),
+        payload: r.payload,
+      })),
+    });
+  }
+
+  /**
+   * 某话题下近期物化的排行榜快照（跨 `TopicVersion` / `TopicRanking`）。
+   */
+  async listSnapshotsForTopicSlug(
+    slug: string,
+    timeWindow?: TimeWindow,
+    limit = 30,
+  ) {
+    const s = slug.trim();
+    const topic = await this.prisma.topic.findUnique({
+      where: { slug: s },
+      select: { id: true, slug: true, title: true },
+    });
+    if (!topic) throw new NotFoundException('topic not found');
+
+    const take = Math.min(Math.max(limit, 1), 100);
+    const rows = await this.prisma.topicRankSnapshot.findMany({
+      where: {
+        topicRanking: {
+          topicVersion: { topicId: topic.id },
+          ...(timeWindow ? { timeWindow } : {}),
+        },
+      },
+      orderBy: { snapshotTime: 'desc' },
+      take,
+      select: {
+        id: true,
+        snapshotTime: true,
+        snapshotVersion: true,
+        confidenceScore: true,
+        generatedByAi: true,
+        topicRankingId: true,
+        topicRanking: {
+          select: {
+            id: true,
+            timeWindow: true,
+            windowStart: true,
+            windowEnd: true,
+            status: true,
+            topicVersion: {
+              select: { id: true, version: true },
+            },
+          },
+        },
+      },
+    });
+
+    return toPlainJson({
+      topic: {
+        id: topic.id.toString(),
+        slug: topic.slug,
+        title: topic.title,
+      },
+      filter: { timeWindow: timeWindow ?? null, limit: take },
+      count: rows.length,
+      snapshots: rows.map((r) => ({
+        id: r.id.toString(),
+        snapshotTime: r.snapshotTime.toISOString(),
+        snapshotVersion: r.snapshotVersion,
+        confidenceScore: r.confidenceScore,
+        generatedByAi: r.generatedByAi,
+        topicRankingId: r.topicRankingId.toString(),
+        topicRanking: {
+          id: r.topicRanking.id.toString(),
+          timeWindow: r.topicRanking.timeWindow,
+          windowStart: r.topicRanking.windowStart.toISOString(),
+          windowEnd: r.topicRanking.windowEnd.toISOString(),
+          status: r.topicRanking.status,
+          topicVersionId: r.topicRanking.topicVersion.id.toString(),
+          topicVersionLabel: r.topicRanking.topicVersion.version,
+        },
+      })),
+    });
+  }
+
+  /**
    * 某实体在话题下的排行时间序列（`RankingItemHistory`），含历史最好/最差名次与末端连续升降步数。
    */
   async getEntityRankHistory(

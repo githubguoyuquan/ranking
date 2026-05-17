@@ -264,7 +264,8 @@ sequenceDiagram
 建议在现有 REST 基础上扩展（**尚未全部存在**）：
 
 - `GET /v1/entities/:id/rank-history?topicSlug=&timeWindow=&limit=` — **`RankingItemHistory` 时间序列** + 历史最好/最差名次 + 末端连续升降步数（**已实现**）  
-- `GET /v1/topics/:slug/snapshots?from=&to=&timeWindow=` — 时间线列表  
+- `GET /v1/topics/:slug/trend-analyses?limit=&timeWindow=` — **快照级 `TrendAnalysis` 列表**（**已实现**；管理台 **话题版本** 页展示摘要表）  
+- `GET /v1/topics/:slug/snapshots?timeWindow=&limit=` — **`TopicRankSnapshot` 列表**（**已实现**；管理台 **话题版本** 页「近期快照」表）  
 - `POST /v1/snapshots/compare` — **已有**（多快照对比）  
 - `GET /v1/trends/hot?window=DAY` — 热点爆发检测（需 Trend job）  
 - `GET /v1/recommendations/similar-topics?topicId=` — 推荐占位  
@@ -273,7 +274,7 @@ sequenceDiagram
 
 ## 13. 前端（Next.js）
 
-**已有**：管理台多页、ECharts、快照对比、搜索、爬取、Outbox、ES 健康等。
+**已有**：管理台多页、ECharts、快照对比、搜索、爬取、Outbox、ES 健康等；**话题版本** 页含 **`TrendAnalysis` 快照摘要表**与**近期快照**表（随 slug 刷新）；**实体** 页可按 topicSlug 打开/复制 **`GET /v1/entities/:id/rank-history`**。
 
 **缺口（产品级）**：
 

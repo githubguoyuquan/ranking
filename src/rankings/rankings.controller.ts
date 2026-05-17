@@ -99,6 +99,32 @@ export class EntityRankHistoryQueryDto {
   limit?: number;
 }
 
+export class TopicTrendAnalysesQueryDto {
+  @IsOptional()
+  @IsEnum(TimeWindow)
+  timeWindow?: TimeWindow;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number;
+}
+
+export class TopicSnapshotsQueryDto {
+  @IsOptional()
+  @IsEnum(TimeWindow)
+  timeWindow?: TimeWindow;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number;
+}
+
 @Controller()
 export class RankingsController {
   constructor(private readonly rankings: RankingsService) {}
@@ -195,6 +221,42 @@ export class RankingsController {
   @Get('v1/topics/:slug/versions')
   async versions(@Param('slug') slug: string) {
     return toPlainJson(await this.rankings.listVersionsBySlug(slug));
+  }
+
+  /** 近期 `TrendAnalysis`（默认仅快照级摘要 `entityId` 为空） */
+  @Get('v1/topics/:slug/trend-analyses')
+  async topicTrendAnalyses(
+    @Param('slug') slug: string,
+    @Query() query: TopicTrendAnalysesQueryDto,
+  ) {
+    try {
+      return await this.rankings.listTrendAnalysesForTopicSlug(
+        slug,
+        query.timeWindow,
+        query.limit,
+      );
+    } catch (e) {
+      if (e instanceof NotFoundException) throw e;
+      throw e;
+    }
+  }
+
+  /** 话题下近期 `TopicRankSnapshot`（跨 version / ranking） */
+  @Get('v1/topics/:slug/snapshots')
+  async topicSnapshots(
+    @Param('slug') slug: string,
+    @Query() query: TopicSnapshotsQueryDto,
+  ) {
+    try {
+      return await this.rankings.listSnapshotsForTopicSlug(
+        slug,
+        query.timeWindow,
+        query.limit,
+      );
+    } catch (e) {
+      if (e instanceof NotFoundException) throw e;
+      throw e;
+    }
   }
 
   /**

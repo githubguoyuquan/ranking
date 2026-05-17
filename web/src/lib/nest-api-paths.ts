@@ -47,6 +47,33 @@ export function nestV1TopicLeaderboardPath(
   return qs ? `${base}?${qs}` : base;
 }
 
+export function nestV1TopicTrendAnalysesPath(
+  topicSlug: string,
+  query?: URLSearchParams,
+): string {
+  const base = `${V1}/topics/${encodeURIComponent(topicSlug)}/trend-analyses`;
+  const qs = query?.toString() ?? "";
+  return qs ? `${base}?${qs}` : base;
+}
+
+export function nestV1TopicSnapshotsPath(
+  topicSlug: string,
+  query?: URLSearchParams,
+): string {
+  const base = `${V1}/topics/${encodeURIComponent(topicSlug)}/snapshots`;
+  const qs = query?.toString() ?? "";
+  return qs ? `${base}?${qs}` : base;
+}
+
+export function nestV1EntityRankHistoryPath(
+  entityId: string,
+  query: URLSearchParams,
+): string {
+  const base = `${V1}/entities/${encodeURIComponent(entityId)}/rank-history`;
+  const qs = query.toString();
+  return qs ? `${base}?${qs}` : base;
+}
+
 export function nestV1CrawlSourcesListPath(limit: number): string {
   return `${NEST_V1.crawlSources}?limit=${encodeURIComponent(String(limit))}`;
 }
@@ -81,6 +108,9 @@ export function nestV1PathWithQuery(
 export const NEST_V1_DOC = {
   topicsVersions: "/v1/topics/:slug/versions",
   topicsLeaderboard: "/v1/topics/:slug/leaderboard",
+  topicsTrendAnalyses: "/v1/topics/:slug/trend-analyses",
+  topicsSnapshots: "/v1/topics/:slug/snapshots",
+  entityRankHistory: "/v1/entities/:id/rank-history",
   rankingsStatus: "/v1/rankings/:topicRankingId/status",
   jobRanking: "/v1/jobs/ranking/:jobId",
   crawlTask: "/v1/crawl/tasks/:id",

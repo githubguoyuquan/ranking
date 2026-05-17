@@ -29,6 +29,8 @@ import { entitiesAdminPrefillPath } from "@/lib/entities-admin-path";
 import { NEST_V1_DOC } from "@/lib/nest-api-paths";
 import {
   nestTopicLeaderboardUrl,
+  nestTopicSnapshotsUrl,
+  nestTopicTrendAnalysesUrl,
   nestTopicVersionsUrl,
 } from "@/lib/nest-api-urls";
 import { unifiedSearchAdminPathFromQuery } from "@/lib/unified-search-admin-path";
@@ -178,6 +180,62 @@ function clampQueryParam(raw: string, maxLen: number): string {
   return t.slice(0, maxLen);
 }
 
+type TrendAnalysisListItem = {
+  id: string;
+  window: string;
+  createdAt: string;
+  payload: unknown;
+};
+
+type TopicSnapshotListItem = {
+  id: string;
+  snapshotTime: string;
+  snapshotVersion: string;
+  confidenceScore: number;
+  generatedByAi: boolean;
+  topicRankingId: string;
+  topicRanking: {
+    id: string;
+    timeWindow: string;
+    windowStart: string;
+    windowEnd: string;
+    status: string;
+    topicVersionId: string;
+    topicVersionLabel: string;
+  };
+};
+
+function parseTrendPayloadPreview(payload: unknown): {
+  snapshotId?: string;
+  itemCount?: number;
+  avgConfidence?: number;
+  topGainerNames: string[];
+} {
+  const base = { topGainerNames: [] as string[] };
+  if (typeof payload !== "object" || payload === null) return base;
+  const o = payload as Record<string, unknown>;
+  const snapshotId = o.snapshotId != null ? String(o.snapshotId) : undefined;
+  const itemCount = typeof o.itemCount === "number" ? o.itemCount : undefined;
+  const avgConfidence =
+    typeof o.avgConfidence === "number" ? o.avgConfidence : undefined;
+  const gainers = o.topRankGainers;
+  const names: string[] = [];
+  if (Array.isArray(gainers)) {
+    for (const g of gainers.slice(0, 3)) {
+      if (typeof g === "object" && g !== null) {
+        const gn = (g as Record<string, unknown>).canonicalName;
+        if (gn != null) names.push(String(gn));
+      }
+    }
+  }
+  return {
+    snapshotId,
+    itemCount,
+    avgConfidence,
+    topGainerNames: names,
+  };
+}
+
 function TopicsPageInner() {
   const { abs } = useAdminAppUrl();
   const searchParams = useSearchParams();
@@ -211,6 +269,90 @@ function TopicsPageInner() {
     if (ws) q.set("windowStart", ws);
     return nestTopicLeaderboardUrl(slugForApi, q);
   }, [slugForApi, lbQueryVersion, lbQueryTimeWindow, lbQueryWindowStart]);
+
+  const trendAnalysesApiUrl = useMemo(
+    () =>
+      nestTopicTrendAnalysesUrl(
+        slugForApi,
+        new URLSearchParams([["limit", "20"]]),
+      ),
+    [slugForApi],
+  );
+
+  const topicSnapshotsApiUrl = useMemo(
+    () =>
+      nestTopicSnapshotsUrl(
+        slugForApi,
+        new URLSearchParams([["limit", "25"]]),
+      ),
+    [slugForApi],
+  );
+
+  const [trendRows, setTrendRows] = useState<TrendAnalysisListItem[]>([]);
+  const [trendLoading, setTrendLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setTrendLoading(true);
+      setTrendRows([]);
+      try {
+        const res = await fetch(trendAnalysesApiUrl, { cache: "no-store" });
+        const text = await res.text();
+        if (cancelled) return;
+        if (!res.ok) return;
+        try {
+          const j = JSON.parse(text) as { analyses?: TrendAnalysisListItem[] };
+          setTrendRows(Array.isArray(j.analyses) ? j.analyses : []);
+        } catch {
+          setTrendRows([]);
+        }
+      } catch {
+        if (!cancelled) setTrendRows([]);
+      } finally {
+        if (!cancelled) setTrendLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [trendAnalysesApiUrl]);
+
+  const [snapshotRows, setSnapshotRows] = useState<TopicSnapshotListItem[]>(
+    [],
+  );
+  const [snapshotLoading, setSnapshotLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setSnapshotLoading(true);
+      setSnapshotRows([]);
+      try {
+        const res = await fetch(topicSnapshotsApiUrl, { cache: "no-store" });
+        const text = await res.text();
+        if (cancelled) return;
+        if (!res.ok) return;
+        try {
+          const j = JSON.parse(text) as {
+            snapshots?: TopicSnapshotListItem[];
+          };
+          setSnapshotRows(
+            Array.isArray(j.snapshots) ? j.snapshots : [],
+          );
+        } catch {
+          setSnapshotRows([]);
+        }
+      } catch {
+        if (!cancelled) setSnapshotRows([]);
+      } finally {
+        if (!cancelled) setSnapshotLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [topicSnapshotsApiUrl]);
 
   useEffect(() => {
     const s = searchParams.get("slug");
@@ -321,7 +463,9 @@ function TopicsPageInner() {
         <h1 className="text-2xl font-semibold tracking-tight">话题版本</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           <code className="rounded bg-muted px-1">GET {NEST_V1_DOC.topicsVersions}</code> ·{" "}
-          <code className="rounded bg-muted px-1">GET {NEST_V1_DOC.topicsLeaderboard}</code>
+          <code className="rounded bg-muted px-1">GET {NEST_V1_DOC.topicsLeaderboard}</code> ·{" "}
+          <code className="rounded bg-muted px-1">GET {NEST_V1_DOC.topicsTrendAnalyses}</code> ·{" "}
+          <code className="rounded bg-muted px-1">GET {NEST_V1_DOC.topicsSnapshots}</code>
         </p>
       </div>
 
@@ -637,6 +781,218 @@ function TopicsPageInner() {
             <pre className="max-h-[480px] overflow-auto rounded-md border border-border bg-muted/50 p-3 text-xs">
               {result}
             </pre>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">快照趋势摘要</CardTitle>
+          <CardDescription>
+            来自 <code className="text-xs">TrendAnalysis</code>（每次成功物化快照写入）。随上方 slug
+            自动刷新；可选 query：<code className="text-xs">timeWindow</code>、
+            <code className="text-xs">limit</code>（1–100）。
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            <a
+              href={trendAnalysesApiUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-primary underline-offset-4 hover:underline"
+            >
+              新标签打开 JSON
+            </a>
+            <CopyTextButton
+              text={trendAnalysesApiUrl}
+              idleLabel="复制 API URL"
+              className="h-6"
+            />
+            {trendLoading ? <span>加载中…</span> : null}
+          </p>
+          {trendRows.length === 0 && !trendLoading ? (
+            <p className="text-sm text-muted-foreground">
+              暂无记录。请先对话题跑榜生成快照（<code className="rounded bg-muted px-1 text-xs">POST {ADMIN_HREF.rankingsRun}</code>
+              ）。
+            </p>
+          ) : null}
+          {trendRows.length > 0 ? (
+            <div className="overflow-x-auto rounded-md border border-border">
+              <table className="w-full text-left text-sm">
+                <thead className="border-b border-border bg-muted/40 text-xs text-muted-foreground">
+                  <tr>
+                    <th scope="col" className="px-3 py-2 font-medium">
+                      时间
+                    </th>
+                    <th scope="col" className="px-3 py-2 font-medium">
+                      window
+                    </th>
+                    <th scope="col" className="px-3 py-2 font-medium">
+                      摘要
+                    </th>
+                    <th scope="col" className="px-3 py-2 font-medium">
+                      {" "}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {trendRows.map((row) => {
+                    const pv = parseTrendPayloadPreview(row.payload);
+                    const snapId = pv.snapshotId;
+                    return (
+                      <tr
+                        key={row.id}
+                        className="border-b border-border/60 last:border-0"
+                      >
+                        <th
+                          scope="row"
+                          className="whitespace-nowrap px-3 py-2 font-normal text-muted-foreground"
+                        >
+                          {row.createdAt}
+                        </th>
+                        <td className="px-3 py-2">{row.window}</td>
+                        <td className="px-3 py-2 text-xs text-muted-foreground">
+                          {pv.itemCount != null ? <>条目 {pv.itemCount}</> : null}
+                          {pv.avgConfidence != null ? (
+                            <>
+                              {pv.itemCount != null ? " · " : null}
+                              置信 {pv.avgConfidence.toFixed(2)}
+                            </>
+                          ) : null}
+                          {pv.topGainerNames.length > 0 ? (
+                            <>
+                              {(pv.itemCount != null || pv.avgConfidence != null
+                                ? " · "
+                                : "")}
+                              涨 {pv.topGainerNames.join("、")}
+                            </>
+                          ) : null}
+                          {pv.itemCount == null &&
+                          pv.avgConfidence == null &&
+                          pv.topGainerNames.length === 0
+                            ? "—"
+                            : null}
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          {snapId ? (
+                            <span className="inline-flex flex-wrap items-center justify-end gap-x-2 gap-y-1">
+                              <Link
+                                href={snapshotDetailAdminPath(snapId)}
+                                className="text-primary underline-offset-2 hover:underline"
+                              >
+                                快照
+                              </Link>
+                              <CopyTextButton
+                                text={abs(snapshotDetailAdminPath(snapId))}
+                                idleLabel="复制快照页"
+                                className="h-6 px-2 text-xs"
+                              />
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">近期快照</CardTitle>
+          <CardDescription>
+            <code className="text-xs">TopicRankSnapshot</code> 列表（按{" "}
+            <code className="text-xs">snapshotTime</code> 倒序）。可选 query：
+            <code className="text-xs">timeWindow</code>、<code className="text-xs">limit</code>（1–100）。
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            <a
+              href={topicSnapshotsApiUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-primary underline-offset-4 hover:underline"
+            >
+              新标签打开 JSON
+            </a>
+            <CopyTextButton
+              text={topicSnapshotsApiUrl}
+              idleLabel="复制 API URL"
+              className="h-6"
+            />
+            {snapshotLoading ? <span>加载中…</span> : null}
+          </p>
+          {snapshotRows.length === 0 && !snapshotLoading ? (
+            <p className="text-sm text-muted-foreground">暂无快照。</p>
+          ) : null}
+          {snapshotRows.length > 0 ? (
+            <div className="overflow-x-auto rounded-md border border-border">
+              <table className="w-full text-left text-sm">
+                <thead className="border-b border-border bg-muted/40 text-xs text-muted-foreground">
+                  <tr>
+                    <th scope="col" className="px-3 py-2 font-medium">
+                      snapshotTime
+                    </th>
+                    <th scope="col" className="px-3 py-2 font-medium">
+                      window
+                    </th>
+                    <th scope="col" className="px-3 py-2 font-medium">
+                      version
+                    </th>
+                    <th scope="col" className="px-3 py-2 font-medium">
+                      置信
+                    </th>
+                    <th scope="col" className="px-3 py-2 font-medium">
+                      {" "}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {snapshotRows.map((row) => (
+                    <tr
+                      key={row.id}
+                      className="border-b border-border/60 last:border-0"
+                    >
+                      <th
+                        scope="row"
+                        className="whitespace-nowrap px-3 py-2 font-normal text-muted-foreground"
+                      >
+                        {row.snapshotTime}
+                      </th>
+                      <td className="px-3 py-2">{row.topicRanking.timeWindow}</td>
+                      <td className="max-w-[8rem] truncate px-3 py-2 text-xs">
+                        {row.topicRanking.topicVersionLabel}
+                      </td>
+                      <td className="px-3 py-2 text-muted-foreground">
+                        {row.confidenceScore.toFixed(2)}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <span className="inline-flex flex-wrap items-center justify-end gap-x-2 gap-y-1">
+                          <Link
+                            href={snapshotDetailAdminPath(row.id)}
+                            className="text-primary underline-offset-2 hover:underline"
+                          >
+                            管理台
+                          </Link>
+                          <CopyTextButton
+                            text={abs(snapshotDetailAdminPath(row.id))}
+                            idleLabel="复制快照页"
+                            className="h-6 px-2 text-xs"
+                          />
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           ) : null}
         </CardContent>
       </Card>

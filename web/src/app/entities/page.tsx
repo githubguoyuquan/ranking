@@ -25,10 +25,13 @@ import {
   ENTITY_CANONICAL_NAME_MAX_LEN,
   ENTITY_LIST_Q_MAX_LEN,
   ENTITY_TYPE_MAX_LEN,
+  TOPIC_SLUG_MAX_LEN,
 } from "@/lib/admin-input-limits";
 import { buildEntitiesListWebPath, entitiesAdminPrefillPath, normalizeEntityAdminListLimit } from "@/lib/entities-admin-path";
 import { useAdminAppUrl } from "@/hooks/use-admin-app-url";
 import { isDecimalBigIntIdString } from "@/lib/decimal-id";
+import { NEST_V1_DOC } from "@/lib/nest-api-paths";
+import { nestEntityRankHistoryUrl } from "@/lib/nest-api-urls";
 import { unifiedSearchAdminPathFromQuery } from "@/lib/unified-search-admin-path";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -52,6 +55,17 @@ function clampEntityListQ(raw: string): string {
   const t = raw.trim();
   if (t.length <= ENTITY_LIST_Q_MAX_LEN) return t;
   return t.slice(0, ENTITY_LIST_Q_MAX_LEN);
+}
+
+const ENTITY_RANK_TOPIC_SLUG_PLACEHOLDER = "global-female-singers";
+
+function entityRankHistoryApiUrl(entityId: string, topicSlugInput: string): string {
+  const slug =
+    topicSlugInput.trim() || ENTITY_RANK_TOPIC_SLUG_PLACEHOLDER;
+  return nestEntityRankHistoryUrl(
+    entityId,
+    new URLSearchParams({ topicSlug: slug, limit: "50" }),
+  );
 }
 
 export default function EntitiesPage() {
@@ -91,6 +105,9 @@ function EntitiesPageInner() {
   const [editType, setEditType] = useState("");
   const [editAliases, setEditAliases] = useState("");
   const [editMsg, setEditMsg] = useState("");
+  const [entityRankTopicSlug, setEntityRankTopicSlug] = useState(
+    ENTITY_RANK_TOPIC_SLUG_PLACEHOLDER,
+  );
 
   const listApiUrl = useMemo(() => {
     const params = new URLSearchParams({
@@ -245,6 +262,10 @@ function EntitiesPageInner() {
           GET {BACKEND_ADMIN.entities} · POST {BACKEND_ADMIN.entities} · PATCH/DELETE{" "}
           {BACKEND_ADMIN_DOC.entitiesId}
         </p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Nest：表格内可开 <code className="rounded bg-muted px-1">GET {NEST_V1_DOC.entityRankHistory}</code>（需{" "}
+          <code className="text-xs">topicSlug</code>，见下方输入框）
+        </p>
         <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
           <CopyTextButton
             text={adminEntitiesUrl()}
@@ -266,11 +287,12 @@ function EntitiesPageInner() {
             {ENTITY_ADMIN_LIST_LIMIT_DEFAULT}）· 表格内编辑/删除 · URL 预填{" "}
             <code className="text-xs">?q=</code> / <code className="text-xs">?limit=</code>；点「刷新」或{" "}
             <kbd className="rounded border border-border bg-muted px-1 text-[10px]">Enter</kbd>{" "}
-            会写入地址栏并重新拉取
+            会写入地址栏并重新拉取 · 「排行 topicSlug」用于一行内打开的{" "}
+            <code className="text-xs">rank-history</code> JSON（默认与 seed 演示一致）
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
             <div className="min-w-0 flex-1 space-y-2">
               <Label htmlFor="q">q</Label>
               <Input
@@ -301,6 +323,16 @@ function EntitiesPageInner() {
                   router.replace(path, { scroll: false });
                   void loadList();
                 }}
+              />
+            </div>
+            <div className="w-full min-w-[10rem] space-y-2 sm:max-w-xs sm:flex-1">
+              <Label htmlFor="entity-rank-topic-slug">排行 topicSlug</Label>
+              <Input
+                id="entity-rank-topic-slug"
+                maxLength={TOPIC_SLUG_MAX_LEN}
+                placeholder={ENTITY_RANK_TOPIC_SLUG_PLACEHOLDER}
+                value={entityRankTopicSlug}
+                onChange={(e) => setEntityRankTopicSlug(e.target.value)}
               />
             </div>
             <Button
@@ -403,6 +435,19 @@ function EntitiesPageInner() {
                           </Button>
                         </div>
                         <div className="flex flex-wrap gap-1.5">
+                          <a
+                            href={entityRankHistoryApiUrl(r.id, entityRankTopicSlug)}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex h-5 items-center rounded-md border border-border bg-background px-2 text-[10px] font-medium text-primary underline-offset-2 hover:underline"
+                          >
+                            rank-history
+                          </a>
+                          <CopyTextButton
+                            text={entityRankHistoryApiUrl(r.id, entityRankTopicSlug)}
+                            idleLabel="复制 rank-history"
+                            className="h-5 px-2 text-[10px]"
+                          />
                           <CopyTextButton
                             text={abs(
                               unifiedSearchAdminPathFromQuery(r.canonicalName),

@@ -6,6 +6,7 @@ import {
   NotFoundException,
   Param,
   Post,
+  Query,
 } from '@nestjs/common';
 import { Transform } from 'class-transformer';
 import { IsArray, IsBoolean, IsDateString, IsEnum, IsOptional, IsString } from 'class-validator';
@@ -48,6 +49,20 @@ export class CompareSnapshotsDto {
   @IsArray()
   @IsString({ each: true })
   snapshotIds!: string[];
+}
+
+export class LeaderboardQueryDto {
+  @IsOptional()
+  @IsString()
+  version?: string;
+
+  @IsOptional()
+  @IsEnum(TimeWindow)
+  timeWindow?: TimeWindow;
+
+  @IsOptional()
+  @IsDateString()
+  windowStart?: string;
 }
 
 @Controller()
@@ -117,6 +132,13 @@ export class RankingsController {
     const snap = await this.rankings.getSnapshotForApi(BigInt(id));
     if (!snap) throw new NotFoundException();
     return snap;
+  }
+
+  @Get('v1/topics/:slug/leaderboard')
+  async leaderboard(@Param('slug') slug: string, @Query() query: LeaderboardQueryDto) {
+    const row = await this.rankings.getLeaderboardForApi(slug, query);
+    if (!row) throw new NotFoundException();
+    return row;
   }
 
   @Get('v1/topics/:slug/versions')

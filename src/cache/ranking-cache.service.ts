@@ -57,6 +57,19 @@ export class RankingCacheService implements OnModuleDestroy {
     return Number.isFinite(n) && n >= 60 ? n : 604800;
   }
 
+  private leaderboardTtlSeconds(): number {
+    const n = Number(process.env.LEADERBOARD_CACHE_TTL_SECONDS);
+    return Number.isFinite(n) && n >= 5 ? n : 120;
+  }
+
+  /** 查询参数指纹（含「默认最新」语义，不宜复用快照缓存） */
+  leaderboardKey(slug: string, q: { version?: string; timeWindow?: string; windowStart?: string }): string {
+    const v = q.version ?? '_';
+    const t = q.timeWindow ?? '_';
+    const w = q.windowStart ?? '_';
+    return `ranking:v1:lb:${encodeURIComponent(slug)}:${v}:${t}:${w}`;
+  }
+
   async getSnapshotJson(id: bigint): Promise<string | null> {
     if (!this.isEnabled()) return null;
     try {
@@ -74,6 +87,26 @@ export class RankingCacheService implements OnModuleDestroy {
     } catch (e) {
       this.logger.warn(
         `Redis ranking cache SET failed: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
+
+  async getLeaderboardJson(key: string): Promise<string | null> {
+    if (!this.isEnabled()) return null;
+    try {
+      return await this.redis!.get(key);
+    } catch {
+      return null;
+    }
+  }
+
+  async setLeaderboardJson(key: string, json: string): Promise<void> {
+    if (!this.isEnabled()) return;
+    try {
+      await this.redis!.set(key, json, 'EX', this.leaderboardTtlSeconds());
+    } catch (e) {
+      this.logger.warn(
+        `Redis leaderboard cache SET failed: ${e instanceof Error ? e.message : String(e)}`,
       );
     }
   }

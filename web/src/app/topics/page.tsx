@@ -19,6 +19,32 @@ export default function TopicsPage() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<string>("");
 
+  const [leaderboardLoading, setLeaderboardLoading] = useState(false);
+  const [leaderboardResult, setLeaderboardResult] = useState<string>("");
+
+  async function loadLeaderboard() {
+    setLeaderboardLoading(true);
+    setLeaderboardResult("");
+    try {
+      const res = await fetch(
+        `${getApiBase()}/v1/topics/${encodeURIComponent(slug)}/leaderboard`,
+        { cache: "no-store" },
+      );
+      const text = await res.text();
+      let formatted: string;
+      try {
+        formatted = JSON.stringify(JSON.parse(text) as unknown, null, 2);
+      } catch {
+        formatted = text;
+      }
+      setLeaderboardResult(`${res.ok ? "" : `HTTP ${res.status}\n`}${formatted}`);
+    } catch (e) {
+      setLeaderboardResult(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLeaderboardLoading(false);
+    }
+  }
+
   async function load() {
     setLoading(true);
     setResult("");
@@ -47,7 +73,8 @@ export default function TopicsPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">话题版本</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          <code className="rounded bg-muted px-1">GET /v1/topics/:slug/versions</code>
+          <code className="rounded bg-muted px-1">GET /v1/topics/:slug/versions</code> ·{' '}
+          <code className="rounded bg-muted px-1">GET /v1/topics/:slug/leaderboard</code>
         </p>
       </div>
 
@@ -67,9 +94,23 @@ export default function TopicsPage() {
               />
             </div>
             <Button disabled={loading} onClick={() => void load()}>
-              {loading ? "加载中…" : "加载"}
+              {loading ? "加载中…" : "版本列表"}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={leaderboardLoading}
+              onClick={() => void loadLeaderboard()}
+            >
+              {leaderboardLoading ? "加载中…" : "热榜 JSON"}
             </Button>
           </div>
+          {leaderboardResult ? (
+            <pre className="max-h-[320px] overflow-auto rounded-md border border-border bg-muted/50 p-3 text-xs">
+              {leaderboardResult}
+            </pre>
+          ) : null}
+
           {result ? (
             <pre className="max-h-[480px] overflow-auto rounded-md border border-border bg-muted/50 p-3 text-xs">
               {result}

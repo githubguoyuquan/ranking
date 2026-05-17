@@ -15,8 +15,8 @@
    - ✅ **爬虫骨架**：`CrawlCheckpoint` REST；`Source` / `CrawlTask`；`CrawledUrl` 指纹去重；BullMQ 队列 `crawl` + 桩任务（`seedUrls` 写库，可换 Playwright）
 3. **P2 — Analytics & search**  
    - ✅ **ClickHouse**：compose、`metric_timeseries`、`AnalyticsModule`；`SYNC_RANKING_TO_CLICKHOUSE` + `CLICKHOUSE_URL` 时 `CLICKHOUSE_WRITE_MODE=direct`（默认）快照后直写，`outbox` 则同事务插入专用 Outbox 行并由 `ClickhouseOutboxFlusherService` 刷入；Outbox 按 `type` 分流，Kafka 仅发布 `ranking.snapshot.completed`  
-   - ✅ **Redis 热读缓存**：`GET /v1/snapshots/:id` 与 DB 同结构的 JSON 缓存（长 TTL、生成后预热）；无 Redis 或失败时自动降级查库  
-   - ⏳ Elasticsearch、热榜聚合 API
+   - ✅ **Redis 热读缓存**：`GET /v1/snapshots/:id` 长 TTL；`GET /v1/topics/:slug/leaderboard` 独立短 TTL 聚合缓存；无 Redis 或失败时降级查库  
+   - ⏳ Elasticsearch
 
 4. **P3 — Agents & UI**  
    - ✅ **管理前端**：`web/` — Next.js App Router、Tailwind v4、shadcn/ui（Radix）、**深色主题**、**ECharts** 柱状图、对接现有 REST API  
@@ -26,7 +26,7 @@
 
 | 优先级 | 方向 | 说明 |
 |--------|------|------|
-| **1** | Redis 读路径 | ✅ 已做：不可变快照适合缓存；减轻 PG、压低 P99。 |
+| **1** | Redis 读路径 | ✅ 已做：快照详情缓存 + **slug 热榜聚合** `GET /v1/topics/:slug/leaderboard`。 |
 | **2** | ClickHouse / Outbox | ✅ 已做：OLAP 与异步刷数。 |
 | **3** | Elasticsearch | 实体/内容全文与复杂过滤；需同步管道与运维，放在 ES 之前完成「事实源 + 缓存」更划算。 |
 | **4** | 真爬取（Playwright 等） | 替换桩；与数据源 SLA、反爬相关，随产品化渐进。 |
@@ -48,9 +48,10 @@ npm run dev   # 默认 http://localhost:3001
 
 ### 快照读缓存（Redis）
 
-- 默认开启；单机不想连 Redis 时可设 `RANKING_CACHE_ENABLED=false`（仅影响 `GET /v1/snapshots/:id`，其它接口仍可能用 Redis 跑异步任务）。  
+- 默认开启；单机不想连 Redis 时可设 `RANKING_CACHE_ENABLED=false`（关闭快照与热榜聚合两类缓存键；异步排行仍可能要 Redis）。  
 - `RANKING_CACHE_TTL_SECONDS`：默认 `604800`（7 天，与不可变快照一致）。  
-- `RANKING_CACHE_REDIS_DB`：默认 `0`；与 BullMQ 共用实例时键前缀为 `ranking:v1:snap:`，一般无需换 DB。  
+- `LEADERBOARD_CACHE_TTL_SECONDS`：默认 `120`；`GET /v1/topics/:slug/leaderboard` 的聚合 JSON（命中后短缓存，「最新窗口」语义用 TTL 消化变更）。  
+- `RANKING_CACHE_REDIS_DB`：默认 `0`；与 BullMQ 共用实例时键前缀为 `ranking:v1:snap:`、`ranking:v1:lb:`，一般无需换 DB。  
 - 排行物化成功后会 `warm` 缓存，首次读多走内存。
 
 ### ClickHouse（可选）
@@ -102,6 +103,17 @@ curl -s http://localhost:3000/v1/rankings/<topicRankingId>/status
 ```
 
 快照详情：`GET /v1/snapshots/{id}`（bigint 已转字符串）。
+
+### 热榜聚合（按 slug）
+
+默认：该话题**最新 effectiveFrom** 的 `TopicVersion` + **最近完成的** `TopicRanking`（含快照）+ 该 ranking 下**最新 snapshotTime** 的快照。
+
+可选查询串：`version`、`timeWindow`、`windowStart`（若带 `windowStart` 必须同时带 `timeWindow`）。响应为 `{ resolved, snapshot }`，其中 `snapshot` 与快照详情 API 同形。
+
+```bash
+curl -s 'http://localhost:3000/v1/topics/global-female-singers/leaderboard'
+curl -s 'http://localhost:3000/v1/topics/global-female-singers/leaderboard?timeWindow=WEEK'
+```
 
 ### 爬虫 / Checkpoint（桩）
 

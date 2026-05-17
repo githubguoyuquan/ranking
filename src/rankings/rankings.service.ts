@@ -283,6 +283,109 @@ export class RankingsService {
     await this.rankingCache.setSnapshotJson(snapshotId, JSON.stringify(plain));
   }
 
+  /**
+   * 按 slug 解析「当前」榜单：默认取最新 effectiveFrom 的 TopicVersion、最近完成的 TopicRanking（含快照），
+   * 嵌套 `snapshot` 与 `GET /v1/snapshots/:id` 同源（再走快照 Redis）。
+   */
+  async getLeaderboardForApi(
+    slug: string,
+    query: { version?: string; timeWindow?: TimeWindow; windowStart?: string },
+  ): Promise<unknown | null> {
+    if (query.windowStart !== undefined && query.timeWindow === undefined) {
+      throw new BadRequestException('timeWindow is required when windowStart is set');
+    }
+
+    const qKey = {
+      version: query.version,
+      timeWindow: query.timeWindow,
+      windowStart: query.windowStart,
+    };
+    const cacheKey = this.rankingCache.leaderboardKey(slug, qKey);
+    const cached = await this.rankingCache.getLeaderboardJson(cacheKey);
+    if (cached) {
+      try {
+        return JSON.parse(cached) as unknown;
+      } catch {
+        /* 损坏则重算 */
+      }
+    }
+
+    const topic = await this.prisma.topic.findUnique({ where: { slug } });
+    if (!topic) return null;
+
+    const topicVersion = query.version
+      ? await this.prisma.topicVersion.findUnique({
+          where: { topicId_version: { topicId: topic.id, version: query.version } },
+        })
+      : await this.prisma.topicVersion.findFirst({
+          where: { topicId: topic.id },
+          orderBy: { effectiveFrom: 'desc' },
+        });
+    if (!topicVersion) return null;
+
+    let topicRanking: TopicRanking | null = null;
+
+    if (query.timeWindow !== undefined && query.windowStart !== undefined) {
+      topicRanking = await this.prisma.topicRanking.findFirst({
+        where: {
+          topicVersionId: topicVersion.id,
+          timeWindow: query.timeWindow,
+          windowStart: new Date(query.windowStart),
+          snapshots: { some: {} },
+        },
+      });
+    } else if (query.timeWindow !== undefined) {
+      topicRanking = await this.prisma.topicRanking.findFirst({
+        where: {
+          topicVersionId: topicVersion.id,
+          timeWindow: query.timeWindow,
+          status: 'completed',
+          snapshots: { some: {} },
+        },
+        orderBy: { windowStart: 'desc' },
+      });
+    } else {
+      topicRanking = await this.prisma.topicRanking.findFirst({
+        where: {
+          topicVersionId: topicVersion.id,
+          status: 'completed',
+          snapshots: { some: {} },
+        },
+        orderBy: { windowStart: 'desc' },
+      });
+    }
+
+    if (!topicRanking) return null;
+
+    const snapshot = await this.prisma.topicRankSnapshot.findFirst({
+      where: { topicRankingId: topicRanking.id },
+      orderBy: { snapshotTime: 'desc' },
+    });
+    if (!snapshot) return null;
+
+    const snapshotPayload = await this.getSnapshotForApi(snapshot.id);
+    if (!snapshotPayload) return null;
+
+    const body = {
+      resolved: {
+        topicSlug: topic.slug,
+        topicTitle: topic.title,
+        topicVersionId: topicVersion.id.toString(),
+        version: topicVersion.version,
+        timeWindow: topicRanking.timeWindow,
+        windowStart: topicRanking.windowStart.toISOString(),
+        windowEnd: topicRanking.windowEnd.toISOString(),
+        topicRankingId: topicRanking.id.toString(),
+        snapshotId: snapshot.id.toString(),
+        snapshotTime: snapshot.snapshotTime.toISOString(),
+      },
+      snapshot: snapshotPayload,
+    };
+
+    await this.rankingCache.setLeaderboardJson(cacheKey, JSON.stringify(body));
+    return body;
+  }
+
   async getTopicRankingStatus(topicRankingId: bigint) {
     return this.prisma.topicRanking.findUnique({
       where: { id: topicRankingId },

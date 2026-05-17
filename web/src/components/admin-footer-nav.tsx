@@ -3,8 +3,9 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 
-import { cn } from "@/lib/utils";
+import { CopyAdminPageUrlButton } from "@/components/copy-admin-page-url-button";
 import { ADMIN_HREF } from "@/lib/admin-web-paths";
+import { cn } from "@/lib/utils";
 
 const linkCls = "text-primary underline-offset-4 hover:underline";
 
@@ -23,7 +24,7 @@ export function AdminFooterNav({
     <nav
       aria-label="管理台页脚导航"
       className={cn(
-        "flex flex-wrap gap-x-4 gap-y-1 text-sm",
+        "flex flex-wrap items-center gap-x-4 gap-y-1 text-sm",
         justify === "center" && "justify-center",
         className,
       )}
@@ -56,6 +57,11 @@ export function AdminFooterNav({
       <Link href={ADMIN_HREF.seed} className={linkCls}>
         演示数据
       </Link>
+      <CopyAdminPageUrlButton
+        path={ADMIN_HREF.home}
+        idleLabel="复制概览"
+        className="h-6 px-2 text-xs"
+      />
       {showBackToHome ? (
         <Link href={ADMIN_HREF.home} className={linkCls}>
           ← 返回概览

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { robustMinMaxNormalize, timeWeight } from './scoring';
+import {
+  endStreakRankDeclining,
+  endStreakRankImproving,
+  robustMinMaxNormalize,
+  timeWeight,
+} from './scoring';
 
 describe('scoring', () => {
   it('timeWeight exponential decays', () => {
@@ -15,5 +20,14 @@ describe('scoring', () => {
     const out = robustMinMaxNormalize([10, 20, 30, 100, 5]);
     expect(Math.min(...out)).toBeGreaterThanOrEqual(0);
     expect(Math.max(...out)).toBeLessThanOrEqual(1);
+  });
+
+  it('endStreakRankImproving counts trailing rank improvements', () => {
+    expect(endStreakRankImproving([{ rank: 5 }, { rank: 3 }, { rank: 1 }])).toBe(2);
+    expect(endStreakRankImproving([{ rank: 1 }, { rank: 1 }])).toBe(0);
+  });
+
+  it('endStreakRankDeclining counts trailing rank drops', () => {
+    expect(endStreakRankDeclining([{ rank: 2 }, { rank: 5 }, { rank: 8 }])).toBe(2);
   });
 });

@@ -125,3 +125,25 @@ export function aiConfidence(coverage: number, variance: number, avgTier: number
   const trust = trustFromSourceTier(avgTier);
   return Math.max(0, Math.min(1, 0.5 * coverage + 0.3 * (1 - variance) + 0.2 * trust));
 }
+
+/** 从时间序列末端向前数：连续「名次数字变小（排名上升）」的步数 */
+export function endStreakRankImproving(historyAsc: Array<{ rank: number }>): number {
+  if (historyAsc.length < 2) return 0;
+  let s = 0;
+  for (let i = historyAsc.length - 1; i > 0; i--) {
+    if (historyAsc[i]!.rank < historyAsc[i - 1]!.rank) s++;
+    else break;
+  }
+  return s;
+}
+
+/** 从时间序列末端向前数：连续「名次数字变大（排名下降）」的步数 */
+export function endStreakRankDeclining(historyAsc: Array<{ rank: number }>): number {
+  if (historyAsc.length < 2) return 0;
+  let s = 0;
+  for (let i = historyAsc.length - 1; i > 0; i--) {
+    if (historyAsc[i]!.rank > historyAsc[i - 1]!.rank) s++;
+    else break;
+  }
+  return s;
+}

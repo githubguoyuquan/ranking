@@ -73,6 +73,16 @@ export async function fetchUrlForCrawlPlaywright(urlStr: string): Promise<FetchC
       textPreview = buildTextPreview('text/html', buf);
     }
 
+    let pageTitle: string | null = null;
+    try {
+      const t = (await page.title()).trim().replace(/\s+/g, ' ');
+      if (t) {
+        pageTitle = t.length <= 512 ? t : `${t.slice(0, 512)}…`;
+      }
+    } catch {
+      pageTitle = null;
+    }
+
     await ctx.close();
     return {
       ok: true,
@@ -81,6 +91,7 @@ export async function fetchUrlForCrawlPlaywright(urlStr: string): Promise<FetchC
       contentHash: sha256Hex(buf),
       mimeType: 'text/html',
       textPreview,
+      pageTitle,
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

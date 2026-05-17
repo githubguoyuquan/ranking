@@ -8,7 +8,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { Transform } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayMinSize,
@@ -16,8 +16,13 @@ import {
   IsBoolean,
   IsDateString,
   IsEnum,
+  IsInt,
   IsOptional,
   IsString,
+  Max,
+  MaxLength,
+  Min,
+  MinLength,
 } from 'class-validator';
 import { TimeWindow } from '@prisma/client';
 import { toPlainJson } from '../lib/json';
@@ -74,6 +79,24 @@ export class LeaderboardQueryDto {
   @IsOptional()
   @IsDateString()
   windowStart?: string;
+}
+
+export class EntityRankHistoryQueryDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(200)
+  topicSlug!: string;
+
+  @IsOptional()
+  @IsEnum(TimeWindow)
+  timeWindow?: TimeWindow;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(500)
+  limit?: number;
 }
 
 @Controller()
@@ -172,5 +195,33 @@ export class RankingsController {
   @Get('v1/topics/:slug/versions')
   async versions(@Param('slug') slug: string) {
     return toPlainJson(await this.rankings.listVersionsBySlug(slug));
+  }
+
+  /**
+   * 实体在话题下的排行时间演化（来自 `RankingItemHistory`）。
+   * 查询参数：`topicSlug`（必填）、`timeWindow`（可选）、`limit`（默认 100，最大 500；取最近若干快照点）。
+   */
+  @Get('v1/entities/:id/rank-history')
+  async entityRankHistory(
+    @Param('id') id: string,
+    @Query() query: EntityRankHistoryQueryDto,
+  ) {
+    let entityId: bigint;
+    try {
+      entityId = BigInt(id.trim());
+    } catch {
+      throw new BadRequestException('invalid entity id');
+    }
+    try {
+      return await this.rankings.getEntityRankHistory(
+        entityId,
+        query.topicSlug,
+        query.timeWindow,
+        query.limit,
+      );
+    } catch (e) {
+      if (e instanceof NotFoundException) throw e;
+      throw e;
+    }
   }
 }

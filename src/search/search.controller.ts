@@ -241,6 +241,7 @@ export class SearchController {
             OR: [
               { url: { contains: needle, mode: 'insensitive' } },
               { textPreview: { contains: needle, mode: 'insensitive' } },
+              { pageTitle: { contains: needle, mode: 'insensitive' } },
             ],
           },
           ...(sourceId !== undefined ? [{ sourceId }] : []),
@@ -517,6 +518,7 @@ export class SearchController {
             OR: [
               { url: { contains: q, mode: 'insensitive' } },
               { textPreview: { contains: q, mode: 'insensitive' } },
+              { pageTitle: { contains: q, mode: 'insensitive' } },
             ],
           },
           ...(sourceId !== undefined ? [{ sourceId }] : []),

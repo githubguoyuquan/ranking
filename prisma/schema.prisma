@@ -285,6 +285,8 @@ model CrawledUrl {
   mimeType       String?  @db.VarChar(255)
   /// 文本类响应的规范化摘录（供检索/摘要；非文本则为 null）
   textPreview    String?  @db.Text
+  /// HTML `<title>` 或无头浏览器 `document.title`（≤512；供列表与检索）
+  pageTitle      String?  @db.VarChar(512)
   status         String
   fetchedAt      DateTime?
 

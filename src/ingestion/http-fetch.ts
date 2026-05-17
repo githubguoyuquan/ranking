@@ -61,6 +61,7 @@ export type FetchCrawlResult =
       contentHash: string;
       mimeType: string | null;
       textPreview: string | null;
+      pageTitle: string | null;
     }
   | {
       ok: false;
@@ -72,6 +73,45 @@ export type FetchCrawlResult =
 const UA =
   process.env.CRAWL_USER_AGENT ??
   'RankingPlatformCrawler/0.1 (+https://github.com/example/ranking; research)';
+
+const PAGE_TITLE_MAX_CHARS = 512;
+
+/** 从 HTML/XML 缓冲提取 `<title>` 纯文本（截断至 `PAGE_TITLE_MAX_CHARS`） */
+export function extractPageTitle(mimeType: string | null, buf: Buffer): string | null {
+  if (buf.length === 0) return null;
+  const m = (mimeType ?? '').toLowerCase();
+  if (m.includes('json') || m.startsWith('image/') || m.startsWith('video/')) return null;
+  const maybeMarkup =
+    m.includes('html') || m.includes('xml') || m === 'application/xhtml+xml';
+  if (!maybeMarkup && !m.startsWith('text/')) return null;
+
+  const cap = Math.min(buf.length, 500_000);
+  const sample = buf.toString('utf8', 0, cap);
+  const match = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(sample);
+  if (!match) return null;
+  let t = match[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  t = decodeBasicHtmlEntities(t);
+  if (!t) return null;
+  return t.length <= PAGE_TITLE_MAX_CHARS ? t : `${t.slice(0, PAGE_TITLE_MAX_CHARS)}…`;
+}
+
+function decodeBasicHtmlEntities(s: string): string {
+  return s
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&#(\d+);/g, (_, n) => {
+      const c = Number(n);
+      return Number.isFinite(c) && c >= 32 && c < 0x110000 ? String.fromCodePoint(c) : _;
+    })
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => {
+      const c = parseInt(h, 16);
+      return Number.isFinite(c) && c >= 32 && c < 0x110000 ? String.fromCodePoint(c) : _;
+    });
+}
 
 export async function fetchUrlForCrawl(urlStr: string): Promise<FetchCrawlResult> {
   const viol = crawlUrlViolation(urlStr);
@@ -115,6 +155,7 @@ export async function fetchUrlForCrawl(urlStr: string): Promise<FetchCrawlResult
         contentHash: sha256Hex(Buffer.alloc(0)),
         mimeType,
         textPreview: null,
+        pageTitle: null,
       };
     }
 
@@ -139,6 +180,7 @@ export async function fetchUrlForCrawl(urlStr: string): Promise<FetchCrawlResult
 
     const combined = Buffer.concat(buf);
     const textPreview = buildTextPreview(mimeType, combined);
+    const pageTitle = extractPageTitle(mimeType, combined);
     return {
       ok: true,
       statusCode: res.status,
@@ -146,6 +188,7 @@ export async function fetchUrlForCrawl(urlStr: string): Promise<FetchCrawlResult
       contentHash: sha256Hex(combined),
       mimeType,
       textPreview,
+      pageTitle,
     };
   } catch (e) {
     const msg =

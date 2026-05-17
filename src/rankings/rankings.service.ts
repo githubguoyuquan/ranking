@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, Optional } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import {
@@ -14,6 +14,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import {
   aiConfidence,
   classifyTrend,
+  endStreakRankDeclining,
+  endStreakRankImproving,
   leastSquaresSlope,
   robustMinMaxNormalize,
   scoreEntity,
@@ -962,6 +964,29 @@ export class RankingsService {
         })),
       });
 
+      const itemsForTrend = await tx.rankingItem.findMany({
+        where: { snapshotId: snap.id },
+        include: { entity: { select: { canonicalName: true } } },
+        orderBy: { rank: 'asc' },
+      });
+      await tx.trendAnalysis.create({
+        data: {
+          topicId: topicVersion.topicId,
+          entityId: null,
+          window: args.timeWindow,
+          payload: this.buildSnapshotTrendAnalysisPayload({
+            snapshotId: snap.id,
+            topicRankingId,
+            topicVersionId: topicVersion.id,
+            snapshotTime,
+            timeWindow: args.timeWindow,
+            snapshotVersion,
+            items: itemsForTrend,
+            confidenceAvg: confAvg,
+          }),
+        },
+      });
+
       await tx.topicRanking.update({
         where: { id: topicRankingId },
         data: {
@@ -1010,6 +1035,149 @@ export class RankingsService {
         where: { id: snap.id },
         include: { items: { include: { entity: true }, orderBy: { rank: 'asc' } } },
       });
+    });
+  }
+
+  private buildSnapshotTrendAnalysisPayload(args: {
+    snapshotId: bigint;
+    topicRankingId: bigint;
+    topicVersionId: bigint;
+    snapshotTime: Date;
+    timeWindow: TimeWindow;
+    snapshotVersion: string;
+    confidenceAvg: number;
+    items: Array<{
+      entityId: bigint;
+      rank: number;
+      previousRank: number | null;
+      rankChange: number | null;
+      trendType: TrendType;
+      confidenceScore: number;
+      popularityScore: number;
+      entity: { canonicalName: string };
+    }>;
+  }): Prisma.InputJsonValue {
+    const trendTypeCounts: Record<string, number> = {};
+    for (const it of args.items) {
+      const k = it.trendType;
+      trendTypeCounts[k] = (trendTypeCounts[k] ?? 0) + 1;
+    }
+    const movers = args.items.filter(
+      (i) => i.rankChange != null && i.previousRank != null,
+    );
+    const topRankGainers = [...movers]
+      .filter((i) => (i.rankChange ?? 0) > 0)
+      .sort((a, b) => (b.rankChange ?? 0) - (a.rankChange ?? 0))
+      .slice(0, 10)
+      .map((i) => ({
+        entityId: i.entityId.toString(),
+        canonicalName: i.entity.canonicalName,
+        previousRank: i.previousRank,
+        rank: i.rank,
+        rankChange: i.rankChange,
+      }));
+    const topRankLosers = [...movers]
+      .filter((i) => (i.rankChange ?? 0) < 0)
+      .sort((a, b) => (a.rankChange ?? 0) - (b.rankChange ?? 0))
+      .slice(0, 10)
+      .map((i) => ({
+        entityId: i.entityId.toString(),
+        canonicalName: i.entity.canonicalName,
+        previousRank: i.previousRank,
+        rank: i.rank,
+        rankChange: i.rankChange,
+      }));
+    return {
+      schemaVersion: 1,
+      kind: 'snapshot_summary',
+      snapshotId: args.snapshotId.toString(),
+      topicRankingId: args.topicRankingId.toString(),
+      topicVersionId: args.topicVersionId.toString(),
+      snapshotTime: args.snapshotTime.toISOString(),
+      timeWindow: args.timeWindow,
+      snapshotVersion: args.snapshotVersion,
+      itemCount: args.items.length,
+      avgConfidence: args.confidenceAvg,
+      trendTypeCounts,
+      topRankGainers,
+      topRankLosers,
+    };
+  }
+
+  /**
+   * 某实体在话题下的排行时间序列（`RankingItemHistory`），含历史最好/最差名次与末端连续升降步数。
+   */
+  async getEntityRankHistory(
+    entityId: bigint,
+    topicSlug: string,
+    timeWindow?: TimeWindow,
+    limit = 100,
+  ) {
+    const slug = topicSlug.trim();
+    const topic = await this.prisma.topic.findUnique({ where: { slug } });
+    if (!topic) throw new NotFoundException('topic not found');
+    const entity = await this.prisma.entity.findUnique({
+      where: { id: entityId },
+      select: { id: true, canonicalName: true, type: true },
+    });
+    if (!entity) throw new NotFoundException('entity not found');
+
+    const take = Math.min(Math.max(limit, 1), 500);
+    const rowsDesc = await this.prisma.rankingItemHistory.findMany({
+      where: {
+        entityId,
+        topicId: topic.id,
+        ...(timeWindow ? { timeWindow } : {}),
+      },
+      orderBy: { asOf: 'desc' },
+      take,
+      select: {
+        asOf: true,
+        rank: true,
+        score: true,
+        timeWindow: true,
+        snapshotId: true,
+      },
+    });
+    const points = rowsDesc.slice().reverse();
+
+    let summary:
+      | {
+          bestRank: number;
+          worstRank: number;
+          endStreakRankImproving: number;
+          endStreakRankDeclining: number;
+          pointCount: number;
+        }
+      | null = null;
+
+    if (points.length > 0) {
+      const ranks = points.map((p) => p.rank);
+      summary = {
+        bestRank: Math.min(...ranks),
+        worstRank: Math.max(...ranks),
+        endStreakRankImproving: endStreakRankImproving(points),
+        endStreakRankDeclining: endStreakRankDeclining(points),
+        pointCount: points.length,
+      };
+    }
+
+    return toPlainJson({
+      entity: {
+        id: entity.id.toString(),
+        canonicalName: entity.canonicalName,
+        type: entity.type,
+      },
+      topic: { id: topic.id.toString(), slug: topic.slug },
+      filter: { timeWindow: timeWindow ?? null, limit: take },
+      points: points.map((p) => ({
+        asOf: p.asOf.toISOString(),
+        rank: p.rank,
+        score: p.score,
+        timeWindow: p.timeWindow,
+        snapshotId: p.snapshotId.toString(),
+      })),
+      summary,
     });
   }
 

@@ -79,6 +79,7 @@ type EsCrawledHit = {
   sourceId: string;
   mimeType: string | null;
   status: string;
+  pageTitle?: string | null;
   snippet: string;
   highlights?: Record<string, string[]>;
 };
@@ -89,6 +90,7 @@ type PgCrawledRow = {
   url: string;
   mimeType: string | null;
   textPreview: string | null;
+  pageTitle?: string | null;
   status: string;
   source?: {
     id: string | number | bigint;
@@ -736,6 +738,18 @@ function SearchPageInner() {
                                   className="h-6 shrink-0"
                                 />
                               </div>
+                              {row.pageTitle ? (
+                                <p className="mt-1 text-xs font-medium text-foreground/90">
+                                  {row.highlights?.pageTitle?.[0] ? (
+                                    <HighlightedHtml
+                                      className="[&_em]:rounded-md [&_em]:bg-amber-500/20 [&_em]:px-0.5 [&_em]:not-italic"
+                                      html={row.highlights.pageTitle[0]}
+                                    />
+                                  ) : (
+                                    row.pageTitle
+                                  )}
+                                </p>
+                              ) : null}
                               <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
                                 <span>
                                   source #{row.sourceId} · {row.status} ·{" "}
@@ -797,6 +811,11 @@ function SearchPageInner() {
                                   className="h-6 shrink-0"
                                 />
                               </div>
+                              {row.pageTitle ? (
+                                <p className="mt-1 text-xs font-medium text-foreground/90">
+                                  {row.pageTitle}
+                                </p>
+                              ) : null}
                               <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
                                 <span>
                                   #{id} · source {String(row.sourceId)} ·{" "}

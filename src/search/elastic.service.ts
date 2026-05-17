@@ -40,6 +40,7 @@ type CrawledUrlEsSource = {
   url: string;
   mimeType: string | null;
   textPreview: string | null;
+  pageTitle: string | null;
   status: string;
   fetchedAt: string | null;
 };
@@ -60,6 +61,7 @@ export type CrawledUrlSearchHit = {
   sourceId: string;
   mimeType: string | null;
   status: string;
+  pageTitle: string | null;
   snippet: string;
   highlights?: Record<string, string[]>;
 };
@@ -67,7 +69,14 @@ export type CrawledUrlSearchHit = {
 function crawledUrlToEsDoc(
   r: Pick<
     CrawledUrl,
-    'id' | 'sourceId' | 'url' | 'mimeType' | 'textPreview' | 'status' | 'fetchedAt'
+    | 'id'
+    | 'sourceId'
+    | 'url'
+    | 'mimeType'
+    | 'textPreview'
+    | 'pageTitle'
+    | 'status'
+    | 'fetchedAt'
   >,
 ): CrawledUrlEsSource {
   return {
@@ -76,6 +85,7 @@ function crawledUrlToEsDoc(
     url: r.url,
     mimeType: r.mimeType,
     textPreview: r.textPreview,
+    pageTitle: r.pageTitle,
     status: r.status,
     fetchedAt: r.fetchedAt ? r.fetchedAt.toISOString() : null,
   };
@@ -163,6 +173,7 @@ export class ElasticService implements OnModuleDestroy {
             },
             mimeType: { type: 'keyword' },
             textPreview: { type: 'text', analyzer: 'standard' },
+            pageTitle: { type: 'text', analyzer: 'standard' },
             status: { type: 'keyword' },
             fetchedAt: { type: 'date' },
           },
@@ -404,7 +415,7 @@ export class ElasticService implements OnModuleDestroy {
               {
                 multi_match: {
                   query: q,
-                  fields: ['url^2', 'textPreview'],
+                  fields: ['url^2', 'pageTitle^1.5', 'textPreview'],
                   type: 'best_fields',
                   fuzziness: 'AUTO',
                 },
@@ -414,10 +425,19 @@ export class ElasticService implements OnModuleDestroy {
           },
         },
         size,
-        _source: ['crawledUrlId', 'url', 'sourceId', 'mimeType', 'status', 'textPreview'],
+        _source: [
+          'crawledUrlId',
+          'url',
+          'sourceId',
+          'mimeType',
+          'status',
+          'textPreview',
+          'pageTitle',
+        ],
         highlight: {
           fields: {
             url: { number_of_fragments: 1, fragment_size: 180 },
+            pageTitle: { number_of_fragments: 0 },
             textPreview: { number_of_fragments: 2, fragment_size: 220 },
           },
           pre_tags: ['<em>'],
@@ -441,6 +461,7 @@ export class ElasticService implements OnModuleDestroy {
             mimeType?: string | null;
             status?: string;
             textPreview?: string | null;
+            pageTitle?: string | null;
           }
         | undefined;
       const preview = src?.textPreview ?? '';
@@ -453,6 +474,7 @@ export class ElasticService implements OnModuleDestroy {
           : undefined;
       const snippetRaw =
         rawHl?.textPreview?.[0] ??
+        rawHl?.pageTitle?.[0] ??
         rawHl?.url?.[0] ??
         (preview.length > 280 ? `${preview.slice(0, 280)}…` : preview);
       out.push({
@@ -462,6 +484,7 @@ export class ElasticService implements OnModuleDestroy {
         sourceId: src?.sourceId ?? '',
         mimeType: src?.mimeType ?? null,
         status: src?.status ?? '',
+        pageTitle: src?.pageTitle ?? null,
         snippet: snippetRaw,
         ...(highlights && Object.keys(highlights).length > 0 ? { highlights } : {}),
       });

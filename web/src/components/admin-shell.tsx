@@ -2,7 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { Suspense } from "react";
 
+import { AdminCopyCurrentPageButton } from "@/components/admin-copy-current-page-button";
+import { CopyTextButton } from "@/components/copy-snapshot-id-button";
+import { useAdminAppUrl } from "@/hooks/use-admin-app-url";
 import { cn } from "@/lib/utils";
 import { getApiBase } from "@/lib/api";
 import { ADMIN_HREF, ADMIN_SNAPSHOTS_ROUTE_PREFIX } from "@/lib/admin-web-paths";
@@ -22,6 +26,8 @@ const links = [
 
 export function AdminShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const apiBase = getApiBase();
+  const { origin } = useAdminAppUrl();
 
   return (
     <div className="flex min-h-screen">
@@ -58,15 +64,42 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             );
           })}
         </nav>
-        <p className="mt-8 text-xs leading-relaxed text-muted-foreground">
-          API{" "}
-          <code className="rounded bg-muted px-1 py-0.5 text-[10px]">
-            {getApiBase()}
-          </code>
-          <br />
-          前端默认端口{" "}
-          <code className="rounded bg-muted px-1 py-0.5 text-[10px]">3001</code>
-        </p>
+        <div className="mt-3 border-t border-border pt-3">
+          <Suspense fallback={null}>
+            <AdminCopyCurrentPageButton className="h-7 w-full justify-center text-xs" />
+          </Suspense>
+        </div>
+        <div className="mt-8 space-y-2 text-xs leading-relaxed text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+            <span>API</span>
+            <code className="rounded bg-muted px-1 py-0.5 text-[10px]">
+              {apiBase}
+            </code>
+            <CopyTextButton
+              text={apiBase}
+              idleLabel="复制 API"
+              className="h-5 px-1.5 text-[10px]"
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+            <span>站点</span>
+            <code
+              className="max-w-[9.5rem] truncate rounded bg-muted px-1 py-0.5 text-[10px]"
+              title={origin || undefined}
+            >
+              {origin || "…"}
+            </code>
+            <CopyTextButton
+              text={origin}
+              idleLabel="复制站点"
+              className="h-5 px-1.5 text-[10px]"
+            />
+          </div>
+          <p>
+            前端默认端口{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-[10px]">3001</code>
+          </p>
+        </div>
       </aside>
       <main
         id="admin-main"

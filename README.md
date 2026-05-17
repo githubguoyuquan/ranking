@@ -1,5 +1,7 @@
 # Ranking platform
 
+完整产品愿景、与当前实现的**差距对照**、目标架构（DDD/消息/规模演进）见 **[docs/PLATFORM_ARCHITECTURE.md](docs/PLATFORM_ARCHITECTURE.md)**。
+
 ## Priority & phased delivery
 
 1. **P0 — Facts & evolution**  
@@ -148,6 +150,16 @@ curl -s -X POST http://localhost:3000/v1/snapshots/compare \
   -d '{"snapshotIds":["1","2"]}'
 ```
 
+### 实体排行时间演化（历史快照点）
+
+每次成功物化快照会写入 **`RankingItemHistory`**，并在 **`TrendAnalysis`** 表插入一条快照级摘要（`entityId` 为空，`payload.kind=snapshot_summary`，含 `trendTypeCounts`、`topRankGainers` / `topRankLosers` 等）。查询某实体在话题下的名次时间序列：
+
+```bash
+curl -s 'http://localhost:3000/v1/entities/1/rank-history?topicSlug=global-female-singers&timeWindow=WEEK&limit=50'
+```
+
+`timeWindow` 可选；`limit` 默认 100、最大 500（按时间倒序取最近若干点，响应内 `points` 已按时间升序）。`summary` 含该窗口内**历史最好/最差名次**，以及**末端连续上升 / 连续下降步数**（`endStreakRankImproving` / `endStreakRankDeclining`）。
+
 ### 热榜聚合（按 slug）
 
 默认：该话题**最新 effectiveFrom** 的 `TopicVersion` + **最近完成的** `TopicRanking`（含快照）+ 该 ranking 下**最新 snapshotTime** 的快照。
@@ -189,7 +201,7 @@ curl -s -X POST http://localhost:3000/admin/reindex-crawl-docs -H 'Content-Type:
 
 - **默认**：`seedUrls` 仅写入 `CrawledUrl`，`status=fetched_stub`（无网络）。  
 - **真 HTTP**：`.env` 设 `CRAWL_HTTP_FETCH=true`，或创建数据源时 `"kind":"http-fetch"`；任务对每条 URL 执行 GET，计算 body **SHA256** 写入 `contentHash`，`status=fetched`；失败为 `fetch_failed`，被 SSRF 规则拦截为 `fetch_blocked`。可选：`CRAWL_FETCH_TIMEOUT_MS`、`CRAWL_MAX_RESPONSE_BYTES`、`CRAWL_USER_AGENT`。  
-- 成功行写入 `mimeType`、去标签后的 **`textPreview`**（仅文本类 MIME；长度见 `CRAWL_TEXT_PREVIEW_CHARS`），便于检索与后续接 ES。  
+- 成功行写入 `mimeType`、**`pageTitle`**（HTML `<title>` 或 Playwright `document.title`，最长 512）、去标签后的 **`textPreview`**（仅文本类 MIME；长度见 `CRAWL_TEXT_PREVIEW_CHARS`），便于列表展示与检索（PG/ES 均支持按标题子串命中）。  
 - `GET /v1/crawl/sources?limit=50` 列出 `Source`（id 降序，默认至多 50 条，最大 100）。  
 - `GET /v1/crawl/sources/:sourceId/urls?limit=50` 查看最新 `CrawledUrl` 行（含摘要）。
 

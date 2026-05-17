@@ -128,6 +128,7 @@ export class IngestionService {
         contentHash: contentHash ?? null,
         mimeType: null,
         textPreview: null,
+        pageTitle: null,
         status: 'registered',
         fetchedAt: null,
       },
@@ -217,12 +218,14 @@ export class IngestionService {
                 fetchedAt: now,
                 mimeType: null,
                 textPreview: null,
+                pageTitle: null,
               },
               update: {
                 status: 'fetched_stub',
                 fetchedAt: now,
                 mimeType: null,
                 textPreview: null,
+                pageTitle: null,
               },
             });
             await this.enqueueCrawledUrlEsOutbox(tx, row);
@@ -245,6 +248,7 @@ export class IngestionService {
                 fetchedAt: now,
                 mimeType: null,
                 textPreview: null,
+                pageTitle: null,
               },
               update: {
                 status: 'fetch_blocked',
@@ -252,6 +256,7 @@ export class IngestionService {
                 fetchedAt: now,
                 mimeType: null,
                 textPreview: null,
+                pageTitle: null,
               },
             });
             await this.enqueueCrawledUrlEsOutbox(tx, row);
@@ -274,6 +279,7 @@ export class IngestionService {
                 contentHash: fetched.contentHash,
                 mimeType: fetched.mimeType,
                 textPreview: fetched.textPreview,
+                pageTitle: fetched.pageTitle,
                 fetchedAt: now,
               },
               update: {
@@ -281,6 +287,7 @@ export class IngestionService {
                 contentHash: fetched.contentHash,
                 mimeType: fetched.mimeType,
                 textPreview: fetched.textPreview,
+                pageTitle: fetched.pageTitle,
                 fetchedAt: now,
               },
             });
@@ -300,6 +307,7 @@ export class IngestionService {
                 fetchedAt: now,
                 mimeType: null,
                 textPreview: null,
+                pageTitle: null,
               },
               update: {
                 status: 'fetch_failed',
@@ -307,6 +315,7 @@ export class IngestionService {
                 fetchedAt: now,
                 mimeType: null,
                 textPreview: null,
+                pageTitle: null,
               },
             });
             await this.enqueueCrawledUrlEsOutbox(tx, row);

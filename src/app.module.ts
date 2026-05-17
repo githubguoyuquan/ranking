@@ -1,12 +1,13 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { bullMqConnectionFromEnv } from './config/redis';
-import { HealthController } from './health.controller';
 import { AnalyticsModule } from './analytics/analytics.module';
+import { HealthController } from './health.controller';
 import { IngestionModule } from './ingestion/ingestion.module';
 import { OutboxModule } from './outbox/outbox.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RankingsModule } from './rankings/rankings.module';
+import { SearchModule } from './search/search.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { RankingsModule } from './rankings/rankings.module';
     OutboxModule,
     IngestionModule,
     RankingsModule,
+    SearchModule,
   ],
   controllers: [HealthController],
 })

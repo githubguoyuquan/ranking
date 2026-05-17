@@ -16,7 +16,7 @@
 3. **P2 — Analytics & search**  
    - ✅ **ClickHouse**：compose、`metric_timeseries`、`AnalyticsModule`；`SYNC_RANKING_TO_CLICKHOUSE` + `CLICKHOUSE_URL` 时 `CLICKHOUSE_WRITE_MODE=direct`（默认）快照后直写，`outbox` 则同事务插入专用 Outbox 行并由 `ClickhouseOutboxFlusherService` 刷入；Outbox 按 `type` 分流，Kafka 仅发布 `ranking.snapshot.completed`  
    - ✅ **Redis 热读缓存**：`GET /v1/snapshots/:id` 长 TTL；`GET /v1/topics/:slug/leaderboard` 独立短 TTL 聚合缓存；无 Redis 或失败时降级查库  
-   - ⏳ Elasticsearch
+   - ✅ **Elasticsearch（骨架）**：compose 单节点、`SearchModule`、`ranking_entities` 索引；`GET /v1/search/entities`；`POST /admin/reindex-entities` 从 PG 全量灌实体（名 + 别名）；未配置 `ELASTICSEARCH_NODE` 时探活仍可用、搜索接口会 503
 
 4. **P3 — Agents & UI**  
    - ✅ **管理前端**：`web/` — Next.js App Router、Tailwind v4、shadcn/ui（Radix）、**深色主题**、**ECharts** 柱状图、对接现有 REST API  
@@ -28,7 +28,7 @@
 |--------|------|------|
 | **1** | Redis 读路径 | ✅ 已做：快照详情缓存 + **slug 热榜聚合** `GET /v1/topics/:slug/leaderboard`。 |
 | **2** | ClickHouse / Outbox | ✅ 已做：OLAP 与异步刷数。 |
-| **3** | Elasticsearch | 实体/内容全文与复杂过滤；需同步管道与运维，放在 ES 之前完成「事实源 + 缓存」更划算。 |
+| **3** | Elasticsearch | ✅ 骨架：`SearchModule`、实体索引与搜索；⏳ 增量同步、多字段/高亮、与爬虫正文联合检索。 |
 | **4** | 真爬取（Playwright 等） | 替换桩；与数据源 SLA、反爬相关，随产品化渐进。 |
 
 ## Web 管理端 (`web/`)
@@ -44,7 +44,7 @@ npm run dev   # 默认 http://localhost:3001
 
 ## Prereqs
 
-- Docker：Postgres、Redis（**BullMQ + 快照读缓存**）、**Redpanda**（Kafka 协议）、可选 **ClickHouse**
+- Docker：Postgres、Redis（**BullMQ + 快照读缓存**）、**Redpanda**（Kafka 协议）、可选 **ClickHouse**、可选 **Elasticsearch**（`9200`）
 
 ### 快照读缓存（Redis）
 
@@ -60,6 +60,13 @@ npm run dev   # 默认 http://localhost:3001
 - `.env`：`CLICKHOUSE_URL=http://localhost:8123`（可选 `CLICKHOUSE_DATABASE=ranking`）；`SYNC_RANKING_TO_CLICKHOUSE=true` 打开排行快照 → OLAP。  
 - `CLICKHOUSE_WRITE_MODE`：`direct`（默认）事务成功后立即写 CH；`outbox` 时在**同一 PG 事务**再插一条 Outbox（类型 `clickhouse.ranking.snapshot.ingest`），由 `ClickhouseOutboxFlusherService` 轮询写入，避免阻塞 API/Worker 主路径。  
 - `GET /v1/analytics/clickhouse/health` 探活；`POST /v1/analytics/clickhouse/metrics` 可灌测试点（见 body 校验）。
+
+### Elasticsearch（可选）
+
+- 启动：`docker compose up -d elasticsearch`（首次拉镜像较慢；单节点 dev，**无安全认证**，勿暴露公网）。  
+- `.env`：`ELASTICSEARCH_NODE=http://localhost:9200`；可选 `ELASTICSEARCH_INDEX_ENTITIES=ranking_entities`。  
+- 流程：写入 PG 实体后执行 `POST /admin/reindex-entities` 建索引并 bulk；再 `GET /v1/search/entities?q=Taylor&limit=10`。  
+- `GET /v1/search/health`：集群探活；未配置 `ELASTICSEARCH_NODE` 时返回 `ok: false`。
 
 ### Kafka / Outbox
 
@@ -113,6 +120,16 @@ curl -s http://localhost:3000/v1/rankings/<topicRankingId>/status
 ```bash
 curl -s 'http://localhost:3000/v1/topics/global-female-singers/leaderboard'
 curl -s 'http://localhost:3000/v1/topics/global-female-singers/leaderboard?timeWindow=WEEK'
+```
+
+### 实体搜索（Elasticsearch）
+
+需 ES 运行且 `.env` 配置 `ELASTICSEARCH_NODE`。先 `seed-demo` 再灌索引：
+
+```bash
+curl -s http://localhost:3000/v1/search/health
+curl -s -X POST http://localhost:3000/admin/reindex-entities -H 'Content-Type: application/json' -d '{}'
+curl -s 'http://localhost:3000/v1/search/entities?q=Swift&limit=5'
 ```
 
 ### 爬虫 / Checkpoint（桩）

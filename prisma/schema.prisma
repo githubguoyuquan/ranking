@@ -248,8 +248,9 @@ model Source {
   kind      String
   trustTier Int     @default(3)
 
-  topic Topic?       @relation(fields: [topicId], references: [id])
-  urls  CrawledUrl[]
+  topic      Topic?       @relation(fields: [topicId], references: [id])
+  urls       CrawledUrl[]
+  crawlTasks CrawlTask[]
 }
 
 model CrawlTask {
@@ -259,6 +260,8 @@ model CrawlTask {
   cursor    String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  source Source @relation(fields: [sourceId], references: [id])
 }
 
 model CrawlCheckpoint {

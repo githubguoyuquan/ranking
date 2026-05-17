@@ -12,8 +12,7 @@
    - ✅ **Transactional Outbox**：快照提交事务内写入 `OutboxEvent`；`OutboxPublisherService` 定时发往 Kafka 兼容 broker（默认 topic `ranking.snapshot.completed`）。未配置 `KAFKA_BROKERS` 时仅积累 outbox 并打日志。  
    - ✅ 本地 **Redpanda**：`docker compose` 中 `redpanda`，宿主机端口 **19092**（`.env` 中 `KAFKA_BROKERS=localhost:19092`）  
    - ✅ 多实例 **Outbox**：`leasedUntil` 租约 + `FOR UPDATE SKIP LOCKED` 抢占，避免并行重复发布  
-   - ⏳ 爬虫 checkpoint（后续）
-
+   - ✅ **爬虫骨架**：`CrawlCheckpoint` REST；`Source` / `CrawlTask`；`CrawledUrl` 指纹去重；BullMQ 队列 `crawl` + 桩任务（`seedUrls` 写库，可换 Playwright）
 3. **P2 — Analytics & search**  
    ClickHouse、Elasticsearch、Redis 热榜缓存
 
@@ -78,3 +77,32 @@ curl -s http://localhost:3000/v1/rankings/<topicRankingId>/status
 ```
 
 快照详情：`GET /v1/snapshots/{id}`（bigint 已转字符串）。
+
+### 爬虫 / Checkpoint（桩）
+
+```bash
+# 数据源
+curl -s -X POST http://localhost:3000/v1/crawl/sources \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Demo Feed","baseUrl":"https://example.com","kind":"demo"}'
+
+# 同步任务：seedUrls 仅写库，不发起真实 HTTP
+curl -s -X POST http://localhost:3000/v1/crawl/tasks \
+  -H 'Content-Type: application/json' \
+  -d '{"sourceId":"1","seedUrls":["https://example.com/a","https://example.com/b"]}'
+
+# 异步任务（需 Redis）
+curl -s -X POST http://localhost:3000/v1/crawl/tasks \
+  -H 'Content-Type: application/json' \
+  -d '{"sourceId":"1","async":true,"seedUrls":["https://example.com/c"]}'
+
+curl -s http://localhost:3000/v1/crawl/tasks/1
+curl -s http://localhost:3000/v1/crawl/checkpoints/source:1
+
+# URL 幂等登记
+curl -s -X POST http://localhost:3000/v1/crawl/urls \
+  -H 'Content-Type: application/json' \
+  -d '{"sourceId":"1","url":"https://example.com/doc?utm_source=x"}'
+```
+
+`PUT /v1/crawl/checkpoints/:crawlerName` 可手写断点（body：`lastCursor`、`lastUrl`、`lastTopic`、`lastProcessed` ISO 字符串）。

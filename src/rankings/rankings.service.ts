@@ -26,7 +26,12 @@ import {
   type RankingJobPayload,
 } from './ranking-job';
 import { ClickhouseService } from '../analytics/clickhouse.service';
-import { OUTBOX_TYPE_RANKING_SNAPSHOT_COMPLETED } from '../outbox/outbox.constants';
+import { RankingCacheService } from '../cache/ranking-cache.service';
+import {
+  OUTBOX_TYPE_CLICKHOUSE_RANKING_SNAPSHOT,
+  OUTBOX_TYPE_RANKING_SNAPSHOT_COMPLETED,
+} from '../outbox/outbox.constants';
+import { toPlainJson } from '../lib/json';
 
 type PolicyJson = {
   entityIds?: string[];
@@ -74,6 +79,7 @@ export class RankingsService {
   constructor(
     private readonly prisma: PrismaService,
     @InjectQueue(RANKING_QUEUE) private readonly rankingQueue: Queue<RankingJobPayload>,
+    private readonly rankingCache: RankingCacheService,
     @Optional() private readonly clickhouse?: ClickhouseService,
   ) {}
 
@@ -236,14 +242,45 @@ export class RankingsService {
     });
   }
 
-  async getSnapshot(id: bigint) {
+  /**
+   * HTTP API 用：优先读 Redis（与 DB 相同的 toPlainJson 形状）；缓存未命中再查库并回填。
+   */
+  async getSnapshotForApi(id: bigint): Promise<unknown | null> {
+    const cached = await this.rankingCache.getSnapshotJson(id);
+    if (cached) {
+      try {
+        return JSON.parse(cached) as unknown;
+      } catch {
+        /* 损坏条目，改走 DB */
+      }
+    }
+    const snap = await this.loadSnapshotFull(id);
+    if (!snap) return null;
+    const plain = toPlainJson(snap);
+    await this.rankingCache.setSnapshotJson(id, JSON.stringify(plain));
+    return plain;
+  }
+
+  private snapshotInclude() {
+    return {
+      items: { include: { entity: true }, orderBy: { rank: 'asc' as const } },
+      topicRanking: { include: { topicVersion: { include: { topic: true } } } },
+    };
+  }
+
+  private async loadSnapshotFull(id: bigint) {
     return this.prisma.topicRankSnapshot.findUnique({
       where: { id },
-      include: {
-        items: { include: { entity: true }, orderBy: { rank: 'asc' } },
-        topicRanking: { include: { topicVersion: { include: { topic: true } } } },
-      },
+      include: this.snapshotInclude(),
     });
+  }
+
+  private async warmSnapshotCache(snapshotId: bigint) {
+    if (!this.rankingCache.isEnabled()) return;
+    const snap = await this.loadSnapshotFull(snapshotId);
+    if (!snap) return;
+    const plain = toPlainJson(snap);
+    await this.rankingCache.setSnapshotJson(snapshotId, JSON.stringify(plain));
   }
 
   async getTopicRankingStatus(topicRankingId: bigint) {
@@ -529,6 +566,7 @@ export class RankingsService {
           lastError: null,
         },
       });
+      await this.warmSnapshotCache(existing.id);
       return existing;
     }
 
@@ -679,6 +717,7 @@ export class RankingsService {
         snapshotTime,
         args.timeWindow,
       );
+      await this.warmSnapshotCache(result.id);
       return result;
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
@@ -699,6 +738,7 @@ export class RankingsService {
             lastError: null,
           },
         });
+        await this.warmSnapshotCache(conflict.id);
         return conflict;
       }
       throw e;
@@ -714,6 +754,8 @@ export class RankingsService {
     timeWindow: TimeWindow,
   ) {
     if (process.env.SYNC_RANKING_TO_CLICKHOUSE !== 'true') return;
+    const mode = (process.env.CLICKHOUSE_WRITE_MODE ?? 'direct').toLowerCase();
+    if (mode === 'outbox') return;
     if (!this.clickhouse?.isEnabled()) return;
     try {
       await this.clickhouse.ingestRankingSnapshot({
@@ -818,6 +860,22 @@ export class RankingsService {
           },
         },
       });
+
+      const chOutbox =
+        process.env.SYNC_RANKING_TO_CLICKHOUSE === 'true' &&
+        (process.env.CLICKHOUSE_WRITE_MODE ?? 'direct').toLowerCase() === 'outbox' &&
+        this.clickhouse?.isEnabled();
+      if (chOutbox) {
+        await tx.outboxEvent.create({
+          data: {
+            type: OUTBOX_TYPE_CLICKHOUSE_RANKING_SNAPSHOT,
+            payload: {
+              schemaVersion: 1,
+              snapshotId: snap.id.toString(),
+            },
+          },
+        });
+      }
 
       return tx.topicRankSnapshot.findUniqueOrThrow({
         where: { id: snap.id },

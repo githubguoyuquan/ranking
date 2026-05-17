@@ -1,24 +1,13 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { KafkaProducerService } from '../kafka/kafka-producer.service';
+import { claimOutboxBatchByType } from './outbox-claim';
 import {
   KAFKA_TOPIC_RANKING_SNAPSHOT_COMPLETED,
   OUTBOX_TYPE_RANKING_SNAPSHOT_COMPLETED,
 } from './outbox.constants';
 
 const FLUSH_BATCH = 80;
-
-type ClaimedOutbox = {
-  id: bigint;
-  type: string;
-  payload: Prisma.JsonValue;
-  createdAt: Date;
-  publishedAt: Date | null;
-  leasedUntil: Date | null;
-  attempts: number;
-  lastError: string | null;
-};
 
 @Injectable()
 export class OutboxPublisherService implements OnModuleInit, OnModuleDestroy {
@@ -50,28 +39,6 @@ export class OutboxPublisherService implements OnModuleInit, OnModuleDestroy {
     return Number.isFinite(n) && n >= 15 && n <= 3600 ? n : 120;
   }
 
-  /**
-   * PostgreSQL SKIP LOCKED：多实例并行时同一批事件不会被重复抢占。
-   */
-  private async claimBatch(): Promise<ClaimedOutbox[]> {
-    const lease = this.leaseSeconds();
-    return this.prisma.$queryRaw<ClaimedOutbox[]>`
-      WITH c AS (
-        SELECT id FROM "OutboxEvent"
-        WHERE "publishedAt" IS NULL
-          AND ("leasedUntil" IS NULL OR "leasedUntil" < NOW())
-        ORDER BY id ASC
-        LIMIT ${FLUSH_BATCH}
-        FOR UPDATE SKIP LOCKED
-      )
-      UPDATE "OutboxEvent" AS o
-      SET "leasedUntil" = NOW() + (${lease} * INTERVAL '1 second')
-      FROM c
-      WHERE o.id = c.id
-      RETURNING o.id, o.type, o.payload, o."createdAt", o."publishedAt", o."leasedUntil", o.attempts, o."lastError"
-    `;
-  }
-
   private async flushOutbox(): Promise<void> {
     if (!this.kafka.isConfigured()) {
       if (!this.warnedNoKafka) {
@@ -83,9 +50,13 @@ export class OutboxPublisherService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    let claimed: ClaimedOutbox[];
+    let claimed: Awaited<ReturnType<typeof claimOutboxBatchByType>>;
     try {
-      claimed = await this.claimBatch();
+      claimed = await claimOutboxBatchByType(this.prisma, {
+        type: OUTBOX_TYPE_RANKING_SNAPSHOT_COMPLETED,
+        limit: FLUSH_BATCH,
+        leaseSeconds: this.leaseSeconds(),
+      });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       this.logger.error(`Outbox claimBatch failed: ${msg}`);

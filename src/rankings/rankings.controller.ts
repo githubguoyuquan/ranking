@@ -114,9 +114,9 @@ export class RankingsController {
 
   @Get('v1/snapshots/:id')
   async snapshot(@Param('id') id: string) {
-    const snap = await this.rankings.getSnapshot(BigInt(id));
+    const snap = await this.rankings.getSnapshotForApi(BigInt(id));
     if (!snap) throw new NotFoundException();
-    return toPlainJson(snap);
+    return snap;
   }
 
   @Get('v1/topics/:slug/versions')

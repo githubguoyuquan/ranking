@@ -14,12 +14,22 @@
    - ✅ 多实例 **Outbox**：`leasedUntil` 租约 + `FOR UPDATE SKIP LOCKED` 抢占，避免并行重复发布  
    - ✅ **爬虫骨架**：`CrawlCheckpoint` REST；`Source` / `CrawlTask`；`CrawledUrl` 指纹去重；BullMQ 队列 `crawl` + 桩任务（`seedUrls` 写库，可换 Playwright）
 3. **P2 — Analytics & search**  
-   - ✅ **ClickHouse**：`docker compose` 服务、`ranking.metric_timeseries`、`AnalyticsModule`、`GET /v1/analytics/clickhouse/health`；`SYNC_RANKING_TO_CLICKHOUSE=true` 且配置 `CLICKHOUSE_URL` 时，快照事务成功后同步写入 `ranking.popularity_score` / `ranking.rank`  
-   - ⏳ Elasticsearch、Redis 热榜缓存
+   - ✅ **ClickHouse**：compose、`metric_timeseries`、`AnalyticsModule`；`SYNC_RANKING_TO_CLICKHOUSE` + `CLICKHOUSE_URL` 时 `CLICKHOUSE_WRITE_MODE=direct`（默认）快照后直写，`outbox` 则同事务插入专用 Outbox 行并由 `ClickhouseOutboxFlusherService` 刷入；Outbox 按 `type` 分流，Kafka 仅发布 `ranking.snapshot.completed`  
+   - ✅ **Redis 热读缓存**：`GET /v1/snapshots/:id` 与 DB 同结构的 JSON 缓存（长 TTL、生成后预热）；无 Redis 或失败时自动降级查库  
+   - ⏳ Elasticsearch、热榜聚合 API
 
 4. **P3 — Agents & UI**  
    - ✅ **管理前端**：`web/` — Next.js App Router、Tailwind v4、shadcn/ui（Radix）、**深色主题**、**ECharts** 柱状图、对接现有 REST API  
    - ⏳ Agent 工具链、更完整的运营模块
+
+## Priority （后续投入）
+
+| 优先级 | 方向 | 说明 |
+|--------|------|------|
+| **1** | Redis 读路径 | ✅ 已做：不可变快照适合缓存；减轻 PG、压低 P99。 |
+| **2** | ClickHouse / Outbox | ✅ 已做：OLAP 与异步刷数。 |
+| **3** | Elasticsearch | 实体/内容全文与复杂过滤；需同步管道与运维，放在 ES 之前完成「事实源 + 缓存」更划算。 |
+| **4** | 真爬取（Playwright 等） | 替换桩；与数据源 SLA、反爬相关，随产品化渐进。 |
 
 ## Web 管理端 (`web/`)
 
@@ -34,12 +44,20 @@ npm run dev   # 默认 http://localhost:3001
 
 ## Prereqs
 
-- Docker：Postgres、Redis、**Redpanda**（Kafka 协议）、可选 **ClickHouse**（`docker compose` 已配置，HTTP **8123**）
+- Docker：Postgres、Redis（**BullMQ + 快照读缓存**）、**Redpanda**（Kafka 协议）、可选 **ClickHouse**
+
+### 快照读缓存（Redis）
+
+- 默认开启；单机不想连 Redis 时可设 `RANKING_CACHE_ENABLED=false`（仅影响 `GET /v1/snapshots/:id`，其它接口仍可能用 Redis 跑异步任务）。  
+- `RANKING_CACHE_TTL_SECONDS`：默认 `604800`（7 天，与不可变快照一致）。  
+- `RANKING_CACHE_REDIS_DB`：默认 `0`；与 BullMQ 共用实例时键前缀为 `ranking:v1:snap:`，一般无需换 DB。  
+- 排行物化成功后会 `warm` 缓存，首次读多走内存。
 
 ### ClickHouse（可选）
 
 - 启动：`docker compose up -d clickhouse`；首次启动会执行 `clickhouse/docker-entrypoint-initdb.d/*.sql` 建库表。  
-- `.env`：`CLICKHOUSE_URL=http://localhost:8123`（可选 `CLICKHOUSE_DATABASE=ranking`）；`SYNC_RANKING_TO_CLICKHOUSE=true` 打开排行快照 → OLAP 同步。  
+- `.env`：`CLICKHOUSE_URL=http://localhost:8123`（可选 `CLICKHOUSE_DATABASE=ranking`）；`SYNC_RANKING_TO_CLICKHOUSE=true` 打开排行快照 → OLAP。  
+- `CLICKHOUSE_WRITE_MODE`：`direct`（默认）事务成功后立即写 CH；`outbox` 时在**同一 PG 事务**再插一条 Outbox（类型 `clickhouse.ranking.snapshot.ingest`），由 `ClickhouseOutboxFlusherService` 轮询写入，避免阻塞 API/Worker 主路径。  
 - `GET /v1/analytics/clickhouse/health` 探活；`POST /v1/analytics/clickhouse/metrics` 可灌测试点（见 body 校验）。
 
 ### Kafka / Outbox

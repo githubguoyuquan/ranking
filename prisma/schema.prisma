@@ -1,0 +1,309 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TopicKind {
+  OBJECTIVE
+  SEMI_OBJECTIVE
+  SUBJECTIVE_TREND
+}
+
+enum TimeWindow {
+  REALTIME
+  DAY
+  WEEK
+  MONTH
+  YEAR
+  CUSTOM
+}
+
+enum TrendType {
+  SURGE
+  STEADY_UP
+  FLAT
+  VOLATILE
+  STEADY_DOWN
+  DECLINE
+}
+
+/// 与下游消费者约定的事件类型（字符串，便于跨语言）
+model OutboxEvent {
+  id          BigInt    @id @default(autoincrement())
+  type        String
+  payload     Json
+  createdAt   DateTime  @default(now())
+  publishedAt DateTime?
+  attempts    Int       @default(0)
+  lastError   String?   @db.Text
+
+  @@index([publishedAt, id])
+  @@index([type])
+}
+
+model Topic {
+  id        BigInt   @id @default(autoincrement())
+  slug      String   @unique
+  title     String
+  kind      TopicKind
+  locale    String   @default("en")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  versions TopicVersion[]
+  sources  Source[]
+}
+
+model TopicVersion {
+  id            BigInt    @id @default(autoincrement())
+  topicId       BigInt
+  version       String
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  frozen        Boolean   @default(false)
+  policyJson    Json
+
+  topic    Topic           @relation(fields: [topicId], references: [id])
+  rankings TopicRanking[]
+
+  @@unique([topicId, version])
+  @@index([topicId, frozen])
+}
+
+model TopicRanking {
+  id             BigInt     @id @default(autoincrement())
+  topicVersionId BigInt
+  timeWindow     TimeWindow
+  windowStart    DateTime
+  windowEnd      DateTime
+  /// queued | running | completed | failed
+  status         String     @default("queued")
+  queuedAt       DateTime?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  lastError      String?    @db.Text
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @default(now()) @updatedAt
+
+  topicVersion TopicVersion       @relation(fields: [topicVersionId], references: [id])
+  snapshots    TopicRankSnapshot[]
+
+  @@unique([topicVersionId, timeWindow, windowStart])
+  @@index([topicVersionId, timeWindow, windowEnd])
+  @@index([status])
+}
+
+model TopicRankSnapshot {
+  id              BigInt   @id @default(autoincrement())
+  topicRankingId  BigInt
+  snapshotTime    DateTime
+  snapshotVersion String
+  rankingJson     Json
+  trendSummary    String?
+  generatedByAi   Boolean  @default(false)
+  confidenceScore Float
+  scoreModelId    BigInt?
+
+  topicRanking TopicRanking @relation(fields: [topicRankingId], references: [id])
+  scoreModel   ScoreModel?  @relation(fields: [scoreModelId], references: [id])
+  items        RankingItem[]
+  analyses     AiAnalysis[]
+
+  @@unique([topicRankingId, snapshotVersion])
+  @@unique([topicRankingId, snapshotTime])
+  @@index([snapshotTime])
+}
+
+model RankingItem {
+  id               BigInt    @id @default(autoincrement())
+  snapshotId       BigInt
+  entityId         BigInt
+  rank             Int
+  previousRank     Int?
+  /// Positive = moved up in rank (better position). previousRank - rank
+  rankChange       Int?
+  trendType        TrendType
+  trendScore       Float
+  popularityScore  Float
+  authorityScore   Float
+  controversyScore Float
+  confidenceScore  Float
+  scoreBreakdown   Json
+  timeWindow       TimeWindow
+  snapshotVersion  String
+  generatedAt      DateTime
+
+  snapshot TopicRankSnapshot @relation(fields: [snapshotId], references: [id])
+  entity   Entity            @relation(fields: [entityId], references: [id])
+
+  breakdowns ScoreBreakdown[]
+
+  @@unique([snapshotId, entityId])
+  @@index([entityId, generatedAt])
+  @@index([snapshotId, rank])
+}
+
+model RankingItemHistory {
+  id         BigInt     @id @default(autoincrement())
+  entityId   BigInt
+  topicId    BigInt
+  timeWindow TimeWindow
+  asOf       DateTime
+  rank       Int
+  score      Float
+  snapshotId BigInt
+
+  entity Entity @relation(fields: [entityId], references: [id])
+
+  @@index([topicId, entityId, timeWindow, asOf])
+}
+
+model Entity {
+  id            BigInt @id @default(autoincrement())
+  type          String
+  canonicalName String
+  aliases       Json?
+  createdAt     DateTime @default(now())
+
+  metrics       EntityMetric[]
+  relationsFrom EntityRelation[] @relation("EntityFrom")
+  relationsTo   EntityRelation[] @relation("EntityTo")
+  rankingItems  RankingItem[]
+  histories     RankingItemHistory[]
+}
+
+model EntityMetric {
+  id         BigInt   @id @default(autoincrement())
+  entityId   BigInt
+  metricKey  String
+  value      Float
+  unit       String?
+  sourceTier Int      @default(3)
+  observedAt DateTime
+
+  entity Entity @relation(fields: [entityId], references: [id])
+
+  @@index([entityId, metricKey, observedAt])
+}
+
+model MetricTimeSeriesRef {
+  id        BigInt @id @default(autoincrement())
+  entityId  BigInt
+  metricKey String
+  chTable   String
+  partition String?
+
+  @@unique([entityId, metricKey])
+}
+
+model TrendAnalysis {
+  id        BigInt   @id @default(autoincrement())
+  topicId   BigInt
+  entityId  BigInt?
+  window    TimeWindow
+  payload   Json
+  createdAt DateTime @default(now())
+
+  @@index([topicId, entityId, createdAt])
+}
+
+model ScoreModel {
+  id        BigInt   @id @default(autoincrement())
+  name      String
+  version   String
+  weights   Json
+  createdAt DateTime @default(now())
+
+  snapshots  TopicRankSnapshot[]
+  breakdowns ScoreBreakdown[]
+}
+
+model ScoreBreakdown {
+  id            BigInt @id @default(autoincrement())
+  modelId       BigInt
+  rankingItemId BigInt
+  component     String
+  value         Float
+  weight        Float
+  note          String?
+
+  model ScoreModel  @relation(fields: [modelId], references: [id])
+  item  RankingItem @relation(fields: [rankingItemId], references: [id])
+
+  @@index([rankingItemId])
+}
+
+model Source {
+  id        BigInt  @id @default(autoincrement())
+  topicId   BigInt?
+  name      String
+  baseUrl   String
+  kind      String
+  trustTier Int     @default(3)
+
+  topic Topic?       @relation(fields: [topicId], references: [id])
+  urls  CrawledUrl[]
+}
+
+model CrawlTask {
+  id        BigInt   @id @default(autoincrement())
+  sourceId  BigInt
+  status    String
+  cursor    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model CrawlCheckpoint {
+  id            BigInt    @id @default(autoincrement())
+  crawlerName   String    @unique
+  lastCursor    String?
+  lastUrl       String?
+  lastTopic     String?
+  lastProcessed DateTime?
+  meta          Json?
+}
+
+model CrawledUrl {
+  id             BigInt   @id @default(autoincrement())
+  sourceId       BigInt
+  url            String
+  urlFingerprint String   @unique
+  contentHash    String?
+  status         String
+  fetchedAt      DateTime?
+
+  source Source @relation(fields: [sourceId], references: [id])
+}
+
+model AiAnalysis {
+  id         BigInt   @id @default(autoincrement())
+  snapshotId BigInt
+  agent      String
+  summary    String
+  detailJson Json
+  confidence Float
+  createdAt  DateTime @default(now())
+
+  snapshot TopicRankSnapshot @relation(fields: [snapshotId], references: [id])
+
+  @@index([snapshotId, agent])
+}
+
+model EntityRelation {
+  id       BigInt @id @default(autoincrement())
+  fromId   BigInt
+  toId     BigInt
+  relation String
+  weight   Float?
+  evidence Json?
+
+  from Entity @relation("EntityFrom", fields: [fromId], references: [id])
+  to   Entity @relation("EntityTo", fields: [toId], references: [id])
+
+  @@index([fromId, relation])
+}

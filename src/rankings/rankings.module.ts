@@ -1,5 +1,6 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
+import { AnalyticsModule } from '../analytics/analytics.module';
 import { RANKING_QUEUE } from './ranking-job';
 import { RankingProcessor } from './ranking.processor';
 import { RankingsController } from './rankings.controller';
@@ -7,6 +8,7 @@ import { RankingsService } from './rankings.service';
 
 @Module({
   imports: [
+    AnalyticsModule,
     BullModule.registerQueue({
       name: RANKING_QUEUE,
     }),

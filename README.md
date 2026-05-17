@@ -14,7 +14,8 @@
    - ✅ 多实例 **Outbox**：`leasedUntil` 租约 + `FOR UPDATE SKIP LOCKED` 抢占，避免并行重复发布  
    - ✅ **爬虫骨架**：`CrawlCheckpoint` REST；`Source` / `CrawlTask`；`CrawledUrl` 指纹去重；BullMQ 队列 `crawl` + 桩任务（`seedUrls` 写库，可换 Playwright）
 3. **P2 — Analytics & search**  
-   ClickHouse、Elasticsearch、Redis 热榜缓存
+   - ✅ **ClickHouse**：`docker compose` 服务、`ranking.metric_timeseries`、`AnalyticsModule`、`GET /v1/analytics/clickhouse/health`；`SYNC_RANKING_TO_CLICKHOUSE=true` 且配置 `CLICKHOUSE_URL` 时，快照事务成功后同步写入 `ranking.popularity_score` / `ranking.rank`  
+   - ⏳ Elasticsearch、Redis 热榜缓存
 
 4. **P3 — Agents & UI**  
    - ✅ **管理前端**：`web/` — Next.js App Router、Tailwind v4、shadcn/ui（Radix）、**深色主题**、**ECharts** 柱状图、对接现有 REST API  
@@ -33,7 +34,13 @@ npm run dev   # 默认 http://localhost:3001
 
 ## Prereqs
 
-- Docker：Postgres、Redis、**Redpanda**（Kafka 协议，`docker compose` 已配置）
+- Docker：Postgres、Redis、**Redpanda**（Kafka 协议）、可选 **ClickHouse**（`docker compose` 已配置，HTTP **8123**）
+
+### ClickHouse（可选）
+
+- 启动：`docker compose up -d clickhouse`；首次启动会执行 `clickhouse/docker-entrypoint-initdb.d/*.sql` 建库表。  
+- `.env`：`CLICKHOUSE_URL=http://localhost:8123`（可选 `CLICKHOUSE_DATABASE=ranking`）；`SYNC_RANKING_TO_CLICKHOUSE=true` 打开排行快照 → OLAP 同步。  
+- `GET /v1/analytics/clickhouse/health` 探活；`POST /v1/analytics/clickhouse/metrics` 可灌测试点（见 body 校验）。
 
 ### Kafka / Outbox
 

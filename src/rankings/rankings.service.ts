@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import {
@@ -25,6 +25,7 @@ import {
   RANKING_QUEUE,
   type RankingJobPayload,
 } from './ranking-job';
+import { ClickhouseService } from '../analytics/clickhouse.service';
 import { OUTBOX_TYPE_RANKING_SNAPSHOT_COMPLETED } from '../outbox/outbox.constants';
 
 type PolicyJson = {
@@ -68,9 +69,12 @@ export type RunRankingArgs = {
 
 @Injectable()
 export class RankingsService {
+  private readonly logger = new Logger(RankingsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     @InjectQueue(RANKING_QUEUE) private readonly rankingQueue: Queue<RankingJobPayload>,
+    @Optional() private readonly clickhouse?: ClickhouseService,
   ) {}
 
   async seedDemo(slug = 'global-female-singers') {
@@ -669,6 +673,12 @@ export class RankingsService {
         snapshotVersion,
         itemsCreate,
       );
+      await this.maybeSyncRankingSnapshotToClickhouse(
+        result,
+        topicVersion.topicId,
+        snapshotTime,
+        args.timeWindow,
+      );
       return result;
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
@@ -692,6 +702,37 @@ export class RankingsService {
         return conflict;
       }
       throw e;
+    }
+  }
+
+  private async maybeSyncRankingSnapshotToClickhouse(
+    snapshot: TopicRankSnapshot & {
+      items: Array<{ entityId: bigint; popularityScore: number; rank: number }>;
+    },
+    topicId: bigint,
+    snapshotTime: Date,
+    timeWindow: TimeWindow,
+  ) {
+    if (process.env.SYNC_RANKING_TO_CLICKHOUSE !== 'true') return;
+    if (!this.clickhouse?.isEnabled()) return;
+    try {
+      await this.clickhouse.ingestRankingSnapshot({
+        snapshotId: snapshot.id,
+        topicId,
+        snapshotTime,
+        timeWindow,
+        items: snapshot.items.map((it) => ({
+          entityId: it.entityId,
+          popularityScore: it.popularityScore,
+          rank: it.rank,
+        })),
+      });
+    } catch (e) {
+      this.logger.warn(
+        `ClickHouse ingest failed for snapshot ${snapshot.id.toString()}: ${
+          e instanceof Error ? e.message : String(e)
+        }`,
+      );
     }
   }
 

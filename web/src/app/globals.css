@@ -128,3 +128,88 @@
     @apply font-sans;
   }
 }
+
+/* Crawl monitor deck — sci-fi HUD animations */
+@keyframes crawl-grid-drift {
+  0% {
+    background-position: 0 0, 0 0;
+  }
+  100% {
+    background-position: 48px 48px, 24px 24px;
+  }
+}
+
+@keyframes crawl-scanline {
+  0% {
+    transform: translateY(-120%);
+    opacity: 0;
+  }
+  8% {
+    opacity: 0.35;
+  }
+  92% {
+    opacity: 0.35;
+  }
+  100% {
+    transform: translateY(120vh);
+    opacity: 0;
+  }
+}
+
+@keyframes crawl-core-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 20px oklch(0.7 0.15 195 / 0.4),
+      inset 0 0 30px oklch(0.55 0.2 280 / 0.15);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow:
+      0 0 45px oklch(0.75 0.18 195 / 0.65),
+      inset 0 0 40px oklch(0.6 0.22 280 / 0.28);
+    transform: scale(1.03);
+  }
+}
+
+@keyframes crawl-ring-spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes crawl-data-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes crawl-float-particle {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+    opacity: 0.4;
+  }
+  50% {
+    transform: translate(6px, -14px) scale(1.2);
+    opacity: 0.85;
+  }
+}
+
+.crawl-monitor-aux::after {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  background-image:
+    radial-gradient(circle at 15% 25%, oklch(0.65 0.22 320 / 0.09), transparent 42%),
+    radial-gradient(circle at 88% 78%, oklch(0.7 0.16 195 / 0.08), transparent 38%);
+  animation: crawl-float-particle 11s ease-in-out infinite;
+}

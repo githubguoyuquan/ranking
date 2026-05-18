@@ -32,18 +32,33 @@ import {
   nestTopicSnapshotsUrl,
   nestTopicTrendAnalysesUrl,
   nestTopicVersionsUrl,
+  nestTopicVersionPolicyUrl,
 } from "@/lib/nest-api-urls";
 import { unifiedSearchAdminPathFromQuery } from "@/lib/unified-search-admin-path";
 import { isIsoDateString } from "@/lib/iso-date";
 import { TIME_WINDOW_SET } from "@/lib/time-window";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+
+const POLICY_METRIC_KEYS = ["streams", "mentions", "social", "news"] as const;
+type PolicyMetricKey = (typeof POLICY_METRIC_KEYS)[number];
+
+type QuickWeightsState = Record<PolicyMetricKey, string>;
+
+const EMPTY_QUICK_WEIGHTS: QuickWeightsState = {
+  streams: "",
+  mentions: "",
+  social: "",
+  news: "",
+};
 
 type TopicVersionRow = {
   id: string;
   version: string;
   effectiveFrom?: string;
+  frozen: boolean;
+  policyJson: unknown;
 };
 
 type LeaderboardPreview = {
@@ -81,6 +96,8 @@ function parseVersionsJson(text: string): TopicVersionRow[] {
         version: String(o.version),
         effectiveFrom:
           o.effectiveFrom != null ? String(o.effectiveFrom) : undefined,
+        frozen: o.frozen === true,
+        policyJson: o.policyJson,
       });
     }
     return rows;
@@ -194,6 +211,14 @@ type TopicSnapshotListItem = {
   confidenceScore: number;
   generatedByAi: boolean;
   topicRankingId: string;
+  /** `GET /v1/topics/:slug/snapshots`：该快照下 AiAnalysis 条数 */
+  aiAnalysisCount?: number;
+  /** 是否存在物化跟进类简报（agent 或 detailJson.agentKind） */
+  hasFollowupBrief?: boolean;
+  /** trend-v1 / agentKind=trend */
+  hasTrendBrief?: boolean;
+  /** credibility-v1 / agentKind=credibility */
+  hasCredibilityBrief?: boolean;
   topicRanking: {
     id: string;
     timeWindow: string;
@@ -243,6 +268,118 @@ function TopicsPageInner() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<string>("");
   const [versionRows, setVersionRows] = useState<TopicVersionRow[]>([]);
+  const [policyTargetId, setPolicyTargetId] = useState<string | null>(null);
+  const [policyDraft, setPolicyDraft] = useState("");
+  const [policyMsg, setPolicyMsg] = useState("");
+  const [policySaving, setPolicySaving] = useState(false);
+  const [quickWeights, setQuickWeights] =
+    useState<QuickWeightsState>(EMPTY_QUICK_WEIGHTS);
+  const [quickEntityIds, setQuickEntityIds] = useState("");
+  const [quickRequired, setQuickRequired] = useState<string[]>([]);
+
+  const applyJsonTextToQuickForm = useCallback((text: string) => {
+    try {
+      const o = JSON.parse(text) as Record<string, unknown>;
+      const wraw = o.weights;
+      const w =
+        wraw && typeof wraw === "object" && !Array.isArray(wraw)
+          ? (wraw as Record<string, unknown>)
+          : {};
+      setQuickWeights({
+        streams: w.streams != null ? String(w.streams) : "",
+        mentions: w.mentions != null ? String(w.mentions) : "",
+        social: w.social != null ? String(w.social) : "",
+        news: w.news != null ? String(w.news) : "",
+      });
+      const ids = o.entityIds;
+      if (Array.isArray(ids)) {
+        setQuickEntityIds(
+          ids.map((x) => String(x).trim()).filter(Boolean).join(", "),
+        );
+      } else {
+        setQuickEntityIds("");
+      }
+      const req = o.requiredSignalKeys;
+      if (Array.isArray(req)) {
+        setQuickRequired(req.map((x) => String(x)));
+      } else {
+        setQuickRequired([]);
+      }
+    } catch {
+      setQuickWeights(EMPTY_QUICK_WEIGHTS);
+      setQuickEntityIds("");
+      setQuickRequired([]);
+    }
+  }, []);
+
+  function mergeQuickFormIntoPolicyDraft() {
+    let base: Record<string, unknown>;
+    try {
+      const parsed = JSON.parse(policyDraft) as unknown;
+      base =
+        parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+          ? (parsed as Record<string, unknown>)
+          : {};
+    } catch {
+      base = {};
+    }
+    const prevWeights =
+      base.weights &&
+      typeof base.weights === "object" &&
+      !Array.isArray(base.weights)
+        ? { ...(base.weights as Record<string, unknown>) }
+        : {};
+    for (const k of POLICY_METRIC_KEYS) {
+      const raw = quickWeights[k].trim();
+      if (raw === "") {
+        delete prevWeights[k];
+      } else {
+        const n = Number(raw);
+        if (Number.isFinite(n) && n >= 0) prevWeights[k] = n;
+      }
+    }
+    base.weights = prevWeights;
+
+    const idsPart = quickEntityIds
+      .split(/[\s,]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (idsPart.length > 0) {
+      base.entityIds = idsPart;
+    } else {
+      delete base.entityIds;
+    }
+
+    if (quickRequired.length > 0) {
+      base.requiredSignalKeys = [...quickRequired];
+    } else {
+      delete base.requiredSignalKeys;
+    }
+
+    setPolicyDraft(JSON.stringify(base, null, 2));
+  }
+
+  useEffect(() => {
+    if (!policyTargetId) {
+      setPolicyDraft("");
+      setQuickWeights(EMPTY_QUICK_WEIGHTS);
+      setQuickEntityIds("");
+      setQuickRequired([]);
+      return;
+    }
+    const row = versionRows.find((r) => r.id === policyTargetId);
+    if (!row) return;
+    try {
+      const text = JSON.stringify(row.policyJson ?? {}, null, 2);
+      setPolicyDraft(text);
+      applyJsonTextToQuickForm(text);
+    } catch {
+      setPolicyDraft("");
+      setQuickWeights(EMPTY_QUICK_WEIGHTS);
+      setQuickEntityIds("");
+      setQuickRequired([]);
+    }
+  }, [policyTargetId, versionRows, applyJsonTextToQuickForm]);
 
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
   const [leaderboardResult, setLeaderboardResult] = useState<string>("");
@@ -251,6 +388,7 @@ function TopicsPageInner() {
   const [lbQueryVersion, setLbQueryVersion] = useState("");
   const [lbQueryTimeWindow, setLbQueryTimeWindow] = useState("");
   const [lbQueryWindowStart, setLbQueryWindowStart] = useState("");
+  const [lbIncludeAiStats, setLbIncludeAiStats] = useState(false);
 
   const slugForApi = slug.trim() || "global-female-singers";
 
@@ -267,8 +405,9 @@ function TopicsPageInner() {
     if (ver) q.set("version", ver);
     if (tw) q.set("timeWindow", tw);
     if (ws) q.set("windowStart", ws);
+    if (lbIncludeAiStats) q.set("includeAiStats", "1");
     return nestTopicLeaderboardUrl(slugForApi, q);
-  }, [slugForApi, lbQueryVersion, lbQueryTimeWindow, lbQueryWindowStart]);
+  }, [slugForApi, lbQueryVersion, lbQueryTimeWindow, lbQueryWindowStart, lbIncludeAiStats]);
 
   const trendAnalysesApiUrl = useMemo(
     () =>
@@ -366,6 +505,10 @@ function TopicsPageInner() {
     const ws = searchParams.get("windowStart");
     if (ws?.trim())
       setLbQueryWindowStart(clampQueryParam(ws, ISO_DATETIME_INPUT_MAX_LEN));
+    const ias = searchParams.get("includeAiStats");
+    setLbIncludeAiStats(
+      ias === "1" || (typeof ias === "string" && ias.toLowerCase() === "true"),
+    );
   }, [searchParams]);
 
   async function loadLeaderboard() {
@@ -401,6 +544,7 @@ function TopicsPageInner() {
       if (ver) q.set("version", ver);
       if (tw) q.set("timeWindow", tw);
       if (ws) q.set("windowStart", ws);
+      if (lbIncludeAiStats) q.set("includeAiStats", "1");
       const url = nestTopicLeaderboardUrl(slugForApi, q);
       const res = await fetch(url, { cache: "no-store" });
       const text = await res.text();
@@ -455,6 +599,40 @@ function TopicsPageInner() {
     }
   }
 
+  async function savePolicyJson() {
+    if (!policyTargetId?.trim()) {
+      setPolicyMsg("先点某一行的「policy」选中 topicVersionId");
+      return;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(policyDraft);
+    } catch {
+      setPolicyMsg("policyJson 不是合法 JSON");
+      return;
+    }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      setPolicyMsg("policyJson 须为对象");
+      return;
+    }
+    setPolicySaving(true);
+    setPolicyMsg("");
+    try {
+      const res = await fetch(nestTopicVersionPolicyUrl(policyTargetId.trim()), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ policyJson: parsed }),
+      });
+      const text = await res.text();
+      setPolicyMsg(`${res.status} ${text.slice(0, 2000)}`);
+      if (res.ok) void load();
+    } catch (e) {
+      setPolicyMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPolicySaving(false);
+    }
+  }
+
   const lb = leaderboardPreview;
 
   return (
@@ -465,7 +643,8 @@ function TopicsPageInner() {
           <code className="rounded bg-muted px-1">GET {NEST_V1_DOC.topicsVersions}</code> ·{" "}
           <code className="rounded bg-muted px-1">GET {NEST_V1_DOC.topicsLeaderboard}</code> ·{" "}
           <code className="rounded bg-muted px-1">GET {NEST_V1_DOC.topicsTrendAnalyses}</code> ·{" "}
-          <code className="rounded bg-muted px-1">GET {NEST_V1_DOC.topicsSnapshots}</code>
+          <code className="rounded bg-muted px-1">GET {NEST_V1_DOC.topicsSnapshots}</code> ·{" "}
+          <code className="rounded bg-muted px-1">PATCH {NEST_V1_DOC.topicVersionPolicy}</code>
         </p>
       </div>
 
@@ -479,7 +658,7 @@ function TopicsPageInner() {
             最多 <code className="text-xs">{TIME_WINDOW_INPUT_MAX_LEN}</code>；<code className="text-xs">windowStart</code>{" "}
             最多 <code className="text-xs">{ISO_DATETIME_INPUT_MAX_LEN}</code>。URL 可预填{" "}
             <code className="text-xs">
-              ?slug=&amp;version=&amp;timeWindow=&amp;windowStart=
+              ?slug=&amp;version=&amp;timeWindow=&amp;windowStart=&amp;includeAiStats=
             </code>
             （热榜查询串与 API 一致）。在 slug 或热榜参数框内按{" "}
             <kbd className="rounded border border-border bg-muted px-1 text-[10px]">Enter</kbd>{" "}
@@ -565,6 +744,19 @@ function TopicsPageInner() {
             <code className="rounded bg-muted px-1">timeWindow</code>
             （REALTIME / DAY / WEEK / MONTH / YEAR / CUSTOM）。
           </p>
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="lb-include-ai-stats"
+              className="size-4 rounded border border-input accent-primary"
+              checked={lbIncludeAiStats}
+              onChange={(e) => setLbIncludeAiStats(e.target.checked)}
+            />
+            <Label htmlFor="lb-include-ai-stats" className="text-sm font-normal text-muted-foreground">
+              热榜 JSON 含 AI 简报统计（<code className="rounded bg-muted px-1 text-xs">includeAiStats=1</code>
+              ，与 <code className="rounded bg-muted px-1 text-xs">GET /v1/snapshots/:id</code> 一致）
+            </Label>
+          </div>
           <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
             <CopyTextButton
               text={abs(topicsAdminPath(slugForApi))}
@@ -740,6 +932,7 @@ function TopicsPageInner() {
                     <th scope="col" className="px-3 py-2 font-medium">version</th>
                     <th scope="col" className="px-3 py-2 font-medium">topicVersionId</th>
                     <th scope="col" className="px-3 py-2 font-medium">effectiveFrom</th>
+                    <th scope="col" className="px-3 py-2 font-medium">frozen</th>
                     <th scope="col" className="px-3 py-2 font-medium"> </th>
                   </tr>
                 </thead>
@@ -755,8 +948,22 @@ function TopicsPageInner() {
                       <td className="px-3 py-2 text-muted-foreground">
                         {r.effectiveFrom ?? "—"}
                       </td>
+                      <td className="px-3 py-2 text-muted-foreground">
+                        {r.frozen ? "是" : "否"}
+                      </td>
                       <td className="px-3 py-2 text-right">
                         <span className="inline-flex flex-wrap items-center justify-end gap-x-2 gap-y-1">
+                          <button
+                            type="button"
+                            className="text-xs text-primary underline-offset-2 hover:underline disabled:text-muted-foreground disabled:no-underline"
+                            disabled={r.frozen}
+                            onClick={() => {
+                              setPolicyTargetId(r.id);
+                              setPolicyMsg("");
+                            }}
+                          >
+                            policy
+                          </button>
                           <Link
                             href={rankingsRunAdminPath(r.id)}
                             className="text-primary underline-offset-4 hover:underline"
@@ -766,6 +973,11 @@ function TopicsPageInner() {
                           <CopyTextButton
                             text={abs(rankingsRunAdminPath(r.id))}
                             idleLabel="复制跑榜页"
+                            className="h-6 px-2 text-xs"
+                          />
+                          <CopyTextButton
+                            text={nestTopicVersionPolicyUrl(r.id)}
+                            idleLabel="复制 PATCH URL"
                             className="h-6 px-2 text-xs"
                           />
                         </span>
@@ -784,6 +996,146 @@ function TopicsPageInner() {
           ) : null}
         </CardContent>
       </Card>
+
+      {versionRows.length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">policyJson（TopicVersion）</CardTitle>
+            <CardDescription>
+              点版本表中某一行的 <code className="text-xs">policy</code> 加载 JSON；保存走{" "}
+              <code className="text-xs">PATCH {NEST_V1_DOC.topicVersionPolicy}</code>
+              ，服务端校验 <code className="text-xs">weights</code> / <code className="text-xs">entityIds</code> /
+              <code className="text-xs">requiredSignalKeys</code>。<code className="text-xs">frozen</code>{" "}
+              版本不可改。
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              当前选中 topicVersionId：{" "}
+              <code className="rounded bg-muted px-1">{policyTargetId ?? "—"}</code>
+            </p>
+            <div className="space-y-3 rounded-md border border-border bg-muted/20 p-3">
+              <p className="text-xs font-medium text-foreground">快捷编辑</p>
+              <p className="text-[11px] leading-relaxed text-muted-foreground">
+                四路权重与演示 seed 一致；其它 <code className="text-xs">weights</code> 键请用下方
+                JSON。先改表单再点「表单 → 写入 JSON」，或改 JSON 后点「JSON → 读回表单」。
+              </p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {POLICY_METRIC_KEYS.map((key) => (
+                  <div key={key} className="space-y-1">
+                    <Label htmlFor={`policy-w-${key}`} className="text-xs capitalize">
+                      weight · {key}
+                    </Label>
+                    <Input
+                      id={`policy-w-${key}`}
+                      inputMode="decimal"
+                      className="h-8 text-xs"
+                      value={quickWeights[key]}
+                      onChange={(e) =>
+                        setQuickWeights((prev) => ({
+                          ...prev,
+                          [key]: e.target.value,
+                        }))
+                      }
+                      disabled={!policyTargetId}
+                    />
+                  </div>
+                ))}
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="policy-entity-ids" className="text-xs">
+                  entityIds（逗号或空格分隔；留空则 PATCH 时去掉该字段，由后端按 metrics 推断）
+                </Label>
+                <Input
+                  id="policy-entity-ids"
+                  className="h-8 font-mono text-xs"
+                  value={quickEntityIds}
+                  onChange={(e) => setQuickEntityIds(e.target.value)}
+                  disabled={!policyTargetId}
+                  placeholder="1, 2, 3"
+                />
+              </div>
+              <fieldset className="space-y-2" disabled={!policyTargetId}>
+                <legend className="text-xs text-muted-foreground">
+                  requiredSignalKeys
+                </legend>
+                <div className="flex flex-wrap gap-x-4 gap-y-1">
+                  {POLICY_METRIC_KEYS.map((key) => (
+                    <label
+                      key={key}
+                      className="inline-flex cursor-pointer items-center gap-1.5 text-xs"
+                    >
+                      <input
+                        type="checkbox"
+                        className="rounded border-input"
+                        checked={quickRequired.includes(key)}
+                        onChange={(e) => {
+                          setQuickRequired((prev) =>
+                            e.target.checked
+                              ? [...new Set([...prev, key])]
+                              : prev.filter((x) => x !== key),
+                          );
+                        }}
+                      />
+                      <span className="capitalize">{key}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={!policyTargetId}
+                  onClick={() => mergeQuickFormIntoPolicyDraft()}
+                >
+                  表单 → 写入 JSON
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={!policyTargetId}
+                  onClick={() => applyJsonTextToQuickForm(policyDraft)}
+                >
+                  JSON → 读回表单
+                </Button>
+              </div>
+            </div>
+            <textarea
+              className="min-h-[220px] w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-xs"
+              spellCheck={false}
+              value={policyDraft}
+              onChange={(e) => setPolicyDraft(e.target.value)}
+              disabled={!policyTargetId}
+              aria-label="policyJson 编辑文本框"
+            />
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={policySaving || !policyTargetId}
+                onClick={() => void savePolicyJson()}
+              >
+                {policySaving ? "保存中…" : "PATCH 保存"}
+              </Button>
+              {policyTargetId ? (
+                <CopyTextButton
+                  text={nestTopicVersionPolicyUrl(policyTargetId)}
+                  idleLabel="复制 PATCH URL"
+                  className="h-9"
+                />
+              ) : null}
+            </div>
+            {policyMsg ? (
+              <pre className="max-h-[200px] overflow-auto rounded-md border border-border bg-muted/50 p-3 text-xs whitespace-pre-wrap">
+                {policyMsg}
+              </pre>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card>
         <CardHeader>
@@ -908,7 +1260,11 @@ function TopicsPageInner() {
           <CardTitle className="text-base">近期快照</CardTitle>
           <CardDescription>
             <code className="text-xs">TopicRankSnapshot</code> 列表（按{" "}
-            <code className="text-xs">snapshotTime</code> 倒序）。可选 query：
+            <code className="text-xs">snapshotTime</code> 倒序）。每条含{" "}
+            <code className="text-xs">aiAnalysisCount</code>、
+            <code className="text-xs">hasFollowupBrief</code>、
+            <code className="text-xs">hasTrendBrief</code>、
+            <code className="text-xs">hasCredibilityBrief</code>。可选 query：
             <code className="text-xs">timeWindow</code>、<code className="text-xs">limit</code>（1–100）。
           </CardDescription>
         </CardHeader>
@@ -950,6 +1306,18 @@ function TopicsPageInner() {
                       置信
                     </th>
                     <th scope="col" className="px-3 py-2 font-medium">
+                      Ai 条
+                    </th>
+                    <th scope="col" className="px-3 py-2 font-medium">
+                      跟进
+                    </th>
+                    <th scope="col" className="px-3 py-2 font-medium">
+                      趋势
+                    </th>
+                    <th scope="col" className="px-3 py-2 font-medium">
+                      可信
+                    </th>
+                    <th scope="col" className="px-3 py-2 font-medium">
                       {" "}
                     </th>
                   </tr>
@@ -972,6 +1340,18 @@ function TopicsPageInner() {
                       </td>
                       <td className="px-3 py-2 text-muted-foreground">
                         {row.confidenceScore.toFixed(2)}
+                      </td>
+                      <td className="px-3 py-2 tabular-nums text-muted-foreground">
+                        {row.aiAnalysisCount ?? 0}
+                      </td>
+                      <td className="px-3 py-2 text-muted-foreground">
+                        {row.hasFollowupBrief === true ? "是" : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-muted-foreground">
+                        {row.hasTrendBrief === true ? "是" : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-muted-foreground">
+                        {row.hasCredibilityBrief === true ? "是" : "—"}
                       </td>
                       <td className="px-3 py-2 text-right">
                         <span className="inline-flex flex-wrap items-center justify-end gap-x-2 gap-y-1">

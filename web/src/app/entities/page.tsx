@@ -30,6 +30,10 @@ import {
 import { buildEntitiesListWebPath, entitiesAdminPrefillPath, normalizeEntityAdminListLimit } from "@/lib/entities-admin-path";
 import { useAdminAppUrl } from "@/hooks/use-admin-app-url";
 import { isDecimalBigIntIdString } from "@/lib/decimal-id";
+import {
+  ADMIN_HREF,
+  entityRankHistoryAdminPath,
+} from "@/lib/admin-web-paths";
 import { NEST_V1_DOC } from "@/lib/nest-api-paths";
 import { nestEntityRankHistoryUrl } from "@/lib/nest-api-urls";
 import { unifiedSearchAdminPathFromQuery } from "@/lib/unified-search-admin-path";
@@ -263,8 +267,10 @@ function EntitiesPageInner() {
           {BACKEND_ADMIN_DOC.entitiesId}
         </p>
         <p className="mt-1 text-xs text-muted-foreground">
-          Nest：表格内可开 <code className="rounded bg-muted px-1">GET {NEST_V1_DOC.entityRankHistory}</code>（需{" "}
-          <code className="text-xs">topicSlug</code>，见下方输入框）
+          「曲线」打开管理台{" "}
+          <code className="rounded bg-muted px-1">{ADMIN_HREF.entityRankHistory}</code>{" "}
+          （ECharts）；JSON 为{" "}
+          <code className="rounded bg-muted px-1">GET {NEST_V1_DOC.entityRankHistory}</code>
         </p>
         <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
           <CopyTextButton
@@ -405,6 +411,21 @@ function EntitiesPageInner() {
                       </td>
                       <td className="space-y-2 px-3 py-2">
                         <div className="flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            asChild
+                          >
+                            <Link
+                              href={entityRankHistoryAdminPath(
+                                r.id,
+                                entityRankTopicSlug,
+                              )}
+                            >
+                              曲线
+                            </Link>
+                          </Button>
                           <Button
                             type="button"
                             variant="outline"

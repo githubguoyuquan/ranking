@@ -39,6 +39,9 @@ export function AdminFooterNav({
       <Link href={ADMIN_HREF.crawl} className={linkCls}>
         爬虫
       </Link>
+      <Link href={ADMIN_HREF.crawlMonitor} className={linkCls}>
+        引擎监控
+      </Link>
       <Link href={ADMIN_HREF.outbox} className={linkCls}>
         Outbox
       </Link>
@@ -47,6 +50,9 @@ export function AdminFooterNav({
       </Link>
       <Link href={ADMIN_HREF.entities} className={linkCls}>
         实体
+      </Link>
+      <Link href={ADMIN_HREF.trends} className={linkCls}>
+        热点趋势
       </Link>
       <Link href={ADMIN_HREF.topics} className={linkCls}>
         话题版本

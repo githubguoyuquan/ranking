@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -169,6 +170,24 @@ export class IngestionController {
       seedUrls: body.seedUrls,
     });
     return toPlainJson(task);
+  }
+
+  @Get('tasks')
+  async listTasks(
+    @Query('limit') limitRaw?: string,
+    @Query('sourceId') sourceIdRaw?: string,
+  ) {
+    const limit = limitRaw !== undefined ? Number(limitRaw) : 30;
+    const lim = Number.isFinite(limit) ? limit : 30;
+    let sourceId: bigint | undefined;
+    if (sourceIdRaw !== undefined && sourceIdRaw.trim() !== '') {
+      try {
+        sourceId = BigInt(sourceIdRaw.trim());
+      } catch {
+        throw new BadRequestException('invalid sourceId');
+      }
+    }
+    return toPlainJson(await this.ingestion.listCrawlTasks(lim, sourceId));
   }
 
   @Get('tasks/:id')

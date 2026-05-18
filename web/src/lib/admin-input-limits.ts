@@ -58,6 +58,9 @@ export const SNAPSHOT_ANALYZE_TOPN_MAX = 50;
 /** topN 输入框：50 为两位十进制 */
 export const SNAPSHOT_ANALYZE_TOPN_INPUT_MAX_LEN = 2;
 
+/** `POST …/analyze` body `chainContext`（与 Nest `AnalyzeSnapshotDto` 一致） */
+export const SNAPSHOT_ANALYZE_CHAIN_CONTEXT_MAX_LEN = 8192;
+
 /** Prisma `TimeWindow` 最长 REALTIME；留余量 */
 export const TIME_WINDOW_INPUT_MAX_LEN = 16;
 

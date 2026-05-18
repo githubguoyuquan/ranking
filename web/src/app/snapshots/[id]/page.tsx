@@ -8,6 +8,12 @@ import {
 import { AdminFooterNav } from "@/components/admin-footer-nav";
 import { CopyAdminPageUrlButton } from "@/components/copy-admin-page-url-button";
 import { CopySnapshotIdButton, CopyTextButton } from "@/components/copy-snapshot-id-button";
+import {
+  SnapshotAnalysesSection,
+  type SnapshotAnalysisListItem,
+} from "@/components/snapshot-analyses-section";
+import { SnapshotAnalysesFilter } from "@/components/snapshot-analyses-filter";
+import { SnapshotAnalysesPagination } from "@/components/snapshot-analyses-pagination";
 import { SnapshotAnalyzeActions } from "@/components/snapshot-analyze-actions";
 import { SnapshotBarChart } from "@/components/snapshot-bar-chart";
 import { DECIMAL_BIGINT_ID_MAX_DIGITS, isDecimalBigIntIdString } from "@/lib/decimal-id";
@@ -24,6 +30,17 @@ import {
   nestSnapshotAnalysesUrl,
   nestSnapshotV1Url,
 } from "@/lib/nest-api-urls";
+import { compareIdsFromRankingSnapshots } from "@/lib/snapshot-compare-pair";
+import { parseSnapshotAnalysesApiResponse } from "@/lib/snapshot-analyses-api";
+import { parseSnapshotPageAnalysisKind } from "@/lib/snapshot-analysis-kind-query";
+import {
+  SNAPSHOT_DETAIL_QS,
+  buildSnapshotDetailAdminQuery,
+  pickFirstSearchParam,
+  parseSnapshotAnalysisLimit,
+  parseSnapshotAnalysisPage,
+  snapshotAnalysisListOffset,
+} from "@/lib/snapshot-detail-search-params";
 import { unifiedSearchAdminPathFromQuery } from "@/lib/unified-search-admin-path";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -33,6 +50,11 @@ type SnapshotPayload = {
   snapshotVersion?: string;
   snapshotTime?: string;
   confidenceScore?: number;
+  /** `GET /v1/snapshots/:id?includeAiStats=1` */
+  aiAnalysisCount?: number;
+  hasFollowupBrief?: boolean;
+  hasTrendBrief?: boolean;
+  hasCredibilityBrief?: boolean;
   items?: Array<{
     rank: number;
     previousRank?: number | null;
@@ -52,10 +74,26 @@ type SnapshotPayload = {
 
 export default async function SnapshotPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<{
+    analysisKind?: string | string[];
+    analysisPage?: string | string[];
+    analysisLimit?: string | string[];
+  }>;
 }) {
-  const { id: rawId } = await params;
+  const [{ id: rawId }, sp] = await Promise.all([
+    params,
+    searchParams ??
+      Promise.resolve(
+        {} as {
+          analysisKind?: string | string[];
+          analysisPage?: string | string[];
+          analysisLimit?: string | string[];
+        },
+      ),
+  ]);
   const id = rawId?.trim() ?? "";
   if (!isDecimalBigIntIdString(id)) {
     return (
@@ -77,12 +115,36 @@ export default async function SnapshotPage({
       </div>
     );
   }
-  const res = await fetch(
-    nestSnapshotV1Url(id),
-    {
-      cache: "no-store",
-    },
+  const rawKind = pickFirstSearchParam(sp, SNAPSHOT_DETAIL_QS.analysisKind);
+  const analysisKind = parseSnapshotPageAnalysisKind(rawKind);
+  const analysisPage = parseSnapshotAnalysisPage(
+    pickFirstSearchParam(sp, SNAPSHOT_DETAIL_QS.analysisPage),
   );
+  const analysisLimit = parseSnapshotAnalysisLimit(
+    pickFirstSearchParam(sp, SNAPSHOT_DETAIL_QS.analysisLimit),
+  );
+  const listOffset = snapshotAnalysisListOffset(analysisPage, analysisLimit);
+  const analysesApiQs = new URLSearchParams();
+  analysesApiQs.set("limit", String(analysisLimit));
+  analysesApiQs.set("offset", String(listOffset));
+  if (analysisKind !== "") analysesApiQs.set("agentKind", analysisKind);
+  const analysesFetchUrl = nestSnapshotAnalysesUrl(id, analysesApiQs);
+  const adminPageQs = buildSnapshotDetailAdminQuery({
+    analysisKind,
+    analysisPage,
+    analysisLimit,
+  });
+  const adminPagePath = snapshotDetailAdminPath(
+    id,
+    adminPageQs.toString() ? adminPageQs : undefined,
+  );
+
+  const snapSummaryQs = new URLSearchParams();
+  snapSummaryQs.set("includeAiStats", "1");
+  const [res, analysesRes] = await Promise.all([
+    fetch(nestSnapshotV1Url(id, snapSummaryQs), { cache: "no-store" }),
+    fetch(analysesFetchUrl, { cache: "no-store" }),
+  ]);
   if (res.status === 404) notFound();
   if (!res.ok) {
     return (
@@ -97,6 +159,44 @@ export default async function SnapshotPage({
     );
   }
   const data = (await res.json()) as SnapshotPayload;
+  let analysisRows: SnapshotAnalysisListItem[] = [];
+  let analysesTotal: number | null = null;
+  let analysesLoadError: string | null = null;
+  if (!analysesRes.ok) {
+    analysesLoadError = `简报列表加载失败 HTTP ${analysesRes.status}`;
+  } else {
+    try {
+      const parsed = parseSnapshotAnalysesApiResponse(await analysesRes.json());
+      analysisRows = parsed.rows;
+      analysesTotal = parsed.total;
+    } catch {
+      analysesLoadError = "简报列表 JSON 解析失败";
+    }
+  }
+
+  let compareSnapshotIds = [id];
+  const trId = data.topicRanking?.id;
+  if (trId != null && String(trId) !== "") {
+    try {
+      const stRes = await fetch(nestRankingStatusUrl(String(trId)), {
+        cache: "no-store",
+      });
+      if (stRes.ok) {
+        const stJson = (await stRes.json()) as { snapshots?: unknown };
+        compareSnapshotIds = compareIdsFromRankingSnapshots(id, stJson.snapshots);
+      }
+    } catch {
+      /* 忽略 status 失败，仍可用单 id 预填对比页 */
+    }
+  }
+  const snapshotsCompareHref = snapshotsCompareAdminPath(compareSnapshotIds, {
+    includeAiStats: true,
+  });
+  const compareLinkLabel =
+    compareSnapshotIds.length >= 2
+      ? "与同 ranking 相邻快照对比（含 AI 列）…"
+      : "与其他快照对比（含 AI 列）…";
+
   const title =
     data.topicRanking?.topicVersion?.topic?.title ?? "排行榜快照";
   const topicSlug = data.topicRanking?.topicVersion?.topic?.slug;
@@ -137,6 +237,17 @@ export default async function SnapshotPage({
               </>
             ) : null}
           </p>
+          {data.aiAnalysisCount != null ? (
+            <p className="mt-1 text-xs text-muted-foreground">
+              AiAnalysis 共 {data.aiAnalysisCount} 条 · 跟进{" "}
+              {data.hasFollowupBrief === true ? "是" : "否"} · 趋势{" "}
+              {data.hasTrendBrief === true ? "是" : "否"} · 可信{" "}
+              {data.hasCredibilityBrief === true ? "是" : "否"}
+              <span className="ml-1 text-muted-foreground/70">
+                （<code className="rounded bg-muted/80 px-1">includeAiStats</code>）
+              </span>
+            </p>
+          ) : null}
         </div>
         <div className="flex flex-col items-end gap-2 sm:items-end">
           <div className="flex flex-wrap justify-end gap-x-3 gap-y-1 text-sm">
@@ -323,7 +434,30 @@ export default async function SnapshotPage({
         </CardContent>
       </Card>
 
-      <SnapshotAnalyzeActions snapshotId={id} />
+      <SnapshotAnalysesSection
+        rows={analysisRows}
+        analysesJsonUrl={analysesFetchUrl}
+        loadError={analysesLoadError}
+        analysesTotal={analysesTotal}
+        filterSlot={
+          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+            <SnapshotAnalysesFilter
+              snapshotId={id}
+              currentKind={analysisKind}
+              listLimit={analysisLimit}
+            />
+            <SnapshotAnalysesPagination
+              snapshotId={id}
+              analysisKind={analysisKind}
+              page={analysisPage}
+              limit={analysisLimit}
+              total={analysesTotal}
+            />
+          </div>
+        }
+      />
+
+      <SnapshotAnalyzeActions snapshotId={id} analysesGetUrl={analysesFetchUrl} />
 
       <AdminFooterNav
         leading={
@@ -342,7 +476,7 @@ export default async function SnapshotPage({
               className="h-6"
             />
             <a
-              href={nestSnapshotAnalysesUrl(id)}
+              href={analysesFetchUrl}
               target="_blank"
               rel="noreferrer"
               className="text-primary underline-offset-4 hover:underline"
@@ -350,18 +484,23 @@ export default async function SnapshotPage({
               GET 简报列表（JSON）
             </a>
             <CopyTextButton
-              text={nestSnapshotAnalysesUrl(id)}
+              text={analysesFetchUrl}
               idleLabel="复制简报列表 URL"
               className="h-6"
             />
             <Link
-              href={snapshotsCompareAdminPath([id])}
+              href={snapshotsCompareHref}
               className="text-primary underline-offset-4 hover:underline"
             >
-              与其他快照对比…
+              {compareLinkLabel}
             </Link>
             <CopyAdminPageUrlButton
-              path={snapshotDetailAdminPath(id)}
+              path={snapshotsCompareHref}
+              idleLabel="复制对比页链接"
+              className="h-6"
+            />
+            <CopyAdminPageUrlButton
+              path={adminPagePath}
               idleLabel="复制本站快照页链接"
               className="h-6"
             />

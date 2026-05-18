@@ -5,6 +5,7 @@ import {
   Get,
   NotFoundException,
   Param,
+  Patch,
   Post,
   Query,
 } from '@nestjs/common';
@@ -17,6 +18,7 @@ import {
   IsDateString,
   IsEnum,
   IsInt,
+  IsObject,
   IsOptional,
   IsString,
   Max,
@@ -65,6 +67,20 @@ export class CompareSnapshotsDto {
   @ArrayMaxSize(10)
   @IsString({ each: true })
   snapshotIds!: string[];
+
+  /** 为每个快照列合并 `aiAnalysisCount` / `hasFollowupBrief` / `hasTrendBrief` / `hasCredibilityBrief` */
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true' || value === '1')
+  @IsBoolean()
+  includeAiStats?: boolean;
+}
+
+export class SnapshotQueryDto {
+  /** 合并 `AiAnalysis` 条数与 `hasFollowupBrief` / `hasTrendBrief` / `hasCredibilityBrief`（跳过快照 Redis 缓存读且本条响应不回写缓存） */
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true' || value === '1')
+  @IsBoolean()
+  includeAiStats?: boolean;
 }
 
 export class LeaderboardQueryDto {
@@ -79,6 +95,12 @@ export class LeaderboardQueryDto {
   @IsOptional()
   @IsDateString()
   windowStart?: string;
+
+  /** 嵌套 `snapshot` 合并 `aiAnalysisCount` / `has*Brief`（与 `GET /v1/snapshots/:id?includeAiStats=1` 行为一致） */
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true' || value === '1')
+  @IsBoolean()
+  includeAiStats?: boolean;
 }
 
 export class EntityRankHistoryQueryDto {
@@ -122,6 +144,24 @@ export class TopicSnapshotsQueryDto {
   @IsInt()
   @Min(1)
   @Max(100)
+  limit?: number;
+}
+
+export class PatchTopicVersionPolicyBodyDto {
+  @IsObject()
+  policyJson!: Record<string, unknown>;
+}
+
+export class TrendsHotQueryDto {
+  @IsOptional()
+  @IsEnum(TimeWindow)
+  timeWindow?: TimeWindow;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(50)
   limit?: number;
 }
 
@@ -188,8 +228,10 @@ export class RankingsController {
   }
 
   @Get('v1/snapshots/:id')
-  async snapshot(@Param('id') id: string) {
-    const snap = await this.rankings.getSnapshotForApi(BigInt(id));
+  async snapshot(@Param('id') id: string, @Query() query: SnapshotQueryDto) {
+    const snap = await this.rankings.getSnapshotForApi(BigInt(id), {
+      includeAiStats: query.includeAiStats === true,
+    });
     if (!snap) throw new NotFoundException();
     return snap;
   }
@@ -204,7 +246,9 @@ export class RankingsController {
       throw new BadRequestException('invalid snapshot id');
     }
     try {
-      return toPlainJson(await this.rankings.compareSnapshots(ids));
+      return toPlainJson(
+        await this.rankings.compareSnapshots(ids, body.includeAiStats === true),
+      );
     } catch (e) {
       if (e instanceof BadRequestException) throw e;
       throw e;
@@ -221,6 +265,32 @@ export class RankingsController {
   @Get('v1/topics/:slug/versions')
   async versions(@Param('slug') slug: string) {
     return toPlainJson(await this.rankings.listVersionsBySlug(slug));
+  }
+
+  /** 更新 TopicVersion.policyJson（须非 frozen；服务端强校验 weights / entityIds） */
+  @Patch('v1/topic-versions/:id/policy')
+  async patchTopicVersionPolicy(
+    @Param('id') id: string,
+    @Body() body: PatchTopicVersionPolicyBodyDto,
+  ) {
+    let tvId: bigint;
+    try {
+      tvId = BigInt(id.trim());
+    } catch {
+      throw new BadRequestException('invalid topic version id');
+    }
+    try {
+      return await this.rankings.updateTopicVersionPolicy(tvId, body.policyJson);
+    } catch (e) {
+      if (e instanceof NotFoundException || e instanceof BadRequestException) throw e;
+      throw e;
+    }
+  }
+
+  /** 近期快照级 TrendAnalysis 涨榜聚合（演示用只读） */
+  @Get('v1/trends/hot')
+  async trendsHot(@Query() query: TrendsHotQueryDto) {
+    return await this.rankings.listHotTrends(query.timeWindow, query.limit);
   }
 
   /** 近期 `TrendAnalysis`（默认仅快照级摘要 `entityId` 为空） */

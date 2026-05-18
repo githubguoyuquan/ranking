@@ -26,12 +26,19 @@ export function nestV1RankingJobPath(jobId: string): string {
   return `${V1}/jobs/ranking/${encodeURIComponent(jobId)}`;
 }
 
-export function nestV1SnapshotPath(snapshotId: string): string {
-  return `${V1}/snapshots/${encodeURIComponent(snapshotId)}`;
+export function nestV1SnapshotPath(snapshotId: string, query?: URLSearchParams): string {
+  const path = `${V1}/snapshots/${encodeURIComponent(snapshotId)}`;
+  if (!query || query.toString() === "") return path;
+  return nestV1PathWithQuery(path, query);
 }
 
-export function nestV1SnapshotAnalysesPath(snapshotId: string): string {
-  return `${V1}/snapshots/${encodeURIComponent(snapshotId)}/analyses`;
+export function nestV1SnapshotAnalysesPath(
+  snapshotId: string,
+  query?: URLSearchParams,
+): string {
+  const path = `${V1}/snapshots/${encodeURIComponent(snapshotId)}/analyses`;
+  if (!query || query.toString() === "") return path;
+  return nestV1PathWithQuery(path, query);
 }
 
 export function nestV1TopicVersionsPath(topicSlug: string): string {
@@ -74,6 +81,16 @@ export function nestV1EntityRankHistoryPath(
   return qs ? `${base}?${qs}` : base;
 }
 
+export function nestV1TopicVersionPolicyPath(topicVersionId: string): string {
+  return `${V1}/topic-versions/${encodeURIComponent(topicVersionId)}/policy`;
+}
+
+export function nestV1TrendsHotPath(query?: URLSearchParams): string {
+  const base = `${V1}/trends/hot`;
+  const qs = query?.toString() ?? "";
+  return qs ? `${base}?${qs}` : base;
+}
+
 export function nestV1CrawlSourcesListPath(limit: number): string {
   return `${NEST_V1.crawlSources}?limit=${encodeURIComponent(String(limit))}`;
 }
@@ -87,6 +104,16 @@ export function nestV1CrawlSourceUrlsPath(
 
 export function nestV1CrawlTaskPath(taskId: string): string {
   return `${V1}/crawl/tasks/${encodeURIComponent(taskId)}`;
+}
+
+/** GET 列表；可选 `sourceId` 按数据源筛选 */
+export function nestV1CrawlTasksListPath(limit: number, sourceId?: string): string {
+  const q = new URLSearchParams();
+  q.set('limit', String(limit));
+  if (sourceId !== undefined && sourceId !== '') {
+    q.set('sourceId', sourceId);
+  }
+  return nestV1PathWithQuery(`${V1}/crawl/tasks`, q);
 }
 
 export function nestV1CrawlCheckpointPath(crawlerName: string): string {
@@ -110,10 +137,14 @@ export const NEST_V1_DOC = {
   topicsLeaderboard: "/v1/topics/:slug/leaderboard",
   topicsTrendAnalyses: "/v1/topics/:slug/trend-analyses",
   topicsSnapshots: "/v1/topics/:slug/snapshots",
+  topicVersionPolicy: "/v1/topic-versions/:id/policy",
+  trendsHot: "/v1/trends/hot",
   entityRankHistory: "/v1/entities/:id/rank-history",
   rankingsStatus: "/v1/rankings/:topicRankingId/status",
   jobRanking: "/v1/jobs/ranking/:jobId",
   crawlTask: "/v1/crawl/tasks/:id",
+  crawlTasksList: "/v1/crawl/tasks",
   crawlSourceUrls: "/v1/crawl/sources/:sourceId/urls",
   crawlCheckpoint: "/v1/crawl/checkpoints/:crawlerName",
+  snapshotsAnalyses: "/v1/snapshots/:id/analyses",
 } as const;

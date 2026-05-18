@@ -25,7 +25,7 @@ import {
 } from "@/lib/backend-api-paths";
 import { ADMIN_HREF, snapshotDetailAdminPath, topicsAdminPath } from "@/lib/admin-web-paths";
 import { entitiesAdminPrefillPath } from "@/lib/entities-admin-path";
-import { NEST_V1 } from "@/lib/nest-api-paths";
+import { NEST_V1, NEST_V1_DOC } from "@/lib/nest-api-paths";
 import { nestClickhouseHealthUrl, nestSearchHealthUrl } from "@/lib/nest-api-urls";
 import { unifiedSearchAdminPathFromQuery } from "@/lib/unified-search-admin-path";
 
@@ -418,6 +418,9 @@ export default async function HomePage() {
           >
             话题版本查询
           </AdminQuickEntryRow>
+          <AdminQuickEntryRow href={ADMIN_HREF.trends} copyLabel="复制热点趋势页链接">
+            热点趋势（GET {NEST_V1_DOC.trendsHot}，聚合快照 TrendAnalysis）
+          </AdminQuickEntryRow>
           <AdminQuickEntryRow
             href={unifiedSearchAdminPathFromQuery("Swift")}
             copyLabel="复制搜索页链接"
@@ -453,6 +456,12 @@ export default async function HomePage() {
           </span>
           <AdminQuickEntryRow href={ADMIN_HREF.crawl} copyLabel="复制爬虫页链接">
             爬虫任务（含异步轮询）
+          </AdminQuickEntryRow>
+          <AdminQuickEntryRow
+            href={ADMIN_HREF.crawlMonitor}
+            copyLabel="复制引擎监控页链接"
+          >
+            引擎监控甲板（实时遥测与任务入轨）
           </AdminQuickEntryRow>
           <AdminQuickEntryRow href={ADMIN_HREF.outbox} copyLabel="复制 Outbox 页链接">
             Outbox 排查

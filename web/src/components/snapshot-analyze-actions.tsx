@@ -2,6 +2,7 @@
 
 import {
   AGENT_MAX,
+  CHAIN_CONTEXT_MAX,
   TOPN_INPUT_MAX_LEN,
   TOPN_MAX,
   TOPN_MIN,
@@ -16,22 +17,26 @@ import { Label } from "@/components/ui/label";
 import { adminSnapshotAnalyzeUrl } from "@/lib/backend-api-urls";
 import { BACKEND_ADMIN_DOC } from "@/lib/backend-api-paths";
 import { nestSnapshotAnalysesUrl } from "@/lib/nest-api-urls";
+import { cn } from "@/lib/utils";
+import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
 export function SnapshotAnalyzeActions(props: SnapshotAnalyzeActionsProps) {
-  const { snapshotId } = props;
+  const { snapshotId, analysesGetUrl: analysesGetUrlProp } = props;
+  const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [text, setText] = useState("");
   const [agent, setAgent] = useState("");
   const [topNInput, setTopNInput] = useState("");
+  const [chainContext, setChainContext] = useState("");
 
   const analyzePostUrl = useMemo(
     () => adminSnapshotAnalyzeUrl(snapshotId),
     [snapshotId],
   );
   const analysesGetUrl = useMemo(
-    () => nestSnapshotAnalysesUrl(snapshotId),
-    [snapshotId],
+    () => analysesGetUrlProp ?? nestSnapshotAnalysesUrl(snapshotId),
+    [analysesGetUrlProp, snapshotId],
   );
 
   async function run() {
@@ -40,10 +45,16 @@ export function SnapshotAnalyzeActions(props: SnapshotAnalyzeActionsProps) {
       setText(topNParsed.message);
       return;
     }
+    if (chainContext.length > CHAIN_CONTEXT_MAX) {
+      setText(`chainContext 过长：最多 ${CHAIN_CONTEXT_MAX} 字符`);
+      return;
+    }
     const body: AnalyzeRequestBody = {};
     const a = agent.trim();
     if (a !== "") body.agent = a;
     if (topNParsed.value != null) body.topN = topNParsed.value;
+    const cc = chainContext.trim();
+    if (cc !== "") body.chainContext = cc;
 
     setLoading(true);
     setText("");
@@ -55,6 +66,9 @@ export function SnapshotAnalyzeActions(props: SnapshotAnalyzeActionsProps) {
       });
       const raw = await res.text();
       setText(`${res.ok ? "" : `HTTP ${res.status}\n`}${raw}`);
+      if (res.ok) {
+        router.refresh();
+      }
     } catch (e) {
       setText(e instanceof Error ? e.message : String(e));
     } finally {
@@ -92,8 +106,8 @@ export function SnapshotAnalyzeActions(props: SnapshotAnalyzeActionsProps) {
         <CopyTextButton text={analysesGetUrl} idleLabel="复制 GET URL" className="h-7" />
         <CopyTextButton text={analyzePostUrl} idleLabel="复制 POST URL" className="h-7" />
         <span className="text-xs text-muted-foreground">
-          POST {BACKEND_ADMIN_DOC.snapshotAnalyze}；body 可选 agent（≤{AGENT_MAX}）、topN（{TOPN_MIN}–{TOPN_MAX}）；
-          可选 OPENAI_API_KEY 润色
+          POST {BACKEND_ADMIN_DOC.snapshotAnalyze}；body 可选 agent（≤{AGENT_MAX}）、topN（{TOPN_MIN}–{TOPN_MAX}）、chainContext（≤{CHAIN_CONTEXT_MAX}）；
+          可选 OPENAI_API_KEY 润色；约定 agent：rules-v1、post-snapshot-summary-v1、trend-v1、credibility-v1
         </span>
       </div>
       <div className="mt-3 flex flex-wrap items-end gap-4">
@@ -104,7 +118,7 @@ export function SnapshotAnalyzeActions(props: SnapshotAnalyzeActionsProps) {
             value={agent}
             onChange={(e) => setAgent(e.target.value)}
             maxLength={AGENT_MAX}
-            placeholder="默认由服务端选择"
+            placeholder="留空则 rules-v1（服务端默认）"
             disabled={loading}
             autoComplete="off"
           />
@@ -122,6 +136,26 @@ export function SnapshotAnalyzeActions(props: SnapshotAnalyzeActionsProps) {
             autoComplete="off"
           />
         </div>
+      </div>
+      <div className="mt-3 flex flex-col gap-1.5">
+        <Label htmlFor="snapshot-analyze-chain">chainContext（可选，模拟流水线上文）</Label>
+        <textarea
+          id="snapshot-analyze-chain"
+          value={chainContext}
+          onChange={(e) => setChainContext(e.target.value)}
+          maxLength={CHAIN_CONTEXT_MAX}
+          placeholder="留空则无；有 OPENAI_API_KEY 时拼入 user 消息前缀"
+          disabled={loading}
+          autoComplete="off"
+          rows={3}
+          className={cn(
+            "min-h-20 w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm transition-colors outline-none placeholder:text-muted-foreground",
+            "focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30",
+          )}
+        />
+        <p className="text-[11px] text-muted-foreground">
+          {chainContext.length}/{CHAIN_CONTEXT_MAX}
+        </p>
       </div>
       {text ? (
         <pre className="mt-3 max-h-64 overflow-auto rounded-md bg-muted p-3 text-xs whitespace-pre-wrap">

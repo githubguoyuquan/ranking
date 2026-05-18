@@ -62,12 +62,16 @@ export class RankingCacheService implements OnModuleDestroy {
     return Number.isFinite(n) && n >= 5 ? n : 120;
   }
 
-  /** 查询参数指纹（含「默认最新」语义，不宜复用快照缓存） */
-  leaderboardKey(slug: string, q: { version?: string; timeWindow?: string; windowStart?: string }): string {
+  /** 查询参数指纹（含「默认最新」语义，不宜复用快照缓存；`includeAiStats` 与快照 GET 一致，独立键避免混写） */
+  leaderboardKey(
+    slug: string,
+    q: { version?: string; timeWindow?: string; windowStart?: string; includeAiStats?: boolean },
+  ): string {
     const v = q.version ?? '_';
     const t = q.timeWindow ?? '_';
     const w = q.windowStart ?? '_';
-    return `ranking:v1:lb:${encodeURIComponent(slug)}:${v}:${t}:${w}`;
+    const s = q.includeAiStats === true ? '1' : '0';
+    return `ranking:v1:lb:${encodeURIComponent(slug)}:${v}:${t}:${w}:s${s}`;
   }
 
   async getSnapshotJson(id: bigint): Promise<string | null> {

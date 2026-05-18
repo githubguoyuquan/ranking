@@ -38,6 +38,10 @@ type CompareResponse = {
     id: string;
     snapshotTime: string;
     snapshotVersion: string;
+    aiAnalysisCount?: number;
+    hasFollowupBrief?: boolean;
+    hasTrendBrief?: boolean;
+    hasCredibilityBrief?: boolean;
   }>;
   rowCount?: number;
   rows?: Array<{
@@ -62,10 +66,25 @@ function formatShortTime(iso: string) {
   }
 }
 
+function snapshotAiBriefCaption(s: NonNullable<CompareResponse["snapshots"]>[number]) {
+  if (typeof s.aiAnalysisCount !== "number") return null;
+  const kinds: string[] = [];
+  if (s.hasFollowupBrief) kinds.push("跟进");
+  if (s.hasTrendBrief) kinds.push("趋势");
+  if (s.hasCredibilityBrief) kinds.push("可信度");
+  return (
+    <div className="text-[10px] font-normal normal-case leading-snug opacity-90">
+      Ai 简报 {s.aiAnalysisCount}
+      {kinds.length > 0 ? ` · ${kinds.join(" · ")}` : ""}
+    </div>
+  );
+}
+
 function CompareSnapshotsInner() {
   const sp = useSearchParams();
   const router = useRouter();
   const [idsInput, setIdsInput] = useState("");
+  const [includeAiStats, setIncludeAiStats] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [data, setData] = useState<CompareResponse | null>(null);
@@ -82,6 +101,13 @@ function CompareSnapshotsInner() {
     );
   }, [sp]);
 
+  useEffect(() => {
+    const raw = sp.get("includeAiStats");
+    setIncludeAiStats(
+      raw === "1" || (typeof raw === "string" && raw.toLowerCase() === "true"),
+    );
+  }, [sp]);
+
   const parsedIds = useMemo(() => snapshotIdsFromInput(idsInput), [idsInput]);
   const invalidSnapshotIds = useMemo(
     () => parsedIds.filter((id) => !isDecimalBigIntIdString(id)),
@@ -91,14 +117,22 @@ function CompareSnapshotsInner() {
     parsedIds.length >= 2 &&
     parsedIds.length <= 10 &&
     invalidSnapshotIds.length === 0;
-  const comparePostBody = useMemo(
-    () =>
-      canCompare ? JSON.stringify({ snapshotIds: parsedIds }) : "",
-    [canCompare, parsedIds],
-  );
+  const comparePostBody = useMemo(() => {
+    if (!canCompare) return "";
+    const body: { snapshotIds: string[]; includeAiStats?: boolean } = {
+      snapshotIds: parsedIds,
+    };
+    if (includeAiStats) body.includeAiStats = true;
+    return JSON.stringify(body);
+  }, [canCompare, parsedIds, includeAiStats]);
   const compareSharePath = useMemo(
-    () => (canCompare ? snapshotsCompareAdminPath(parsedIds) : ""),
-    [canCompare, parsedIds],
+    () =>
+      canCompare
+        ? snapshotsCompareAdminPath(parsedIds, {
+            includeAiStats: includeAiStats || undefined,
+          })
+        : "",
+    [canCompare, parsedIds, includeAiStats],
   );
 
   async function run() {
@@ -128,7 +162,10 @@ function CompareSnapshotsInner() {
       const res = await fetch(nestSnapshotCompareUrl(), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ snapshotIds }),
+        body: JSON.stringify({
+          snapshotIds,
+          ...(includeAiStats ? { includeAiStats: true } : {}),
+        }),
       });
       const text = await res.text();
       if (!res.ok) {
@@ -136,7 +173,12 @@ function CompareSnapshotsInner() {
         return;
       }
       setData(JSON.parse(text) as CompareResponse);
-      router.replace(snapshotsCompareAdminPath(snapshotIds), { scroll: false });
+      router.replace(
+        snapshotsCompareAdminPath(snapshotIds, {
+          includeAiStats: includeAiStats || undefined,
+        }),
+        { scroll: false },
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -156,7 +198,9 @@ function CompareSnapshotsInner() {
           下 2–10 张快照；每个 id 须为十进制数字（与后端{" "}
           <code className="rounded bg-muted px-1 text-xs">BigInt</code> 一致）。URL 可加{" "}
           <code className="rounded bg-muted px-1 text-xs">?ids=</code>
-          （英文逗号分隔的 id 列表）。
+          （英文逗号分隔的 id 列表）；可选{" "}
+          <code className="rounded bg-muted px-1 text-xs">includeAiStats=1</code>{" "}
+          预勾选「合并 AI 简报统计」。
         </p>
         <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
           <CopyTextButton
@@ -197,6 +241,19 @@ function CompareSnapshotsInner() {
                 void run();
               }}
             />
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="compare-include-ai-stats"
+              className="size-4 rounded border border-input accent-primary"
+              checked={includeAiStats}
+              onChange={(e) => setIncludeAiStats(e.target.checked)}
+            />
+            <Label htmlFor="compare-include-ai-stats" className="text-sm font-normal">
+              POST 体含 <code className="rounded bg-muted px-1 text-xs">includeAiStats</code>
+              ，响应每列快照附带简报条数与类型标记
+            </Label>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Button
@@ -329,6 +386,7 @@ function CompareSnapshotsInner() {
                           <div className="text-[10px] font-normal normal-case opacity-90">
                             {formatShortTime(s.snapshotTime)}
                           </div>
+                          {snapshotAiBriefCaption(s)}
                         </div>
                       </th>
                     ))}

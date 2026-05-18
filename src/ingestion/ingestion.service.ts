@@ -12,6 +12,7 @@ import {
   type CrawlJobPayload,
   urlFingerprint,
 } from './crawl-job';
+import { clampCrawlTasksListTake } from './crawl-list-limits';
 import { crawlUrlViolation, fetchUrlForCrawl } from './http-fetch';
 import { fetchUrlForCrawlPlaywright } from './http-fetch-playwright';
 
@@ -92,6 +93,19 @@ export class IngestionService {
     });
     if (!task) throw new NotFoundException('CrawlTask not found');
     return task;
+  }
+
+  /** 最近任务（运营台列表 / 引擎监控）；可选按 sourceId 收窄 */
+  async listCrawlTasks(limit = 30, sourceId?: bigint) {
+    const take = clampCrawlTasksListTake(limit);
+    return this.prisma.crawlTask.findMany({
+      where: sourceId !== undefined ? { sourceId } : undefined,
+      orderBy: { id: 'desc' },
+      take,
+      include: {
+        source: { select: { id: true, name: true, kind: true } },
+      },
+    });
   }
 
   async listCrawledUrlsForSource(sourceId: bigint, limit = 50) {

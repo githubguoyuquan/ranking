@@ -34,6 +34,7 @@ import {
   nestCrawlSourcesListUrl,
   nestCrawlSourcesUrl,
   nestCrawlSourceUrlsUrl,
+  nestCrawlTasksListUrl,
   nestCrawlTaskUrl,
   nestCrawlTasksUrl,
   nestCrawlUrlsRegisterUrl,
@@ -144,6 +145,14 @@ export default function CrawlAdminPage() {
     if (!t) return "";
     return nestCrawlCheckpointUrl(t);
   }, [checkpointCrawlerName]);
+
+  const crawlTasksListAllUrl = useMemo(() => nestCrawlTasksListUrl(30), []);
+
+  const crawlTasksListForSourceUrl = useMemo(() => {
+    const id = sourceId.trim();
+    if (!id || !isDecimalBigIntIdString(id)) return "";
+    return nestCrawlTasksListUrl(30, id);
+  }, [sourceId]);
 
   const refreshSources = useCallback(async () => {
     try {
@@ -645,7 +654,12 @@ export default function CrawlAdminPage() {
             <code className="text-xs">completed</code> /{" "}
             <code className="text-xs">failed</code>（最长约 2 分钟）。sourceId 须为十进制
             Source 主键（至多 {DECIMAL_BIGINT_ID_MAX_DIGITS}{" "}
-            位）。在 sourceId 或 seedUrl 按{" "}
+            位）。<code className="rounded bg-muted px-1 text-xs">GET</code>{" "}
+            <code className="rounded bg-muted px-1 text-xs">
+              /v1/crawl/tasks
+            </code>{" "}
+            可按 <code className="text-xs">limit</code>、
+            <code className="text-xs">sourceId</code> 列出近期任务。在 sourceId 或 seedUrl 按{" "}
             <kbd className="rounded border border-border bg-muted px-1 text-[10px]">Enter</kbd>{" "}
             可提交任务。
           </CardDescription>
@@ -658,6 +672,39 @@ export default function CrawlAdminPage() {
               className="h-6"
             />
             <span className="text-muted-foreground/90">POST + JSON body 提交任务</span>
+            <span className="text-muted-foreground/40" aria-hidden>
+              ·
+            </span>
+            <a
+              href={crawlTasksListAllUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-primary underline-offset-4 hover:underline"
+            >
+              GET 任务列表（limit=30）
+            </a>
+            <CopyTextButton
+              text={crawlTasksListAllUrl}
+              idleLabel="复制任务列表 URL（全量）"
+              className="h-6"
+            />
+            {crawlTasksListForSourceUrl ? (
+              <>
+                <a
+                  href={crawlTasksListForSourceUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-primary underline-offset-4 hover:underline"
+                >
+                  GET 任务列表（当前 source）
+                </a>
+                <CopyTextButton
+                  text={crawlTasksListForSourceUrl}
+                  idleLabel="复制任务列表 URL（当前 source）"
+                  className="h-6"
+                />
+              </>
+            ) : null}
           </p>
           <div className="space-y-2">
             <Label htmlFor="crawl-task-sourceId">sourceId</Label>

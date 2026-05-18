@@ -5,6 +5,9 @@ export const KAFKA_TOPIC_RANKING_SNAPSHOT_COMPLETED =
 /** Outbox row type (matches DB `OutboxEvent.type`) */
 export const OUTBOX_TYPE_RANKING_SNAPSHOT_COMPLETED = 'ranking.snapshot.completed';
 
+/** 排行物化后编排占位（默认仅写 DB，不送 Kafka；Phase B 扩展 Agent / 多步任务） */
+export const OUTBOX_TYPE_RANKING_FOLLOWUP_REQUESTED = 'ranking.followup.requested';
+
 /** 异步写入 ClickHouse（与 Kafka 行同事务插入，由 ClickhouseOutboxFlusher 消费） */
 export const OUTBOX_TYPE_CLICKHOUSE_RANKING_SNAPSHOT = 'clickhouse.ranking.snapshot.ingest';
 

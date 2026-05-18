@@ -4,9 +4,12 @@ import {
   nestV1CrawlCheckpointPath,
   nestV1CrawlSourceUrlsPath,
   nestV1CrawlSourcesListPath,
+  nestV1CrawlTasksListPath,
   nestV1CrawlTaskPath,
   nestV1PathWithQuery,
   nestV1EntityRankHistoryPath,
+  nestV1TopicVersionPolicyPath,
+  nestV1TrendsHotPath,
   nestV1RankingJobPath,
   nestV1RankingStatusPath,
   nestV1SnapshotAnalysesPath,
@@ -59,12 +62,15 @@ export function nestRankingJobUrl(jobId: string): string {
   return nestAbs(nestV1RankingJobPath(jobId));
 }
 
-export function nestSnapshotV1Url(snapshotId: string): string {
-  return nestAbs(nestV1SnapshotPath(snapshotId));
+export function nestSnapshotV1Url(snapshotId: string, query?: URLSearchParams): string {
+  return nestAbs(nestV1SnapshotPath(snapshotId, query));
 }
 
-export function nestSnapshotAnalysesUrl(snapshotId: string): string {
-  return nestAbs(nestV1SnapshotAnalysesPath(snapshotId));
+export function nestSnapshotAnalysesUrl(
+  snapshotId: string,
+  query?: URLSearchParams,
+): string {
+  return nestAbs(nestV1SnapshotAnalysesPath(snapshotId, query));
 }
 
 export function nestSnapshotCompareUrl(): string {
@@ -103,6 +109,14 @@ export function nestEntityRankHistoryUrl(
   return nestAbs(nestV1EntityRankHistoryPath(entityId, query));
 }
 
+export function nestTopicVersionPolicyUrl(topicVersionId: string): string {
+  return nestAbs(nestV1TopicVersionPolicyPath(topicVersionId));
+}
+
+export function nestTrendsHotUrl(query?: URLSearchParams): string {
+  return nestAbs(nestV1TrendsHotPath(query));
+}
+
 export function nestCrawlSourcesListUrl(limit: number): string {
   return nestAbs(nestV1CrawlSourcesListPath(limit));
 }
@@ -117,6 +131,11 @@ export function nestCrawlSourceUrlsUrl(sourceId: string, limit: number): string 
 
 export function nestCrawlTasksUrl(): string {
   return nestAbs(NEST_V1.crawlTasks);
+}
+
+/** GET 最近任务列表（可选 sourceId） */
+export function nestCrawlTasksListUrl(limit: number, sourceId?: string): string {
+  return nestAbs(nestV1CrawlTasksListPath(limit, sourceId));
 }
 
 export function nestCrawlTaskUrl(taskId: string): string {

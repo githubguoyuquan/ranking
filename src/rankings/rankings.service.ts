@@ -27,21 +27,30 @@ import {
   RANKING_QUEUE,
   type RankingJobPayload,
 } from './ranking-job';
+import {
+  buildRankingFollowupJobId,
+  RANKING_FOLLOWUP_JOB_NAME,
+  RANKING_FOLLOWUP_QUEUE,
+  type RankingFollowupPayload,
+} from './ranking-followup-job';
 import { ClickhouseService } from '../analytics/clickhouse.service';
 import { RankingCacheService } from '../cache/ranking-cache.service';
 import {
   OUTBOX_TYPE_CLICKHOUSE_RANKING_SNAPSHOT,
+  OUTBOX_TYPE_RANKING_FOLLOWUP_REQUESTED,
   OUTBOX_TYPE_RANKING_SNAPSHOT_COMPLETED,
 } from '../outbox/outbox.constants';
 import { toPlainJson } from '../lib/json';
 import { elasticEntitySyncOutboxCreate } from '../search/elastic-entity-outbox';
 import { ElasticService } from '../search/elastic.service';
-
-type PolicyJson = {
-  entityIds?: string[];
-  weights: Record<string, number>;
-  requiredSignalKeys?: string[];
-};
+import { parseRankingPolicyJson, type RankingPolicyJson } from '../domain/policy-json';
+import {
+  AI_AGENT_CREDIBILITY_V1,
+  AI_AGENT_POST_SNAPSHOT_SUMMARY_V1,
+  AI_AGENT_TREND_V1,
+  parseFollowupAnalyzePipeline,
+} from '../agent/ai-agent.constants';
+import { SnapshotAnalyzeService } from '../agent/snapshot-analyze.service';
 
 const defaultWeights: Record<string, number> = {
   streams: 0.35,
@@ -83,6 +92,9 @@ export class RankingsService {
   constructor(
     private readonly prisma: PrismaService,
     @InjectQueue(RANKING_QUEUE) private readonly rankingQueue: Queue<RankingJobPayload>,
+    @InjectQueue(RANKING_FOLLOWUP_QUEUE)
+    private readonly rankingFollowupQueue: Queue<RankingFollowupPayload>,
+    private readonly snapshotAnalyze: SnapshotAnalyzeService,
     private readonly rankingCache: RankingCacheService,
     private readonly elastic: ElasticService,
     @Optional() private readonly clickhouse?: ClickhouseService,
@@ -100,7 +112,7 @@ export class RankingsService {
       },
     });
 
-    const policy: PolicyJson = {
+    const policy: RankingPolicyJson = {
       weights: defaultWeights,
       requiredSignalKeys: ['streams', 'mentions', 'social'],
     };
@@ -278,21 +290,34 @@ export class RankingsService {
 
   /**
    * HTTP API 用：优先读 Redis（与 DB 相同的 toPlainJson 形状）；缓存未命中再查库并回填。
+   * `includeAiStats` 时跳过缓存读且**不回写**缓存，并在 payload 上合并当前 `AiAnalysis` 统计（简报计数与跟进类标记）。
    */
-  async getSnapshotForApi(id: bigint): Promise<unknown | null> {
-    const cached = await this.rankingCache.getSnapshotJson(id);
-    if (cached) {
-      try {
-        return JSON.parse(cached) as unknown;
-      } catch {
-        /* 损坏条目，改走 DB */
+  async getSnapshotForApi(
+    id: bigint,
+    opts?: { includeAiStats?: boolean },
+  ): Promise<unknown | null> {
+    if (!opts?.includeAiStats) {
+      const cached = await this.rankingCache.getSnapshotJson(id);
+      if (cached) {
+        try {
+          return JSON.parse(cached) as unknown;
+        } catch {
+          /* 损坏条目，改走 DB */
+        }
       }
     }
+
     const snap = await this.loadSnapshotFull(id);
     if (!snap) return null;
     const plain = toPlainJson(snap);
-    await this.rankingCache.setSnapshotJson(id, JSON.stringify(plain));
-    return plain;
+
+    if (!opts?.includeAiStats) {
+      await this.rankingCache.setSnapshotJson(id, JSON.stringify(plain));
+      return plain;
+    }
+
+    const stats = await this.aiAnalysisQuickStatsForSnapshot(id);
+    return { ...(plain as Record<string, unknown>), ...stats };
   }
 
   private snapshotInclude() {
@@ -319,11 +344,16 @@ export class RankingsService {
 
   /**
    * 按 slug 解析「当前」榜单：默认取最新 effectiveFrom 的 TopicVersion、最近完成的 TopicRanking（含快照），
-   * 嵌套 `snapshot` 与 `GET /v1/snapshots/:id` 同源（再走快照 Redis）。
+   * 嵌套 `snapshot` 与 `GET /v1/snapshots/:id` 同源；可选 `includeAiStats` 时与快照 GET 一致合并简报统计（独立热榜缓存键）。
    */
   async getLeaderboardForApi(
     slug: string,
-    query: { version?: string; timeWindow?: TimeWindow; windowStart?: string },
+    query: {
+      version?: string;
+      timeWindow?: TimeWindow;
+      windowStart?: string;
+      includeAiStats?: boolean;
+    },
   ): Promise<unknown | null> {
     if (query.windowStart !== undefined && query.timeWindow === undefined) {
       throw new BadRequestException('timeWindow is required when windowStart is set');
@@ -333,6 +363,7 @@ export class RankingsService {
       version: query.version,
       timeWindow: query.timeWindow,
       windowStart: query.windowStart,
+      includeAiStats: query.includeAiStats === true,
     };
     const cacheKey = this.rankingCache.leaderboardKey(slug, qKey);
     const cached = await this.rankingCache.getLeaderboardJson(cacheKey);
@@ -397,7 +428,9 @@ export class RankingsService {
     });
     if (!snapshot) return null;
 
-    const snapshotPayload = await this.getSnapshotForApi(snapshot.id);
+    const snapshotPayload = await this.getSnapshotForApi(snapshot.id, {
+      includeAiStats: query.includeAiStats === true,
+    });
     if (!snapshotPayload) return null;
 
     const body = {
@@ -466,6 +499,13 @@ export class RankingsService {
 
     try {
       const snapshot = await this.materializeRankingSnapshot(topicRanking, topicVersion, args);
+      await this.enqueuePostSnapshotFollowup(
+        snapshot.id,
+        topicRanking.id,
+        topicVersion.id,
+        topicVersion.topicId,
+        args.timeWindow,
+      );
       return this.serializeSnapshot(snapshot);
     } catch (err) {
       await this.prisma.topicRanking.update({
@@ -599,6 +639,13 @@ export class RankingsService {
 
     try {
       const snap = await this.materializeRankingSnapshot(topicRanking, topicVersion, args);
+      await this.enqueuePostSnapshotFollowup(
+        snap.id,
+        topicRankingId,
+        topicVersion.id,
+        topicVersion.topicId,
+        args.timeWindow,
+      );
       return this.serializeSnapshot(snap);
     } catch (err) {
       await this.prisma.topicRanking.update({
@@ -627,6 +674,167 @@ export class RankingsService {
     };
   }
 
+  /**
+   * Phase B：物化成功后入队轻量 follow-up（与主排行解耦，便于挂摘要 / Agent DAG）。
+   * `RANKING_FOLLOWUP_DISABLED=true` 时跳过入队。
+   */
+  private async enqueuePostSnapshotFollowup(
+    snapshotId: bigint,
+    topicRankingId: bigint,
+    topicVersionId: bigint,
+    topicId: bigint,
+    timeWindow: TimeWindow,
+  ): Promise<void> {
+    if (process.env.RANKING_FOLLOWUP_DISABLED === 'true') {
+      return;
+    }
+    const payload: RankingFollowupPayload = {
+      schemaVersion: 1,
+      snapshotId: snapshotId.toString(),
+      topicRankingId: topicRankingId.toString(),
+      topicVersionId: topicVersionId.toString(),
+      topicId: topicId.toString(),
+      timeWindow,
+    };
+    const jobId = buildRankingFollowupJobId(payload.snapshotId);
+    try {
+      await this.rankingFollowupQueue.add(RANKING_FOLLOWUP_JOB_NAME, payload, {
+        jobId,
+        removeOnComplete: 500,
+        removeOnFail: 50,
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 3000 },
+      });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/already exists|duplicate/i.test(msg)) {
+        this.logger.debug(`ranking followup job exists: ${jobId}`);
+        return;
+      }
+      this.logger.warn(`ranking followup enqueue failed (${jobId}): ${msg}`);
+    }
+  }
+
+  /** BullMQ `ranking-followup` Worker 处理函数 */
+  async handleRankingFollowupJob(data: RankingFollowupPayload): Promise<Record<string, unknown>> {
+    const snapshotId = BigInt(data.snapshotId);
+    const snap = await this.prisma.topicRankSnapshot.findUnique({
+      where: { id: snapshotId },
+      select: { id: true, topicRankingId: true, snapshotTime: true },
+    });
+    if (!snap) {
+      this.logger.warn(`followup: snapshot ${data.snapshotId} not found`);
+      return { ok: false, reason: 'snapshot not found' };
+    }
+    this.logger.log(
+      `ranking.followup post-snapshot snapshotId=${data.snapshotId} topicRankingId=${data.topicRankingId} timeWindow=${data.timeWindow}`,
+    );
+    if (process.env.RANKING_FOLLOWUP_OUTBOX === 'true') {
+      await this.prisma.outboxEvent.create({
+        data: {
+          type: OUTBOX_TYPE_RANKING_FOLLOWUP_REQUESTED,
+          payload: {
+            schemaVersion: 1,
+            snapshotId: data.snapshotId,
+            topicRankingId: data.topicRankingId,
+            topicVersionId: data.topicVersionId,
+            topicId: data.topicId,
+            timeWindow: data.timeWindow,
+            snapshotTime: snap.snapshotTime.toISOString(),
+          },
+        },
+      });
+    }
+
+    const sidStr = data.snapshotId;
+    const pipeline = this.resolveFollowupAnalyzePipeline();
+    const chainBlocks: string[] = [];
+    let analyzedSummary = false;
+    let analyzedTrend = false;
+    let analyzedCredibility = false;
+
+    for (const agent of pipeline) {
+      const chainContext = chainBlocks.length > 0 ? chainBlocks.join('\n\n---\n\n') : undefined;
+      const res = await this.tryFollowupAiAnalysis(snapshotId, sidStr, agent, chainContext);
+      if (res.ok) {
+        chainBlocks.push(`[${agent}] ${res.summary}`);
+      }
+      if (agent === AI_AGENT_POST_SNAPSHOT_SUMMARY_V1) {
+        analyzedSummary ||= res.ok;
+      } else if (agent === AI_AGENT_TREND_V1) {
+        analyzedTrend ||= res.ok;
+      } else if (agent === AI_AGENT_CREDIBILITY_V1) {
+        analyzedCredibility ||= res.ok;
+      }
+    }
+
+    return toPlainJson({
+      ok: true,
+      snapshotId: data.snapshotId,
+      analyzed: analyzedSummary || analyzedTrend || analyzedCredibility,
+      analyzedSummary,
+      analyzedTrend,
+      analyzedCredibility,
+      analyzePipeline: pipeline,
+    }) as Record<string, unknown>;
+  }
+
+  private resolveFollowupAnalyzePipeline(): string[] {
+    const raw = process.env.RANKING_FOLLOWUP_ANALYZE_PIPELINE?.trim();
+    if (raw) {
+      const { agents, unknown } = parseFollowupAnalyzePipeline(raw);
+      for (const u of unknown) {
+        this.logger.warn(
+          `followup: RANKING_FOLLOWUP_ANALYZE_PIPELINE unknown segment "${u}" skipped`,
+        );
+      }
+      if (agents.length === 0) {
+        this.logger.warn(
+          `followup: RANKING_FOLLOWUP_ANALYZE_PIPELINE parsed empty from "${raw.slice(0, 120)}"`,
+        );
+      }
+      return agents;
+    }
+    const pipeline: string[] = [];
+    if (process.env.RANKING_FOLLOWUP_ANALYZE === 'true') {
+      pipeline.push(AI_AGENT_POST_SNAPSHOT_SUMMARY_V1);
+    }
+    if (process.env.RANKING_FOLLOWUP_ANALYZE_TREND === 'true') {
+      pipeline.push(AI_AGENT_TREND_V1);
+    }
+    if (process.env.RANKING_FOLLOWUP_ANALYZE_CREDIBILITY === 'true') {
+      pipeline.push(AI_AGENT_CREDIBILITY_V1);
+    }
+    return pipeline;
+  }
+
+  private rankingFollowupAnalyzeTopN(): number {
+    const topNRaw = Number(process.env.RANKING_FOLLOWUP_ANALYZE_TOPN ?? '8');
+    return Math.min(50, Math.max(1, Number.isFinite(topNRaw) ? topNRaw : 8));
+  }
+
+  private async tryFollowupAiAnalysis(
+    snapshotId: bigint,
+    snapshotIdStr: string,
+    agent: string,
+    chainContext?: string,
+  ): Promise<{ ok: true; summary: string } | { ok: false }> {
+    try {
+      const row = await this.snapshotAnalyze.analyzeSnapshot(snapshotId, {
+        agent,
+        topN: this.rankingFollowupAnalyzeTopN(),
+        chainContext,
+      });
+      return { ok: true, summary: row.summary };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.logger.warn(
+        `followup: AiAnalysis (${agent}) skipped for snapshot ${snapshotIdStr}: ${msg}`,
+      );
+      return { ok: false };
+    }
+  }
+
   private toPayload(topicRankingId: bigint, args: RunRankingArgs): RankingJobPayload {
     return {
       topicRankingId: topicRankingId.toString(),
@@ -649,8 +857,68 @@ export class RankingsService {
     if (ids.length === 0) throw new BadRequestException('no entities to rank');
   }
 
+  private async assertPolicyEntityIdsExist(entityIds: string[]) {
+    const unique = [...new Set(entityIds)];
+    const ids = unique.map((s) => BigInt(s));
+    const found = await this.prisma.entity.findMany({
+      where: { id: { in: ids } },
+      select: { id: true },
+    });
+    if (found.length !== ids.length) {
+      const ok = new Set(found.map((f) => f.id.toString()));
+      const missing = unique.filter((id) => !ok.has(id));
+      throw new BadRequestException(`unknown entity id(s): ${missing.join(', ')}`);
+    }
+  }
+
+  /**
+   * 校验并 PATCH `TopicVersion.policyJson`（`frozen` 为 true 时拒绝）。
+   */
+  async updateTopicVersionPolicy(topicVersionId: bigint, rawPolicy: unknown) {
+    let policy: RankingPolicyJson;
+    try {
+      policy = parseRankingPolicyJson(rawPolicy);
+    } catch (e) {
+      throw new BadRequestException(
+        e instanceof Error ? e.message : 'invalid policyJson',
+      );
+    }
+
+    const row = await this.prisma.topicVersion.findUnique({
+      where: { id: topicVersionId },
+    });
+    if (!row) throw new NotFoundException('topic version not found');
+    if (row.frozen) {
+      throw new BadRequestException('topic version is frozen');
+    }
+
+    if (policy.entityIds?.length) {
+      await this.assertPolicyEntityIdsExist(policy.entityIds);
+    }
+
+    await this.assertEntitiesPresent({
+      id: row.id,
+      policyJson: policy,
+    });
+
+    const updated = await this.prisma.topicVersion.update({
+      where: { id: topicVersionId },
+      data: { policyJson: policy as Prisma.InputJsonValue },
+    });
+
+    return toPlainJson({
+      id: updated.id.toString(),
+      topicId: updated.topicId.toString(),
+      version: updated.version,
+      frozen: updated.frozen,
+      effectiveFrom: updated.effectiveFrom.toISOString(),
+      effectiveTo: updated.effectiveTo?.toISOString() ?? null,
+      policyJson: updated.policyJson,
+    });
+  }
+
   private async resolveEntityIds(topicVersion: { policyJson: unknown }): Promise<bigint[]> {
-    const policy = topicVersion.policyJson as unknown as PolicyJson;
+    const policy = topicVersion.policyJson as unknown as RankingPolicyJson;
     let entityIds = (policy.entityIds ?? []).map((x) => BigInt(x));
     if (entityIds.length === 0) {
       const distinct = await this.prisma.entityMetric.findMany({
@@ -672,7 +940,7 @@ export class RankingsService {
     args: RunRankingArgs,
   ) {
     const snapshotTime = args.asOf ?? args.windowEnd;
-    const policy = topicVersion.policyJson as unknown as PolicyJson;
+    const policy = topicVersion.policyJson as unknown as RankingPolicyJson;
     const weights = policy.weights ?? defaultWeights;
     const required = new Set(policy.requiredSignalKeys ?? Object.keys(weights));
 
@@ -1153,6 +1421,68 @@ export class RankingsService {
     });
   }
 
+  private async distinctSnapshotIdsMatchingAnalysis(
+    snapshotIds: bigint[],
+    agent: string,
+    agentKind: string,
+  ): Promise<Set<string>> {
+    const out = new Set<string>();
+    if (snapshotIds.length === 0) return out;
+    const rows = await this.prisma.aiAnalysis.findMany({
+      where: {
+        snapshotId: { in: snapshotIds },
+        OR: [
+          { agent },
+          {
+            detailJson: {
+              path: ['agentKind'],
+              equals: agentKind,
+            },
+          },
+        ],
+      },
+      distinct: ['snapshotId'],
+      select: { snapshotId: true },
+    });
+    for (const r of rows) {
+      out.add(r.snapshotId.toString());
+    }
+    return out;
+  }
+
+  private async aiAnalysisQuickStatsForSnapshot(snapshotId: bigint): Promise<{
+    aiAnalysisCount: number;
+    hasFollowupBrief: boolean;
+    hasTrendBrief: boolean;
+    hasCredibilityBrief: boolean;
+  }> {
+    const sid = snapshotId.toString();
+    const [aiAnalysisCount, fu, tr, cr] = await Promise.all([
+      this.prisma.aiAnalysis.count({ where: { snapshotId } }),
+      this.distinctSnapshotIdsMatchingAnalysis(
+        [snapshotId],
+        AI_AGENT_POST_SNAPSHOT_SUMMARY_V1,
+        'followup',
+      ),
+      this.distinctSnapshotIdsMatchingAnalysis(
+        [snapshotId],
+        AI_AGENT_TREND_V1,
+        'trend',
+      ),
+      this.distinctSnapshotIdsMatchingAnalysis(
+        [snapshotId],
+        AI_AGENT_CREDIBILITY_V1,
+        'credibility',
+      ),
+    ]);
+    return {
+      aiAnalysisCount,
+      hasFollowupBrief: fu.has(sid),
+      hasTrendBrief: tr.has(sid),
+      hasCredibilityBrief: cr.has(sid),
+    };
+  }
+
   /**
    * 某话题下近期物化的排行榜快照（跨 `TopicVersion` / `TopicRanking`）。
    */
@@ -1200,6 +1530,40 @@ export class RankingsService {
       },
     });
 
+    const snapshotIds = rows.map((r) => r.id);
+    const analysisCountBySnapshot = new Map<string, number>();
+    let followupSnapshotIds = new Set<string>();
+    let trendSnapshotIds = new Set<string>();
+    let credibilitySnapshotIds = new Set<string>();
+
+    if (snapshotIds.length > 0) {
+      const countAgg = await this.prisma.aiAnalysis.groupBy({
+        by: ['snapshotId'],
+        where: { snapshotId: { in: snapshotIds } },
+        _count: { _all: true },
+      });
+      for (const c of countAgg) {
+        analysisCountBySnapshot.set(c.snapshotId.toString(), c._count._all);
+      }
+
+      const [fu, tr, cr] = await Promise.all([
+        this.distinctSnapshotIdsMatchingAnalysis(
+          snapshotIds,
+          AI_AGENT_POST_SNAPSHOT_SUMMARY_V1,
+          'followup',
+        ),
+        this.distinctSnapshotIdsMatchingAnalysis(snapshotIds, AI_AGENT_TREND_V1, 'trend'),
+        this.distinctSnapshotIdsMatchingAnalysis(
+          snapshotIds,
+          AI_AGENT_CREDIBILITY_V1,
+          'credibility',
+        ),
+      ]);
+      followupSnapshotIds = fu;
+      trendSnapshotIds = tr;
+      credibilitySnapshotIds = cr;
+    }
+
     return toPlainJson({
       topic: {
         id: topic.id.toString(),
@@ -1208,23 +1572,126 @@ export class RankingsService {
       },
       filter: { timeWindow: timeWindow ?? null, limit: take },
       count: rows.length,
-      snapshots: rows.map((r) => ({
-        id: r.id.toString(),
-        snapshotTime: r.snapshotTime.toISOString(),
-        snapshotVersion: r.snapshotVersion,
-        confidenceScore: r.confidenceScore,
-        generatedByAi: r.generatedByAi,
-        topicRankingId: r.topicRankingId.toString(),
-        topicRanking: {
-          id: r.topicRanking.id.toString(),
-          timeWindow: r.topicRanking.timeWindow,
-          windowStart: r.topicRanking.windowStart.toISOString(),
-          windowEnd: r.topicRanking.windowEnd.toISOString(),
-          status: r.topicRanking.status,
-          topicVersionId: r.topicRanking.topicVersion.id.toString(),
-          topicVersionLabel: r.topicRanking.topicVersion.version,
-        },
-      })),
+      snapshots: rows.map((r) => {
+        const sid = r.id.toString();
+        return {
+          id: sid,
+          snapshotTime: r.snapshotTime.toISOString(),
+          snapshotVersion: r.snapshotVersion,
+          confidenceScore: r.confidenceScore,
+          generatedByAi: r.generatedByAi,
+          topicRankingId: r.topicRankingId.toString(),
+          aiAnalysisCount: analysisCountBySnapshot.get(sid) ?? 0,
+          hasFollowupBrief: followupSnapshotIds.has(sid),
+          hasTrendBrief: trendSnapshotIds.has(sid),
+          hasCredibilityBrief: credibilitySnapshotIds.has(sid),
+          topicRanking: {
+            id: r.topicRanking.id.toString(),
+            timeWindow: r.topicRanking.timeWindow,
+            windowStart: r.topicRanking.windowStart.toISOString(),
+            windowEnd: r.topicRanking.windowEnd.toISOString(),
+            status: r.topicRanking.status,
+            topicVersionId: r.topicRanking.topicVersion.id.toString(),
+            topicVersionLabel: r.topicRanking.topicVersion.version,
+          },
+        };
+      }),
+    });
+  }
+
+  /**
+   * 从近期快照级 `TrendAnalysis` 的 `topRankGainers` 聚合「涨名次」热度（演示级只读）。
+   */
+  async listHotTrends(timeWindow?: TimeWindow, limit = 15) {
+    const take = Math.min(Math.max(limit, 1), 50);
+    const scan = 120;
+    const rows = await this.prisma.trendAnalysis.findMany({
+      where: {
+        entityId: null,
+        ...(timeWindow ? { window: timeWindow } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      take: scan,
+      select: {
+        topicId: true,
+        window: true,
+        createdAt: true,
+        payload: true,
+      },
+    });
+
+    const topicIdStrs = [...new Set(rows.map((r) => r.topicId.toString()))];
+    const topicIds = topicIdStrs.map((s) => BigInt(s));
+    const topics =
+      topicIds.length === 0
+        ? []
+        : await this.prisma.topic.findMany({
+            where: { id: { in: topicIds } },
+            select: { id: true, slug: true, title: true },
+          });
+    const topicById = new Map(topics.map((t) => [t.id.toString(), t]));
+
+    type Acc = {
+      canonicalName: string;
+      totalRankGain: number;
+      mentions: number;
+      topicSlugs: string[];
+    };
+    const agg = new Map<string, Acc>();
+
+    for (const r of rows) {
+      const payload = r.payload as Record<string, unknown>;
+      if (payload?.kind !== 'snapshot_summary') continue;
+      const gainers = payload.topRankGainers;
+      if (!Array.isArray(gainers)) continue;
+      const tInfo = topicById.get(r.topicId.toString());
+      const slug = tInfo?.slug ?? r.topicId.toString();
+
+      for (const g of gainers) {
+        if (typeof g !== 'object' || g === null) continue;
+        const o = g as Record<string, unknown>;
+        const eid = o.entityId != null ? String(o.entityId) : '';
+        const name = o.canonicalName != null ? String(o.canonicalName) : '';
+        const rc =
+          typeof o.rankChange === 'number' ? o.rankChange : Number(o.rankChange);
+        if (!eid || !Number.isFinite(rc) || rc <= 0) continue;
+
+        let acc = agg.get(eid);
+        if (!acc) {
+          acc = {
+            canonicalName: name,
+            totalRankGain: 0,
+            mentions: 0,
+            topicSlugs: [],
+          };
+          agg.set(eid, acc);
+        }
+        acc.totalRankGain += rc;
+        acc.mentions += 1;
+        if (name && !acc.canonicalName) acc.canonicalName = name;
+        if (!acc.topicSlugs.includes(slug)) acc.topicSlugs.push(slug);
+      }
+    }
+
+    const items = [...agg.entries()]
+      .map(([entityId, v]) => ({
+        entityId,
+        canonicalName: v.canonicalName || entityId,
+        totalRankGain: v.totalRankGain,
+        mentions: v.mentions,
+        topicSlugs: v.topicSlugs,
+      }))
+      .sort((a, b) => b.totalRankGain - a.totalRankGain)
+      .slice(0, take);
+
+    return toPlainJson({
+      filter: { timeWindow: timeWindow ?? null, limit: take },
+      source: {
+        analysesScanned: rows.length,
+        note:
+          'Aggregated from recent snapshot-level TrendAnalysis payloads (topRankGainers rank change).',
+      },
+      items,
     });
   }
 
@@ -1308,7 +1775,7 @@ export class RankingsService {
   /**
    * 并列对比若干快照的名次（须同属一个 TopicRanking）；`snapshotIds` 先去重并保持顺序。
    */
-  async compareSnapshots(rawIds: bigint[]) {
+  async compareSnapshots(rawIds: bigint[], includeAiStats?: boolean) {
     const seen = new Set<string>();
     const snapshotIds: bigint[] = [];
     for (const id of rawIds) {
@@ -1392,12 +1859,17 @@ export class RankingsService {
       return rA - rB;
     });
 
+    const statsList = includeAiStats
+      ? await Promise.all(ordered.map((s) => this.aiAnalysisQuickStatsForSnapshot(s.id)))
+      : null;
+
     return {
       topicRankingId: topicRankingId.toString(),
-      snapshots: ordered.map((s) => ({
+      snapshots: ordered.map((s, i) => ({
         id: s.id.toString(),
         snapshotTime: s.snapshotTime.toISOString(),
         snapshotVersion: s.snapshotVersion,
+        ...(statsList ? statsList[i] : {}),
       })),
       rowCount: rows.length,
       rows,

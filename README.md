@@ -9,20 +9,21 @@
 
 2. **P1 — Jobs & durability**  
    - ✅ BullMQ + Redis：异步 `POST /v1/rankings/run`（`"async": true`），进程内 Worker (`RankingProcessor`)  
+   - ✅ **排行编排（Phase B 起点）**：快照物化成功后入队 **`ranking-followup`**（`post-snapshot`），`RankingFollowupProcessor` 打日志；可选 `RANKING_FOLLOWUP_OUTBOX=true` 写 `OutboxEvent` 类型 `ranking.followup.requested`（**不**经当前 Kafka publisher，仅占位可观测）；`RANKING_FOLLOWUP_DISABLED=true` 跳过入队  
    - ✅ 幂等：`(topicRankingId, snapshotTime)` 唯一；`snapshotVersion` 采用 `${version}.${window}.${timestamp}`；任务 `jobId` 为 payload SHA-256  
    - ✅ `TopicRanking` 状态：`queued` → `running` → `completed` | `failed`  
    - ✅ **Transactional Outbox**：快照提交事务内写入 `OutboxEvent`；`OutboxPublisherService` 定时发往 Kafka 兼容 broker（默认 topic `ranking.snapshot.completed`）。未配置 `KAFKA_BROKERS` 时仅积累 outbox 并打日志。  
    - ✅ 本地 **Redpanda**：`docker compose` 中 `redpanda`，宿主机端口 **19092**（`.env` 中 `KAFKA_BROKERS=localhost:19092`）  
    - ✅ 多实例 **Outbox**：`leasedUntil` 租约 + `FOR UPDATE SKIP LOCKED` 抢占，避免并行重复发布  
-   - ✅ **爬虫**：Checkpoint / `Source` / `CrawlTask` / `CrawledUrl` + BullMQ `crawl`；**可选真 HTTP**（`CRAWL_HTTP_FETCH` 或 `kind: http-fetch`）或 **Playwright**（`CRAWL_USE_PLAYWRIGHT` / `kind: http-playwright`）：`contentHash`、`textPreview`、基础 SSRF；未开真抓取时仍为桩 `fetched_stub`
+   - ✅ **爬虫**：Checkpoint / `Source` / `CrawlTask` / `CrawledUrl` + BullMQ `crawl`；**`GET /v1/crawl/tasks`** 按 `limit`（1–100，默认 30）、可选 **`sourceId`** 列出近期任务（引擎监控 / 运营排障）；**可选真 HTTP**（`CRAWL_HTTP_FETCH` 或 `kind: http-fetch`）或 **Playwright**（`CRAWL_USE_PLAYWRIGHT` / `kind: http-playwright`）：`contentHash`、`textPreview`、基础 SSRF；未开真抓取时仍为桩 `fetched_stub`
 3. **P2 — Analytics & search**  
    - ✅ **ClickHouse**：compose、`metric_timeseries`、`AnalyticsModule`；`SYNC_RANKING_TO_CLICKHOUSE` + `CLICKHOUSE_URL` 时 `CLICKHOUSE_WRITE_MODE=direct`（默认）快照后直写，`outbox` 则同事务插入专用 Outbox 行并由 `ClickhouseOutboxFlusherService` 刷入；Outbox 按 `type` 分流，Kafka 仅发布 `ranking.snapshot.completed`  
    - ✅ **Redis 热读缓存**：`GET /v1/snapshots/:id` 长 TTL；`GET /v1/topics/:slug/leaderboard` 独立短 TTL 聚合缓存；无 Redis 或失败时降级查库  
    - ✅ **Elasticsearch（骨架）**：compose、`SearchModule`、**双索引** `ranking_entities`（实体）与 **`ranking_crawled_urls`（爬取 URL + textPreview）**；启用 ES 时实体写入走 Outbox（`elasticsearch.entity.sync`），**爬取任务**在 PG 事务内写入 **`elasticsearch.crawled_url.sync`**，由 **`ElasticCrawledUrlOutboxFlusherService`** 异步 upsert/delete；`GET /v1/search/crawled-urls-es`、`POST /admin/reindex-crawl-docs`；`admin/entities`、`seed-demo` 已接入实体侧；未配 `ELASTICSEARCH_NODE` 时仅 PG、无相关 Outbox 刷 ES
 
 4. **P3 — Agents & UI**  
-   - ✅ **管理前端**：`web/` — Next.js、快照图表、**搜索**（页眉 `GET /v1/search/health`；`/search?q=&limit=&entityIndex=&crawlIndex=&sourceId=&status=` 预填表单；**`limit` 前端钳制 1–30 与 DTO 一致**；**提交检索后地址栏与请求参数对齐**；**命中实体名可再点进同名检索**；**ES health 新标签 JSON**；**与表单一致的 GET /v1/search 新标签**、**复制 API URL**；**q 为空时主检索框 Enter 不提交**（与「搜索」按钮一致）；**limit/sourceId/status 在已有 q 时 Enter 触发搜索**（**sourceId 非空须十进制 ≤38 位**）/ **索引**（`POST /admin/reindex-*`；**`/reindex` 页脚 `GET /v1/search/health` 新标签**）/ **实体 / 爬虫**（`/entities?q=` 预填；列表 **q 最多 200 字符**（与聚合搜索一致）；**新标签打开当前 `GET /admin/entities`**；**新建/编辑 Enter 提交**；**canonicalName 为空时不 POST/PATCH**；**PATCH/DELETE 路径 id 须十进制（前端预校验）**；名称列→搜索；**爬虫**页 **数据源列表加载后自动选用首条**（避免空库误请求 id=1）、**新标签** `GET /v1/crawl/sources` / **当前 source urls**；**新建源 Enter**：**name/baseUrl 均非空**；**可选 trustTier 1–5（与 DTO 一致，表列 tier）、topicId（十进制，可空）**；**任务区**：**sourceId（十进制 ≤38 位）与 seedUrl 均非空**方可提交（与按钮一致）；异步 + 轮询 `GET /v1/crawl/tasks/:id`（**轮询前校验任务 id 为十进制**）、**话题**（热榜区 **复制 snapshotId / topicVersionId**；**新标签**当前 **versions / leaderboard**；**热榜 windowStart 非空时校验 ISO**；**slug/version/timeWindow/windowStart 框与 URL 预填截断（160/64/16/80）**）、**演示数据**（slug **Enter** · **复制**快照 ids / topicVersionId；成功写入后页脚 **首张快照**、**本批对比** 与 **索引/爬虫/Outbox** 等链）、**运行排行**（**topicVersionId** 未填不提交；**填写时校验十进制 id（≤38 位，与 BigInt 一致）**；**timeWindow / ISO 框 maxLength 16/80**；**提交前校验** `timeWindow` 枚举与 **ISO** 窗口时间；**演示数据**链至 **`/rankings/run?topicVersionId=`**；各框 **Enter** · **复制 POST 体**；**异步** **GET job / ranking status** 新标签与 **复制 id**）、**Outbox limit/type Enter**、根级 **loading / error**、快照 **Agent 简报**  
-   - ✅ **Agent（最小）**：`POST /admin/snapshots/:id/analyze` → `AiAnalysis`；body 可选 **`agent`（≤120）**、**`topN`（1–50）**；`GET /v1/snapshots/:id/analyses`；可选 `OPENAI_API_KEY` 调 GPT；生产需鉴权、配额与审计；管理台快照详情 **Agent 区**提供 **可选表单（与 DTO 一致）**、**新标签打开 analyses**、**复制 GET / POST URL**、`aria-live` 状态；得分分布图容器带 **简要 `aria-label`（读屏）**  
+   - ✅ **管理前端**：`web/` — Next.js、快照图表、**搜索**（页眉 `GET /v1/search/health`；`/search?q=&limit=&entityIndex=&crawlIndex=&sourceId=&status=` 预填表单；**`limit` 前端钳制 1–30 与 DTO 一致**；**提交检索后地址栏与请求参数对齐**；**命中实体名可再点进同名检索**；**ES health 新标签 JSON**；**与表单一致的 GET /v1/search 新标签**、**复制 API URL**；**q 为空时主检索框 Enter 不提交**（与「搜索」按钮一致）；**limit/sourceId/status 在已有 q 时 Enter 触发搜索**（**sourceId 非空须十进制 ≤38 位**）/ **索引**（`POST /admin/reindex-*`；**`/reindex` 页脚 `GET /v1/search/health` 新标签**）/ **实体 / 爬虫**（`/entities?q=` 预填；列表 **q 最多 200 字符**（与聚合搜索一致）；**新标签打开当前 `GET /admin/entities`**；**新建/编辑 Enter 提交**；**canonicalName 为空时不 POST/PATCH**；**PATCH/DELETE 路径 id 须十进制（前端预校验）**；名称列→搜索；**爬虫**页 **数据源列表加载后自动选用首条**（避免空库误请求 id=1）、**新标签** `GET /v1/crawl/sources` / **当前 source urls**；**新建源 Enter**：**name/baseUrl 均非空**；**可选 trustTier 1–5（与 DTO 一致，表列 tier）、topicId（十进制，可空）**；**任务区**：**sourceId（十进制 ≤38 位）与 seedUrl 均非空**方可提交（与按钮一致）；**GET 任务列表**（全量或当前 source）可 **新标签打开 / 复制 URL**；异步 + 轮询 `GET /v1/crawl/tasks/:id`（**轮询前校验任务 id 为十进制**）、**话题**（热榜区 **复制 snapshotId / topicVersionId**；**新标签**当前 **versions / leaderboard**；**热榜 windowStart 非空时校验 ISO**；**slug/version/timeWindow/windowStart 框与 URL 预填截断（160/64/16/80）**）、**演示数据**（slug **Enter** · **复制**快照 ids / topicVersionId；成功写入后页脚 **首张快照**、**本批对比** 与 **索引/爬虫/Outbox** 等链）、**运行排行**（**topicVersionId** 未填不提交；**填写时校验十进制 id（≤38 位，与 BigInt 一致）**；**timeWindow / ISO 框 maxLength 16/80**；**提交前校验** `timeWindow` 枚举与 **ISO** 窗口时间；**演示数据**链至 **`/rankings/run?topicVersionId=`**；各框 **Enter** · **复制 POST 体**；**异步** **GET job / ranking status** 新标签与 **复制 id**）、**Outbox limit/type Enter**、根级 **loading / error**、快照 **Agent 简报**  
+   - ✅ **Agent（最小）**：`POST /admin/snapshots/:id/analyze` → `AiAnalysis`；body 可选 **`agent`（≤120）**、**`topN`（1–50）**、**`chainContext`（≤8192，有 `OPENAI_API_KEY` 时写入 user 前缀）**；约定名 **`rules-v1`**（默认）、**`post-snapshot-summary-v1`** / **`trend-v1`** / **`credibility-v1`**（后两者可由 `ranking-followup` 选配，`detailJson.agentKind` 分别为 `followup` / `trend` / `credibility`）；`GET /v1/snapshots/:id/analyses` 返回 **`{ filter, total, analyses }`**，可选 **`agentKind`**、**`agent`**、**`limit`（1–200，默认 50）**、**`offset`**；可选 `OPENAI_API_KEY` 调 GPT；**`AI_ANALYSIS_DAILY_CAP`**（UTC 日条数软配额，占位）；生产需正式鉴权、配额与审计；**`RANKING_FOLLOWUP_ANALYZE_PIPELINE`**（非空则**仅**按逗号顺序跑多步、后续步将前序摘要写入 user 前缀；见 `.env.example`）或 **`RANKING_FOLLOWUP_ANALYZE`** / **`RANKING_FOLLOWUP_ANALYZE_TREND`** / **`RANKING_FOLLOWUP_ANALYZE_CREDIBILITY`**；共用 **`RANKING_FOLLOWUP_ANALYZE_TOPN`**；返回体含 **`analyzePipeline`**、**`analyzedSummary`** / **`analyzedTrend`** / **`analyzedCredibility`**（流水线中含 **`rules-v1`** 等时仍可能 **`analyzed`** 为 true）；**`detailJson.usedChainContext`** 标记链式上文；管理台快照详情 **Agent 区**提供 **可选表单（与 DTO 一致）**、**新标签打开 analyses**、**复制 GET / POST URL**、`aria-live` 状态；得分分布图容器带 **简要 `aria-label`（读屏）**  
    - ✅ **Playwright 爬取**：`CRAWL_USE_PLAYWRIGHT` 或 `Source.kind=http-playwright`；依赖 `playwright` + `npx playwright install chromium`  
    - ✅ **Elasticsearch 高亮**：实体与 `ranking_crawled_urls` 检索返回 `<em>` 高亮片段（管理台搜索页展示）
 
@@ -140,14 +141,17 @@ curl -s http://localhost:3000/v1/jobs/ranking/<jobId>
 curl -s http://localhost:3000/v1/rankings/<topicRankingId>/status
 ```
 
-快照详情：`GET /v1/snapshots/{id}`（bigint 已转字符串）。管理台 `/snapshots/:id` **路径 id 非法（非十进制等）时不请求 API，直接提示**；快照详情与 **快照对比** 表中的实体名可点进 **`/search?q=`**；得分分布 **ECharts 柱图点击柱条** 亦可跳到同名聚合搜索；**复制 snapshot id**、**复制 topicVersionId**、**复制 topicRankingId**、**新标签打开** **`GET /v1/snapshots/:id`**、**`GET /v1/snapshots/:id/analyses`** 与 **`GET /v1/rankings/:id/status`**。
+快照详情：`GET /v1/snapshots/{id}`（bigint 已转字符串）。可选 **`?includeAiStats=1`** 合并当前 **`AiAnalysis`** 条数与 **`hasFollowupBrief`** / **`hasTrendBrief`** / **`hasCredibilityBrief`**（**本条响应不走快照 Redis 缓存**）。管理台 `/snapshots/:id` 支持 **`?analysisKind=`**（与 API **`agentKind`** 一致）、**`?analysisPage=`**（默认 1）、**`?analysisLimit=`**（默认 50，最大 200）与简报分页。快照详情与 **快照对比** 表中的实体名可点进 **`/search?q=`**；得分分布 **ECharts 柱图点击柱条** 亦可跳到同名聚合搜索；**复制 snapshot id**、**复制 topicVersionId**、**复制 topicRankingId**、**新标签打开** **`GET /v1/snapshots/:id`**、**`GET /v1/snapshots/:id/analyses`** 与 **`GET /v1/rankings/:id/status`**。
 
-同一 **`TopicRanking`** 下多张快照并列对比：`POST /v1/snapshots/compare`，body 为 `{"snapshotIds":["1","2"]}`（**2–10** 个 id，可去重）。管理台 **`/snapshots/compare`**（支持 `?ids=`；**无查询串时不预填示例 id**；**2–10 个十进制 id（≤38 位）才允许对比/复制 POST 与路径**；**对比成功后地址栏与 ids 对齐**；**复制 POST 体**、**复制对比页路径**；页脚链至 **运行排行 / 索引 / 爬虫 / Outbox** 等）。侧栏在 **`/snapshots/:id` 详情**时同步高亮 **「快照对比」** 以便返回同类操作。
+同一 **`TopicRanking`** 下多张快照并列对比：`POST /v1/snapshots/compare`，body 为 `{"snapshotIds":["1","2"]}`（**2–10** 个 id，可去重）；可选 **`"includeAiStats": true`**，响应 **`snapshots[]`** 每项合并 **`aiAnalysisCount`**、**`hasFollowupBrief`**、**`hasTrendBrief`**、**`hasCredibilityBrief`**（与快照详情 `?includeAiStats=1` 同源统计）。管理台 **`/snapshots/compare`**（支持 `?ids=` 与 **`?includeAiStats=1`** 预勾选；**无查询串时不预填示例 id**；**2–10 个十进制 id（≤38 位）才允许对比/复制 POST 与路径**；**对比成功后地址栏与 ids 对齐**；**复制 POST 体**、**复制对比页路径**；页脚链至 **运行排行 / 索引 / 爬虫 / Outbox** 等）。侧栏在 **`/snapshots/:id` 详情**时同步高亮 **「快照对比」** 以便返回同类操作。
 
 ```bash
 curl -s -X POST http://localhost:3000/v1/snapshots/compare \
   -H 'Content-Type: application/json' \
   -d '{"snapshotIds":["1","2"]}'
+curl -s -X POST http://localhost:3000/v1/snapshots/compare \
+  -H 'Content-Type: application/json' \
+  -d '{"snapshotIds":["1","2"],"includeAiStats":true}'
 ```
 
 ### 实体排行时间演化（历史快照点）
@@ -167,27 +171,43 @@ curl -s 'http://localhost:3000/v1/topics/global-female-singers/trend-analyses?li
 # 可选 &timeWindow=WEEK
 ```
 
-按话题 slug 列出近期 **`TopicRankSnapshot`**（默认 30 条，最大 100，按 `snapshotTime` 倒序）：
+按话题 slug 列出近期 **`TopicRankSnapshot`**（默认 30 条，最大 100，按 `snapshotTime` 倒序）；每条含 **`aiAnalysisCount`**、**`hasFollowupBrief`**、**`hasTrendBrief`**、**`hasCredibilityBrief`**（按约定 `agent` 或对应 **`detailJson.agentKind`** 判定）。
 
 ```bash
 curl -s 'http://localhost:3000/v1/topics/global-female-singers/snapshots?limit=25'
 # 可选 &timeWindow=WEEK
 ```
 
+跨话题只读「热点」：**聚合**近期快照级 `TrendAnalysis.payload.topRankGainers` 的涨名次（演示级，`limit` 默认 15、最大 50）：
+
+```bash
+curl -s 'http://localhost:3000/v1/trends/hot?limit=12'
+# 可选 &timeWindow=WEEK
+```
+
+更新 **`TopicVersion.policyJson`**（`frozen=true` 时拒绝；body 须含 **`weights`**；可选 **`entityIds`**、`requiredSignalKeys`，服务端与物化路径一致）：
+
+```bash
+curl -s -X PATCH http://localhost:3000/v1/topic-versions/1/policy \
+  -H 'Content-Type: application/json' \
+  -d '{"policyJson":{"weights":{"streams":0.4,"mentions":0.3,"social":0.2,"news":0.1},"requiredSignalKeys":["streams","mentions"]}}'
+```
+
 ### 热榜聚合（按 slug）
 
 默认：该话题**最新 effectiveFrom** 的 `TopicVersion` + **最近完成的** `TopicRanking`（含快照）+ 该 ranking 下**最新 snapshotTime** 的快照。
 
-可选查询串：`version`、`timeWindow`、`windowStart`（若带 `windowStart` 必须同时带 `timeWindow`）。响应为 `{ resolved, snapshot }`，其中 `snapshot` 与快照详情 API 同形。管理台 **话题版本** 页（**slug 留空时仍按演示默认 `global-female-singers` 请求**，避免 `/topics//versions`）；**slug / 热榜 version 输入分别 maxLength 160 / 64**；**`timeWindow` / `windowStart` 输入 maxLength 16 / 80**；URL 预填超长 query 时同步截断；**热榜请求前校验** `timeWindow` 须在 Prisma 枚举内；**`windowStart` 非空时校验 ISO**；在加载热榜后会展示解析表，并支持 URL 预填：`?slug=`、`?version=`、`?timeWindow=`、`?windowStart=`；**Enter** 可在 slug / 热榜参数框内快捷触发请求；表格中 **实体名可点进 `/search?q=`**，并可打开 **`/entities?q=`**；热榜预览区可 **复制 snapshotId / topicVersionId**；**新标签**打开与当前 slug、热榜参数一致的 **`GET /v1/topics/:slug/versions`** 与 **`/leaderboard`**。
+可选查询串：`version`、`timeWindow`、`windowStart`（若带 `windowStart` 必须同时带 `timeWindow`）、**`includeAiStats=1`**（嵌套 `snapshot` 合并 `aiAnalysisCount` / `hasFollowupBrief` / `hasTrendBrief` / `hasCredibilityBrief`，与 `GET /v1/snapshots/:id?includeAiStats=1` 一致；热榜 Redis 键含该开关，避免与无统计体混读）。响应为 `{ resolved, snapshot }`，其中 `snapshot` 与快照详情 API 同形。管理台 **话题版本** 页（**slug 留空时仍按演示默认 `global-female-singers` 请求**，避免 `/topics//versions`）；**slug / 热榜 version 输入分别 maxLength 160 / 64**；**`timeWindow` / `windowStart` 输入 maxLength 16 / 80**；URL 预填超长 query 时同步截断；**热榜请求前校验** `timeWindow` 须在 Prisma 枚举内；**`windowStart` 非空时校验 ISO**；在加载热榜后会展示解析表，并支持 URL 预填：`?slug=`、`?version=`、`?timeWindow=`、`?windowStart=`；**Enter** 可在 slug / 热榜参数框内快捷触发请求；表格中 **实体名可点进 `/search?q=`**，并可打开 **`/entities?q=`**；热榜预览区可 **复制 snapshotId / topicVersionId**；**新标签**打开与当前 slug、热榜参数一致的 **`GET /v1/topics/:slug/versions`** 与 **`/leaderboard`**。
 
 ```bash
 curl -s 'http://localhost:3000/v1/topics/global-female-singers/leaderboard'
 curl -s 'http://localhost:3000/v1/topics/global-female-singers/leaderboard?timeWindow=WEEK'
+curl -s 'http://localhost:3000/v1/topics/global-female-singers/leaderboard?includeAiStats=1'
 ```
 
 ### 实体搜索（Elasticsearch + PG）
 
-需 ES 运行且 `.env` 配置 `ELASTICSEARCH_NODE` 时，`/v1/search/entities` 默认走 ES 并返回 **`highlights`**（`<em>` 包裹命中词）。`GET /admin/entities` 列出实体（运营台与脚本）。管理台 **`/entities`** 支持 **`?q=`** 预填列表筛选框并刷新；**新标签打开与当前筛选一致的列表 API**（`limit=50` + 可选 `q`）；**排行 topicSlug** 输入框控制每行 **rank-history**（`GET /v1/entities/:id/rank-history`）链接与复制。新建/编辑表单 **`canonicalName` 输入框 `maxLength=500`**、**`type` 为 120**，与 **POST/PATCH DTO** 一致。
+需 ES 运行且 `.env` 配置 `ELASTICSEARCH_NODE` 时，`/v1/search/entities` 默认走 ES 并返回 **`highlights`**（`<em>` 包裹命中词）。`GET /admin/entities` 列出实体（运营台与脚本）。管理台 **`/entities`** 支持 **`?q=`** 预填列表筛选框并刷新；**新标签打开与当前筛选一致的列表 API**（`limit=50` + 可选 `q`）；**排行 topicSlug** 输入框控制每行 **rank-history** JSON 与 **「曲线」**（**`/entities/rank-history`**，ECharts）。新建/编辑表单 **`canonicalName` 输入框 `maxLength=500`**、**`type` 为 120**，与 **POST/PATCH DTO** 一致。
 
 ```bash
 curl -s 'http://localhost:3000/v1/search?q=Swift&limit=12&entityIndex=auto'
@@ -202,7 +222,11 @@ curl -s 'http://localhost:3000/v1/search/entities?q=Swift&limit=5&engine=auto'
 curl -s 'http://localhost:3000/v1/search/entities?q=Dee&engine=pg'
 curl -s 'http://localhost:3000/admin/entities?limit=10'
 curl -s -X POST http://localhost:3000/admin/snapshots/1/analyze -H 'Content-Type: application/json' -d '{}'
+# 同上：可选 body 如 {"agent":"trend-v1","chainContext":"…"}（≤8192，配 OPENAI_API_KEY 时写入 user 前缀）
+curl -s 'http://localhost:3000/v1/snapshots/1?includeAiStats=1'
 curl -s http://localhost:3000/v1/snapshots/1/analyses
+# 响应体为 `{ filter, total, analyses }`；可选 ?agentKind= &agent= &limit=（默认 50，最大 200）&offset=
+curl -s 'http://localhost:3000/v1/snapshots/1/analyses?agentKind=trend&limit=20&offset=0'
 curl -s 'http://localhost:3000/v1/search/crawled-urls?q=example&limit=10'
 curl -s 'http://localhost:3000/v1/search/crawled-urls-es?q=example&limit=10'
 # 可选 &sourceId=1&status=fetched
@@ -218,9 +242,12 @@ curl -s -X POST http://localhost:3000/admin/reindex-crawl-docs -H 'Content-Type:
 - 成功行写入 `mimeType`、**`pageTitle`**（HTML `<title>` 或 Playwright `document.title`，最长 512）、去标签后的 **`textPreview`**（仅文本类 MIME；长度见 `CRAWL_TEXT_PREVIEW_CHARS`），便于列表展示与检索（PG/ES 均支持按标题子串命中）。  
 - `GET /v1/crawl/sources?limit=50` 列出 `Source`（id 降序，默认至多 50 条，最大 100）。  
 - `GET /v1/crawl/sources/:sourceId/urls?limit=50` 查看最新 `CrawledUrl` 行（含摘要）。
+- `GET /v1/crawl/tasks?limit=30` 列出近期 `CrawlTask`（`limit` 1–100，非数字或缺省按 30 再钳制）；可选 **`sourceId`** 只看待定数据源。
 
 ```bash
 curl -s 'http://localhost:3000/v1/crawl/sources?limit=50'
+curl -s 'http://localhost:3000/v1/crawl/tasks?limit=30'
+curl -s 'http://localhost:3000/v1/crawl/tasks?limit=30&sourceId=1'
 curl -s -X POST http://localhost:3000/v1/crawl/sources \
   -H 'Content-Type: application/json' \
   -d '{"name":"Example","baseUrl":"https://example.com","kind":"http-fetch"}'

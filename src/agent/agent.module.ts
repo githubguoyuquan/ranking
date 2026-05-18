@@ -7,5 +7,6 @@ import { SnapshotAnalyzeService } from './snapshot-analyze.service';
   imports: [PrismaModule],
   controllers: [AgentController],
   providers: [SnapshotAnalyzeService],
+  exports: [SnapshotAnalyzeService],
 })
 export class AgentModule {}

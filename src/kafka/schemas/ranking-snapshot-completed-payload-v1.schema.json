@@ -1,0 +1,44 @@
+{
+  "$id": "https://ranking.platform/schemas/kafka/ranking-snapshot-completed-payload-v1.json",
+  "title": "RankingSnapshotCompletedPayloadV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "snapshotId",
+    "topicRankingId",
+    "topicVersionId",
+    "topicId",
+    "topicVersionLabel",
+    "timeWindow",
+    "snapshotTime",
+    "snapshotVersion",
+    "itemCount",
+    "confidenceScore",
+    "hasScoreModel",
+    "scoreModelId"
+  ],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "snapshotId": { "type": "string", "pattern": "^[0-9]+$" },
+    "topicRankingId": { "type": "string", "pattern": "^[0-9]+$" },
+    "topicVersionId": { "type": "string", "pattern": "^[0-9]+$" },
+    "topicId": { "type": "string", "pattern": "^[0-9]+$" },
+    "topicVersionLabel": { "type": "string", "minLength": 1 },
+    "timeWindow": {
+      "type": "string",
+      "enum": ["REALTIME", "DAY", "WEEK", "MONTH", "YEAR", "CUSTOM"]
+    },
+    "snapshotTime": { "type": "string", "format": "date-time" },
+    "snapshotVersion": { "type": "string", "minLength": 1 },
+    "itemCount": { "type": "integer", "minimum": 0 },
+    "confidenceScore": { "type": "number" },
+    "hasScoreModel": { "type": "boolean" },
+    "scoreModelId": {
+      "oneOf": [
+        { "type": "string", "pattern": "^[0-9]+$" },
+        { "type": "null" }
+      ]
+    }
+  }
+}

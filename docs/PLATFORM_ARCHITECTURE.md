@@ -205,12 +205,12 @@ sequenceDiagram
 
 ## 8. Kafka 消息流（当前 + 目标）
 
-**当前**：事务内写入的 **`OutboxEvent`** 按 `type` 分流：**`ranking.snapshot.completed`** → **`OutboxPublisherService`** 发 **Kafka**（`payload` 由 **`buildRankingSnapshotCompletedOutboxPayload`** 构造，含 **`hasScoreModel`** / **`scoreModelId`** 等）；**`clickhouse.ranking.snapshot.ingest`**（`SYNC_RANKING_TO_CLICKHOUSE` + **`CLICKHOUSE_WRITE_MODE=outbox`**）→ **`buildClickhouseRankingSnapshotOutboxPayload`**，由 **ClickhouseOutboxFlusher** 消费；**`elasticsearch.entity.sync`** / **`elasticsearch.crawled_url.sync`** → **`buildElasticEntitySyncOutboxPayload`** / **`buildElasticCrawledUrlSyncOutboxPayload`**，由 **ES Flusher** 消费；**`ranking.followup.requested`**（**`RANKING_FOLLOWUP_OUTBOX`**）→ **`buildRankingFollowupRequestedOutboxPayload`**，**不经 Kafka**，仅占位列。常量见 **`src/outbox/outbox.constants.ts`**；**`GET /admin/outbox`** 与 **OpenAPI** 见 **`docs/openapi/admin-outbox.yaml`**；管理台 **`/outbox`** 对主要 `type` 提供快捷筛选、摘要列与 JSON 键高亮。
+**当前**：事务内写入的 **`OutboxEvent`** 按 `type` 分流：**`ranking.snapshot.completed`** → **`OutboxPublisherService`** 发 **Kafka**（Wire 为 **Envelope v1**：`envelopeVersion`、`type`、`payload`、`meta`；`payload` 由 **`buildRankingSnapshotCompletedOutboxPayload`** 构造；发布前 **`KafkaEventSchemaService`** 用 **AJV + `src/kafka/schemas/*.schema.json`** 校验；路由与 topic 见 **`src/kafka/event-registry.ts`**、消费方说明见 **`docs/kafka/EVENT_CATALOG.md`**）；**`clickhouse.ranking.snapshot.ingest`**（`SYNC_RANKING_TO_CLICKHOUSE` + **`CLICKHOUSE_WRITE_MODE=outbox`**）→ **`buildClickhouseRankingSnapshotOutboxPayload`**，由 **ClickhouseOutboxFlusher** 消费；**`elasticsearch.entity.sync`** / **`elasticsearch.crawled_url.sync`** → **`buildElasticEntitySyncOutboxPayload`** / **`buildElasticCrawledUrlSyncOutboxPayload`**，由 **ES Flusher** 消费；**`ranking.followup.requested`**（**`RANKING_FOLLOWUP_OUTBOX`**）→ **`buildRankingFollowupRequestedOutboxPayload`**，**不经 Kafka**，仅占位列。常量见 **`src/outbox/outbox.constants.ts`**；**`GET /admin/outbox`** 与 **OpenAPI** 见 **`docs/openapi/admin-outbox.yaml`**；管理台 **`/outbox`** 对主要 `type` 提供快捷筛选、摘要列与 JSON 键高亮。
 
 **目标**（演进）：
 
-- `crawl.url.fetched`、`entity.signal.updated`、`ranking.requested`、`ranking.completed`、`ai.analysis.requested` 等主题；
-- **Schema Registry**（Protobuf/JSON Schema）；
+- 更多领域事件入 Kafka（`crawl.url.fetched`、`entity.signal.updated`、`ranking.requested`、`ai.analysis.requested` 等），在 **`event-registry.ts`** 注册并配套 JSON Schema；
+- **Confluent/Apicurio Schema Registry**（中心化 `$id`、兼容性策略；当前为仓库内 JSON Schema + 发布侧校验）；
 - **消费者组** 分离：索引、风控、计费、对账。
 
 ---

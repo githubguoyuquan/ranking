@@ -1,11 +1,13 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { KafkaProducerService } from '../kafka/kafka-producer.service';
-import { claimOutboxBatchByType } from './outbox-claim';
+import { KafkaEventSchemaService } from '../kafka/kafka-event-schema.service';
 import {
-  KAFKA_TOPIC_RANKING_SNAPSHOT_COMPLETED,
-  OUTBOX_TYPE_RANKING_SNAPSHOT_COMPLETED,
-} from './outbox.constants';
+  buildKafkaEnvelopeV1,
+  resolveKafkaTopicForOutboxType,
+} from '../kafka/event-registry';
+import { claimOutboxBatchByType } from './outbox-claim';
+import { OUTBOX_TYPE_RANKING_SNAPSHOT_COMPLETED } from './outbox.constants';
 
 const FLUSH_BATCH = 80;
 
@@ -19,6 +21,7 @@ export class OutboxPublisherService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly prisma: PrismaService,
     private readonly kafka: KafkaProducerService,
+    private readonly kafkaEventSchema: KafkaEventSchemaService,
   ) {}
 
   onModuleInit(): void {
@@ -64,14 +67,45 @@ export class OutboxPublisherService implements OnModuleInit, OnModuleDestroy {
     }
 
     for (const row of claimed) {
-      const envelope = {
+      const v = this.kafkaEventSchema.validateBeforePublish({
         type: row.type,
         payload: row.payload,
-        meta: {
-          outboxId: row.id.toString(),
-          createdAt: row.createdAt.toISOString(),
-        },
-      };
+        id: row.id,
+        createdAt: row.createdAt,
+      });
+      if (!v.ok) {
+        this.logger.error(`Outbox ${row.id} Kafka schema validation failed: ${v.errors}`);
+        await this.prisma.outboxEvent.update({
+          where: { id: row.id },
+          data: {
+            attempts: { increment: 1 },
+            lastError: `kafka_schema: ${v.errors}`.slice(0, 4000),
+            leasedUntil: new Date(Date.now() + 300_000),
+          },
+        });
+        continue;
+      }
+
+      const envelope = buildKafkaEnvelopeV1({
+        type: row.type,
+        payload: row.payload,
+        outboxId: row.id,
+        createdAt: row.createdAt,
+      });
+
+      const topic = resolveKafkaTopicForOutboxType(row.type);
+      if (!topic) {
+        this.logger.error(`No Kafka topic registered for outbox type ${row.type}`);
+        await this.prisma.outboxEvent.update({
+          where: { id: row.id },
+          data: {
+            attempts: { increment: 1 },
+            lastError: 'kafka: outbox type not in event registry',
+            leasedUntil: new Date(Date.now() + 120_000),
+          },
+        });
+        continue;
+      }
 
       const key =
         row.type === OUTBOX_TYPE_RANKING_SNAPSHOT_COMPLETED &&
@@ -82,7 +116,7 @@ export class OutboxPublisherService implements OnModuleInit, OnModuleDestroy {
           : row.id.toString();
 
       try {
-        const ok = await this.kafka.send(KAFKA_TOPIC_RANKING_SNAPSHOT_COMPLETED, [
+        const ok = await this.kafka.send(topic, [
           { key, value: JSON.stringify(envelope) },
         ]);
         if (!ok) {

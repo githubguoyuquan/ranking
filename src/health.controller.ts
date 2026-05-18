@@ -2,6 +2,7 @@ import { Controller, Get, HttpStatus, Res } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { Response } from 'express';
 import { RedisHealthService } from './cache/redis-health.service';
+import { KafkaEventSchemaService } from './kafka/kafka-event-schema.service';
 import { KafkaProducerService } from './kafka/kafka-producer.service';
 import { toPlainJson } from './lib/json';
 import { PrismaService } from './prisma/prisma.service';
@@ -12,6 +13,7 @@ export class HealthController {
     private readonly prisma: PrismaService,
     private readonly redisHealth: RedisHealthService,
     private readonly kafka: KafkaProducerService,
+    private readonly kafkaSchemas: KafkaEventSchemaService,
   ) {}
 
   @Get()
@@ -82,9 +84,14 @@ export class HealthController {
     return toPlainJson(await this.redisHealth.ping());
   }
 
-  /** 可选；未配置 `KAFKA_BROKERS` 时 `configured: false`。 */
+  /** 可选；未配置 `KAFKA_BROKERS` 时 `configured: false`。含已加载的 Kafka JSON Schema 路由摘要。 */
   @Get('kafka')
   async kafkaHealth() {
-    return toPlainJson(await this.kafka.ping());
+    const ping = await this.kafka.ping();
+    return toPlainJson({
+      ...ping,
+      kafkaEvents: this.kafkaSchemas.describeLoaded(),
+      schemaValidationSkipped: process.env.KAFKA_SKIP_SCHEMA_VALIDATION === 'true',
+    });
   }
 }

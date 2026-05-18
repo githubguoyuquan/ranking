@@ -1,0 +1,32 @@
+{
+  "$id": "https://ranking.platform/schemas/kafka/event-envelope-v1.json",
+  "title": "KafkaEventEnvelopeV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["envelopeVersion", "type", "payload", "meta"],
+  "properties": {
+    "envelopeVersion": {
+      "type": "integer",
+      "const": 1,
+      "description": "Wire format version for the outer envelope (independent of payload.schemaVersion)."
+    },
+    "type": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Mirrors OutboxEvent.type and Kafka routing key semantics."
+    },
+    "payload": {
+      "type": "object",
+      "description": "Event-specific body; validated separately per `type`."
+    },
+    "meta": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["outboxId", "createdAt"],
+      "properties": {
+        "outboxId": { "type": "string", "pattern": "^[0-9]+$" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}

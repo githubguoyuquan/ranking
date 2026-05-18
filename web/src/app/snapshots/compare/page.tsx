@@ -1,5 +1,6 @@
 "use client";
 
+import { SnapshotScoreBreakdownCell } from "@/components/snapshot-score-breakdown-cell";
 import { AdminFooterNav } from "@/components/admin-footer-nav";
 import { CopyAdminPageUrlButton } from "@/components/copy-admin-page-url-button";
 import { CopyTextButton } from "@/components/copy-snapshot-id-button";
@@ -34,10 +35,12 @@ function snapshotIdsFromInput(input: string): string[] {
 
 type CompareResponse = {
   topicRankingId?: string;
-  snapshots?: Array<{
+    snapshots?: Array<{
     id: string;
     snapshotTime: string;
     snapshotVersion: string;
+    /** 是否已关联物化 `ScoreModel`（`GET …/score-breakdowns` 是否可能有行） */
+    hasScoreModel?: boolean;
     aiAnalysisCount?: number;
     hasFollowupBrief?: boolean;
     hasTrendBrief?: boolean;
@@ -53,6 +56,7 @@ type CompareResponse = {
         rank: number;
         popularityScore: number;
         rankChange: number | null;
+        scoreBreakdown?: Record<string, number>;
       }
     >;
   }>;
@@ -76,6 +80,21 @@ function snapshotAiBriefCaption(s: NonNullable<CompareResponse["snapshots"]>[num
     <div className="text-[10px] font-normal normal-case leading-snug opacity-90">
       Ai 简报 {s.aiAnalysisCount}
       {kinds.length > 0 ? ` · ${kinds.join(" · ")}` : ""}
+    </div>
+  );
+}
+
+function snapshotScoreModelCaption(s: NonNullable<CompareResponse["snapshots"]>[number]) {
+  if (s.hasScoreModel !== true) {
+    return (
+      <div className="text-[10px] font-normal normal-case leading-snug text-muted-foreground">
+        ScoreModel —
+      </div>
+    );
+  }
+  return (
+    <div className="text-[10px] font-normal normal-case leading-snug text-muted-foreground">
+      ScoreModel 已接
     </div>
   );
 }
@@ -200,7 +219,11 @@ function CompareSnapshotsInner() {
           <code className="rounded bg-muted px-1 text-xs">?ids=</code>
           （英文逗号分隔的 id 列表）；可选{" "}
           <code className="rounded bg-muted px-1 text-xs">includeAiStats=1</code>{" "}
-          预勾选「合并 AI 简报统计」。
+          预勾选「合并 AI 简报统计」。表格单元格在有条目时可展开{" "}
+          <code className="rounded bg-muted px-1 text-xs">scoreBreakdown</code>
+          ；按列快照亦可{" "}
+          <code className="rounded bg-muted px-1 text-xs">GET …/score-breakdowns</code>{" "}
+          拉关系表扁平 JSON。
         </p>
         <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
           <CopyTextButton
@@ -386,6 +409,7 @@ function CompareSnapshotsInner() {
                           <div className="text-[10px] font-normal normal-case opacity-90">
                             {formatShortTime(s.snapshotTime)}
                           </div>
+                          {snapshotScoreModelCaption(s)}
                           {snapshotAiBriefCaption(s)}
                         </div>
                       </th>
@@ -445,6 +469,14 @@ function CompareSnapshotsInner() {
                                     <> · Δ {cell.rankChange}</>
                                   ) : null}
                                 </div>
+                                {cell.scoreBreakdown &&
+                                Object.keys(cell.scoreBreakdown).length > 0 ? (
+                                  <div className="mt-1 text-[10px] text-muted-foreground">
+                                    <SnapshotScoreBreakdownCell
+                                      raw={cell.scoreBreakdown}
+                                    />
+                                  </div>
+                                ) : null}
                               </>
                             ) : (
                               "—"

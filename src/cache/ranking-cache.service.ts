@@ -48,8 +48,9 @@ export class RankingCacheService implements OnModuleDestroy {
     await this.redis?.quit();
   }
 
+  /** 与缓存 JSON 模式对齐：结构变更时递增版本前缀，避免旧条目长期占用 TTL */
   private keySnapshot(id: bigint): string {
-    return `ranking:v1:snap:${id.toString()}`;
+    return `ranking:v2:snap:${id.toString()}`;
   }
 
   private ttlSeconds(): number {
@@ -62,7 +63,7 @@ export class RankingCacheService implements OnModuleDestroy {
     return Number.isFinite(n) && n >= 5 ? n : 120;
   }
 
-  /** 查询参数指纹（含「默认最新」语义，不宜复用快照缓存；`includeAiStats` 与快照 GET 一致，独立键避免混写） */
+  /** 与 `getLeaderboardForApi` 嵌套 `snapshot` 形状对齐；变更时递增避免旧缓存长期命中 */
   leaderboardKey(
     slug: string,
     q: { version?: string; timeWindow?: string; windowStart?: string; includeAiStats?: boolean },
@@ -71,7 +72,7 @@ export class RankingCacheService implements OnModuleDestroy {
     const t = q.timeWindow ?? '_';
     const w = q.windowStart ?? '_';
     const s = q.includeAiStats === true ? '1' : '0';
-    return `ranking:v1:lb:${encodeURIComponent(slug)}:${v}:${t}:${w}:s${s}`;
+    return `ranking:v3:lb:${encodeURIComponent(slug)}:${v}:${t}:${w}:s${s}`;
   }
 
   async getSnapshotJson(id: bigint): Promise<string | null> {

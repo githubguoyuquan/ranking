@@ -51,6 +51,14 @@ import {
   parseFollowupAnalyzePipeline,
 } from '../agent/ai-agent.constants';
 import { SnapshotAnalyzeService } from '../agent/snapshot-analyze.service';
+import {
+  parseScoreBreakdownJson,
+  stableWeightsFingerprint,
+} from './score-model-utils';
+import { toRankingSnapshotPlainJson } from './snapshot-plain-json';
+import { buildClickhouseRankingSnapshotOutboxPayload } from './clickhouse-ranking-snapshot-outbox-payload';
+import { buildRankingFollowupRequestedOutboxPayload } from './ranking-followup-requested-outbox-payload';
+import { buildRankingSnapshotCompletedOutboxPayload } from './ranking-snapshot-completed-outbox-payload';
 
 const defaultWeights: Record<string, number> = {
   streams: 0.35,
@@ -324,6 +332,7 @@ export class RankingsService {
     return {
       items: { include: { entity: true }, orderBy: { rank: 'asc' as const } },
       topicRanking: { include: { topicVersion: { include: { topic: true } } } },
+      scoreModel: true,
     };
   }
 
@@ -331,6 +340,60 @@ export class RankingsService {
     return this.prisma.topicRankSnapshot.findUnique({
       where: { id },
       include: this.snapshotInclude(),
+    });
+  }
+
+  /**
+   * 法务/审计：按 `ScoreBreakdown` 关系表扁平导出（新物化快照；旧快照无行时 `rows` 为空）。
+   */
+  async getSnapshotRelationalScoreBreakdowns(snapshotId: bigint): Promise<unknown | null> {
+    const snap = await this.prisma.topicRankSnapshot.findUnique({
+      where: { id: snapshotId },
+      include: { scoreModel: true },
+    });
+    if (!snap) return null;
+
+    const breakdownRows = await this.prisma.scoreBreakdown.findMany({
+      where: { item: { snapshotId: snapshotId } },
+      include: {
+        item: {
+          select: {
+            rank: true,
+            entityId: true,
+            entity: { select: { canonicalName: true } },
+          },
+        },
+        model: true,
+      },
+    });
+
+    breakdownRows.sort((a, b) => {
+      const dr = a.item.rank - b.item.rank;
+      if (dr !== 0) return dr;
+      return a.component.localeCompare(b.component);
+    });
+
+    const scoreModelPlain =
+      snap.scoreModel != null
+        ? toPlainJson(snap.scoreModel)
+        : breakdownRows[0]?.model != null
+          ? toPlainJson(breakdownRows[0].model)
+          : null;
+
+    return toPlainJson({
+      snapshotId: snap.id.toString(),
+      scoreModel: scoreModelPlain,
+      rowCount: breakdownRows.length,
+      rows: breakdownRows.map((r) => ({
+        rank: r.item.rank,
+        entityId: r.item.entityId.toString(),
+        canonicalName: r.item.entity.canonicalName,
+        modelId: r.modelId.toString(),
+        component: r.component,
+        value: r.value,
+        weight: r.weight,
+        note: r.note,
+      })),
     });
   }
 
@@ -445,6 +508,7 @@ export class RankingsService {
         topicRankingId: topicRanking.id.toString(),
         snapshotId: snapshot.id.toString(),
         snapshotTime: snapshot.snapshotTime.toISOString(),
+        hasScoreModel: snapshot.scoreModelId != null,
       },
       snapshot: snapshotPayload,
     };
@@ -525,6 +589,7 @@ export class RankingsService {
     topicRankingId: string;
     dedupedSnapshot?: boolean;
     snapshotId?: string;
+    hasScoreModel?: boolean;
   }> {
     const topicVersion = await this.loadTopicVersionOrThrow(args.topicVersionId);
     const entityIds = await this.resolveEntityIds(topicVersion);
@@ -582,6 +647,7 @@ export class RankingsService {
         topicRankingId: topicRanking.id.toString(),
         dedupedSnapshot: true,
         snapshotId: existingSnap.id.toString(),
+        hasScoreModel: existingSnap.scoreModelId != null,
       };
     }
 
@@ -733,15 +799,14 @@ export class RankingsService {
       await this.prisma.outboxEvent.create({
         data: {
           type: OUTBOX_TYPE_RANKING_FOLLOWUP_REQUESTED,
-          payload: {
-            schemaVersion: 1,
+          payload: buildRankingFollowupRequestedOutboxPayload({
             snapshotId: data.snapshotId,
             topicRankingId: data.topicRankingId,
             topicVersionId: data.topicVersionId,
             topicId: data.topicId,
             timeWindow: data.timeWindow,
-            snapshotTime: snap.snapshotTime.toISOString(),
-          },
+            snapshotTime: snap.snapshotTime,
+          }),
         },
       });
     }
@@ -1109,6 +1174,7 @@ export class RankingsService {
         snapshotTime,
         snapshotVersion,
         itemsCreate,
+        weights,
       );
       await this.maybeSyncRankingSnapshotToClickhouse(
         result,
@@ -1177,6 +1243,26 @@ export class RankingsService {
     }
   }
 
+  private async resolveOrCreateScoreModel(
+    tx: Prisma.TransactionClient,
+    topicVersion: { id: bigint; version: string },
+    weights: Record<string, number>,
+  ) {
+    const name = `topicVersion:${topicVersion.id.toString()}`;
+    const version = `${topicVersion.version}#${stableWeightsFingerprint(weights)}`;
+    const existing = await tx.scoreModel.findFirst({
+      where: { name, version },
+    });
+    if (existing) return existing;
+    return tx.scoreModel.create({
+      data: {
+        name,
+        version,
+        weights: weights as Prisma.InputJsonValue,
+      },
+    });
+  }
+
   private async persistSnapshotTransaction(
     topicRankingId: bigint,
     topicVersion: { id: bigint; topicId: bigint; version: string },
@@ -1184,8 +1270,11 @@ export class RankingsService {
     snapshotTime: Date,
     snapshotVersion: string,
     itemsCreate: Prisma.RankingItemCreateWithoutSnapshotInput[],
+    weights: Record<string, number>,
   ) {
     return this.prisma.$transaction(async (tx) => {
+      const scoreModel = await this.resolveOrCreateScoreModel(tx, topicVersion, weights);
+
       const snap = await tx.topicRankSnapshot.create({
         data: {
           topicRankingId,
@@ -1195,10 +1284,30 @@ export class RankingsService {
           trendSummary: null,
           generatedByAi: false,
           confidenceScore: 0,
+          scoreModelId: scoreModel.id,
           items: { create: itemsCreate },
         },
         include: { items: { orderBy: { rank: 'asc' } } },
       });
+
+      const breakdownRows: Prisma.ScoreBreakdownCreateManyInput[] = [];
+      for (const it of snap.items) {
+        const rec = parseScoreBreakdownJson(it.scoreBreakdown);
+        if (!rec) continue;
+        for (const [component, value] of Object.entries(rec)) {
+          const w = weights[component];
+          breakdownRows.push({
+            modelId: scoreModel.id,
+            rankingItemId: it.id,
+            component,
+            value,
+            weight: typeof w === 'number' && Number.isFinite(w) ? w : 0,
+          });
+        }
+      }
+      if (breakdownRows.length > 0) {
+        await tx.scoreBreakdown.createMany({ data: breakdownRows });
+      }
 
       const confAvg =
         snap.items.reduce((a, it) => a + it.confidenceScore, 0) / Math.max(1, snap.items.length);
@@ -1267,19 +1376,19 @@ export class RankingsService {
       await tx.outboxEvent.create({
         data: {
           type: OUTBOX_TYPE_RANKING_SNAPSHOT_COMPLETED,
-          payload: {
-            schemaVersion: 1,
-            snapshotId: snap.id.toString(),
-            topicRankingId: topicRankingId.toString(),
-            topicVersionId: topicVersion.id.toString(),
-            topicId: topicVersion.topicId.toString(),
+          payload: buildRankingSnapshotCompletedOutboxPayload({
+            snapshotId: snap.id,
+            topicRankingId,
+            topicVersionId: topicVersion.id,
+            topicId: topicVersion.topicId,
             topicVersionLabel: topicVersion.version,
             timeWindow: args.timeWindow,
-            snapshotTime: snapshotTime.toISOString(),
+            snapshotTime,
             snapshotVersion,
             itemCount: snap.items.length,
             confidenceScore: confAvg,
-          },
+            scoreModelId: snap.scoreModelId,
+          }),
         },
       });
 
@@ -1291,10 +1400,9 @@ export class RankingsService {
         await tx.outboxEvent.create({
           data: {
             type: OUTBOX_TYPE_CLICKHOUSE_RANKING_SNAPSHOT,
-            payload: {
-              schemaVersion: 1,
-              snapshotId: snap.id.toString(),
-            },
+            payload: buildClickhouseRankingSnapshotOutboxPayload({
+              snapshotId: snap.id,
+            }),
           },
         });
       }
@@ -1515,6 +1623,7 @@ export class RankingsService {
         confidenceScore: true,
         generatedByAi: true,
         topicRankingId: true,
+        scoreModelId: true,
         topicRanking: {
           select: {
             id: true,
@@ -1585,6 +1694,7 @@ export class RankingsService {
           hasFollowupBrief: followupSnapshotIds.has(sid),
           hasTrendBrief: trendSnapshotIds.has(sid),
           hasCredibilityBrief: credibilitySnapshotIds.has(sid),
+          hasScoreModel: r.scoreModelId != null,
           topicRanking: {
             id: r.topicRanking.id.toString(),
             timeWindow: r.topicRanking.timeWindow,
@@ -1826,6 +1936,7 @@ export class RankingsService {
           rank: number;
           popularityScore: number;
           rankChange: number | null;
+          scoreBreakdown?: Record<string, number>;
         }
       >;
     };
@@ -1844,10 +1955,12 @@ export class RankingsService {
           };
           entityMap.set(eid, row);
         }
+        const breakdown = parseScoreBreakdownJson(it.scoreBreakdown);
         row.bySnapshot[sid] = {
           rank: it.rank,
           popularityScore: it.popularityScore,
           rankChange: it.rankChange,
+          ...(breakdown ? { scoreBreakdown: breakdown } : {}),
         };
       }
     }
@@ -1869,6 +1982,7 @@ export class RankingsService {
         id: s.id.toString(),
         snapshotTime: s.snapshotTime.toISOString(),
         snapshotVersion: s.snapshotVersion,
+        hasScoreModel: s.scoreModelId != null,
         ...(statsList ? statsList[i] : {}),
       })),
       rowCount: rows.length,
@@ -1877,10 +1991,6 @@ export class RankingsService {
   }
 
   private serializeSnapshot(s: TopicRankSnapshot & { items: unknown }) {
-    return JSON.parse(
-      JSON.stringify(s, (_key, value) =>
-        typeof value === 'bigint' ? value.toString() : value,
-      ),
-    ) as Record<string, unknown>;
+    return toRankingSnapshotPlainJson(s);
   }
 }

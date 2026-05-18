@@ -55,7 +55,7 @@ class ListAnalysesQueryDto {
 
 function parseSnapshotId(raw: string): bigint {
   try {
-    return BigInt(raw);
+    return BigInt(raw.trim());
   } catch {
     throw new BadRequestException('invalid snapshotId');
   }

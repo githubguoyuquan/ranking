@@ -26,7 +26,7 @@ import {
 import { ADMIN_HREF, snapshotDetailAdminPath, topicsAdminPath } from "@/lib/admin-web-paths";
 import { entitiesAdminPrefillPath } from "@/lib/entities-admin-path";
 import { NEST_V1, NEST_V1_DOC } from "@/lib/nest-api-paths";
-import { nestClickhouseHealthUrl, nestSearchHealthUrl } from "@/lib/nest-api-urls";
+import { nestClickhouseHealthUrl, nestSearchHealthUrl, nestSnapshotScoreBreakdownsUrl } from "@/lib/nest-api-urls";
 import { unifiedSearchAdminPathFromQuery } from "@/lib/unified-search-admin-path";
 
 type FetchOk<T> = { ok: true; data: T };
@@ -281,6 +281,12 @@ export default async function HomePage() {
                     RANKING_CACHE_ENABLED
                   </code>
                 </p>
+                {redis?.ok === true && redis?.cacheReadsEnabled !== false ? (
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    键前缀示例：<code className="rounded bg-muted px-1">ranking:v2:snap:</code>、
+                    <code className="rounded bg-muted px-1">ranking:v3:lb:</code>
+                  </p>
+                ) : null}
                 {!redis?.ok ? (
                   <p className="mt-1 text-muted-foreground">
                     {redis?.detail ?? "不可用"}
@@ -478,6 +484,21 @@ export default async function HomePage() {
           >
             示例：快照详情（id=1，库中无存则 404）
           </AdminQuickEntryRow>
+          <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+            <a
+              className="text-primary underline-offset-4 hover:underline"
+              href={nestSnapshotScoreBreakdownsUrl("1")}
+              target="_blank"
+              rel="noreferrer"
+            >
+              GET {NEST_V1_DOC.snapshotsScoreBreakdowns}（示例 id=1）
+            </a>
+            <CopyTextButton
+              text={nestSnapshotScoreBreakdownsUrl("1")}
+              idleLabel="复制 score-breakdowns URL"
+              className="h-6"
+            />
+          </span>
 
           <div className="mt-4 border-t border-border pt-4">
             <p className="text-xs font-medium text-foreground">API 直链（新标签）</p>

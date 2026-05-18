@@ -1,0 +1,136 @@
+openapi: 3.0.3
+info:
+  title: Ranking platform — Admin Outbox (fragment)
+  description: |
+    只读排障接口 **`GET /admin/outbox`**。与 Nest 实现一致：`src/outbox/outbox-admin.controller.ts`。
+
+    **`OutboxEvent.type` → `payload` → 消费者**（写入侧 **builder** 路径）：
+
+    | `type` | 消费者 | `payload` builder |
+    |--------|--------|-------------------|
+    | `ranking.snapshot.completed` | **Kafka**（`OutboxPublisherService`） | `buildRankingSnapshotCompletedOutboxPayload` |
+    | `clickhouse.ranking.snapshot.ingest` | **ClickhouseOutboxFlusherService** | `buildClickhouseRankingSnapshotOutboxPayload` |
+    | `elasticsearch.entity.sync` | **ElasticEntityOutboxFlusherService** | `buildElasticEntitySyncOutboxPayload` |
+    | `elasticsearch.crawled_url.sync` | **ElasticCrawledUrlOutboxFlusherService** | `buildElasticCrawledUrlSyncOutboxPayload` |
+    | `ranking.followup.requested` | 占位可观测（`RANKING_FOLLOWUP_OUTBOX`） | `buildRankingFollowupRequestedOutboxPayload` |
+
+    源文件：`src/outbox/outbox.constants.ts`；Kafka/Outbox 运维说明见根目录 **`README`**。
+  version: 0.1.0
+
+servers:
+  - url: http://localhost:3000
+    description: 本地 API（`PORT` 与环境一致）
+
+tags:
+  - name: Admin
+    description: 运维 / 排障（多数无鉴权）
+
+paths:
+  /admin/outbox:
+    get:
+      tags: [Admin]
+      summary: 列出 Outbox 行（只读）
+      description: |
+        按 `id` 倒序，最多返回 `limit` 条。`pendingOnly=true` 时仅 `publishedAt` 为空的行。
+        响应经 `toPlainJson`：**`id`** 等为十进制字符串。
+      operationId: adminListOutbox
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: 1–200；缺省由服务视为 50。非法值触发校验 **400**。
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: type
+          in: query
+          required: false
+          description: 与 `OutboxEvent.type` 精确匹配；最长 120（与 DTO `@MaxLength` 一致）。
+          schema:
+            type: string
+            maxLength: 120
+          examples:
+            rankingKafka:
+              value: ranking.snapshot.completed
+            clickhouseIngest:
+              value: clickhouse.ranking.snapshot.ingest
+            elasticEntity:
+              value: elasticsearch.entity.sync
+        - name: pendingOnly
+          in: query
+          required: false
+          description: 传 `true` 或字符串 `true` 时仅未发布行。
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OutboxListResponse"
+              example:
+                count: 1
+                rows:
+                  - id: "12"
+                    type: ranking.snapshot.completed
+                    payload:
+                      schemaVersion: 1
+                      snapshotId: "99"
+                      topicRankingId: "3"
+                      hasScoreModel: true
+                      scoreModelId: "7"
+                    createdAt: "2026-05-17T12:00:00.000Z"
+                    publishedAt: null
+                    leasedUntil: null
+                    attempts: 0
+                    lastError: null
+        "400":
+          description: 查询参数未通过 `ValidationPipe`（如 `limit` 越界、类型错误）。
+
+components:
+  schemas:
+    OutboxListResponse:
+      type: object
+      required: [count, rows]
+      properties:
+        count:
+          type: integer
+          description: 等于本页 `rows.length`
+        rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/OutboxEventRow"
+
+    OutboxEventRow:
+      type: object
+      description: Prisma `OutboxEvent` 经 `toPlainJson`；`payload` 形状依 `type` 而定。
+      required: [id, type, payload, createdAt, attempts]
+      properties:
+        id:
+          type: string
+          description: 自增主键（十进制字符串）
+        type:
+          type: string
+        payload:
+          description: JSON 对象；常见排行 Kafka / CH 载荷见本文件 `info.description`
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+        publishedAt:
+          type: string
+          format: date-time
+          nullable: true
+        leasedUntil:
+          type: string
+          format: date-time
+          nullable: true
+        attempts:
+          type: integer
+        lastError:
+          type: string
+          nullable: true

@@ -287,7 +287,11 @@ export class SearchController {
     });
   }
 
-  /** 列表实体（运营台/脚本）；可选 `q` 子串匹配 canonicalName */
+  /**
+   * 列表实体（运营台/脚本）；可选 `q` 子串匹配 canonicalName
+   *
+   * **OpenAPI 3** 手写片段：`docs/openapi/admin-entities.yaml`
+   */
   @Get('admin/entities')
   async listEntities(@Query('q') q?: string, @Query('limit') limitRaw?: string) {
     const take = Math.min(Math.max(Number(limitRaw) || 40, 1), 100);

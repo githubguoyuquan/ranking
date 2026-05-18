@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { adminSnapshotAnalyzeUrl } from "@/lib/backend-api-urls";
 import { BACKEND_ADMIN_DOC } from "@/lib/backend-api-paths";
-import { nestSnapshotAnalysesUrl } from "@/lib/nest-api-urls";
+import { nestSnapshotAnalysesUrl, nestSnapshotScoreBreakdownsUrl } from "@/lib/nest-api-urls";
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -37,6 +37,10 @@ export function SnapshotAnalyzeActions(props: SnapshotAnalyzeActionsProps) {
   const analysesGetUrl = useMemo(
     () => analysesGetUrlProp ?? nestSnapshotAnalysesUrl(snapshotId),
     [analysesGetUrlProp, snapshotId],
+  );
+  const scoreBreakdownsUrl = useMemo(
+    () => nestSnapshotScoreBreakdownsUrl(snapshotId),
+    [snapshotId],
   );
 
   async function run() {
@@ -104,6 +108,19 @@ export function SnapshotAnalyzeActions(props: SnapshotAnalyzeActionsProps) {
           GET 已有简报（新标签打开 JSON）
         </a>
         <CopyTextButton text={analysesGetUrl} idleLabel="复制 GET URL" className="h-7" />
+        <a
+          href={scoreBreakdownsUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="text-xs text-primary underline-offset-4 hover:underline"
+        >
+          GET score-breakdowns
+        </a>
+        <CopyTextButton
+          text={scoreBreakdownsUrl}
+          idleLabel="复制 score-breakdowns URL"
+          className="h-7"
+        />
         <CopyTextButton text={analyzePostUrl} idleLabel="复制 POST URL" className="h-7" />
         <span className="text-xs text-muted-foreground">
           POST {BACKEND_ADMIN_DOC.snapshotAnalyze}；body 可选 agent（≤{AGENT_MAX}）、topN（{TOPN_MIN}–{TOPN_MAX}）、chainContext（≤{CHAIN_CONTEXT_MAX}）；

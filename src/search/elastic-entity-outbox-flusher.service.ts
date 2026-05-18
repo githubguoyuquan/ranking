@@ -8,7 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { claimOutboxBatchByType } from '../outbox/outbox-claim';
 import { OUTBOX_TYPE_ELASTIC_ENTITY_SYNC } from '../outbox/outbox.constants';
 import { ElasticService } from './elastic.service';
-import type { ElasticEntitySyncPayload } from './elastic-entity-outbox';
+import type { ElasticEntitySyncPayload } from './elastic-entity-sync-outbox-payload';
 
 const FLUSH_BATCH = 80;
 

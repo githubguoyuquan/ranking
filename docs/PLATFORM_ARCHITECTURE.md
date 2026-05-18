@@ -205,7 +205,7 @@ sequenceDiagram
 
 ## 8. Kafka 消息流（当前 + 目标）
 
-**当前**：`OutboxPublisherService` 发布 `ranking.snapshot.completed`；其它 Outbox 类型由进程内 Flusher 消费（ClickHouse/ES），**不全部经 Kafka**。
+**当前**：事务内写入的 **`OutboxEvent`** 按 `type` 分流：**`ranking.snapshot.completed`** → **`OutboxPublisherService`** 发 **Kafka**（`payload` 由 **`buildRankingSnapshotCompletedOutboxPayload`** 构造，含 **`hasScoreModel`** / **`scoreModelId`** 等）；**`clickhouse.ranking.snapshot.ingest`**（`SYNC_RANKING_TO_CLICKHOUSE` + **`CLICKHOUSE_WRITE_MODE=outbox`**）→ **`buildClickhouseRankingSnapshotOutboxPayload`**，由 **ClickhouseOutboxFlusher** 消费；**`elasticsearch.entity.sync`** / **`elasticsearch.crawled_url.sync`** → **`buildElasticEntitySyncOutboxPayload`** / **`buildElasticCrawledUrlSyncOutboxPayload`**，由 **ES Flusher** 消费；**`ranking.followup.requested`**（**`RANKING_FOLLOWUP_OUTBOX`**）→ **`buildRankingFollowupRequestedOutboxPayload`**，**不经 Kafka**，仅占位列。常量见 **`src/outbox/outbox.constants.ts`**；**`GET /admin/outbox`** 与 **OpenAPI** 见 **`docs/openapi/admin-outbox.yaml`**；管理台 **`/outbox`** 对主要 `type` 提供快捷筛选、摘要列与 JSON 键高亮。
 
 **目标**（演进）：
 
@@ -261,23 +261,26 @@ sequenceDiagram
 
 ## 12. API 设计原则（面向愿景查询）
 
-建议在现有 REST 基础上扩展（**尚未全部存在**）：
+建议在现有 REST 基础上扩展（**尚未全部存在**）。另：**`GET /admin/outbox`**（**已实现**；契约见 **`src/outbox/outbox-admin.controller.ts`**、**`docs/openapi/admin-outbox.yaml`**）、**`GET /admin/entities`**（**已实现**；**`docs/openapi/admin-entities.yaml`**）；OpenAPI 目录下 **多个 `.yaml`** 由 **`src/openapi/docs-openapi.spec.ts`**（**`npm test`**）做可解析性与 **`paths`** 断言。详情见 **`README`** Kafka/Outbox 与 OpenAPI 小节。
 
-- `GET /v1/entities/:id/rank-history?topicSlug=&timeWindow=&limit=` — **`RankingItemHistory` 时间序列** + 历史最好/最差名次 + 末端连续升降步数（**已实现**）  
+- `GET /v1/entities/:id/rank-history?topicSlug=&timeWindow=&limit=` — **`RankingItemHistory` 时间序列** + 历史最好/最差名次 + 末端连续升降步数（**已实现**）
+- `GET /v1/topics/:slug/leaderboard?version=&timeWindow=&windowStart=&includeAiStats=` — **`{ resolved, snapshot }`**（**已实现**；**`resolved.hasScoreModel`**；嵌套 **`snapshot`** 与 **`GET /v1/snapshots/:id`** 同形）
 - `GET /v1/topics/:slug/trend-analyses?limit=&timeWindow=` — **快照级 `TrendAnalysis` 列表**（**已实现**；管理台 **话题版本** 页展示摘要表）  
-- `GET /v1/topics/:slug/snapshots?timeWindow=&limit=` — **`TopicRankSnapshot` 列表**（**已实现**；管理台 **话题版本** 页「近期快照」表；每条含 **`aiAnalysisCount`**、**`hasFollowupBrief`**、**`hasTrendBrief`**、**`hasCredibilityBrief`**）  
+- `GET /v1/topics/:slug/snapshots?timeWindow=&limit=` — **`TopicRankSnapshot` 列表**（**已实现**；管理台 **话题版本** 页「近期快照」表；每条含 **`aiAnalysisCount`**、**`hasFollowupBrief`**、**`hasTrendBrief`**、**`hasCredibilityBrief`**、**`hasScoreModel`**）  
 - `PATCH /v1/topic-versions/:id/policy` — 更新 **`policyJson`**（**已实现**；`src/domain/policy-json.ts` 校验；**`frozen`** 不可改；管理台话题页 **policy** 编辑器）  
 - `GET /v1/trends/hot?timeWindow=&limit=` — **快照级涨榜聚合**（**已实现（演示）**；由近期 `TrendAnalysis` 的 `topRankGainers` 汇总；管理台 **`/trends`**）  
-- `POST /v1/snapshots/compare` — **已有**（多快照对比）  
-- `GET /v1/snapshots/:id?includeAiStats=` — **快照 JSON + 当前 `AiAnalysis` 计数与三类简报标记**（**已实现**；`true`/`1` 时跳过快照 Redis 读且不回写缓存）  
+- `POST /v1/snapshots/compare` — **已有**（多快照对比）；`snapshots[]` 含 **`hasScoreModel`**；`rows[].bySnapshot[id]` 含可选 **`scoreBreakdown`**  
+- `GET /v1/snapshots/:id/score-breakdowns` — **`ScoreBreakdown` 关系表扁平导出**（**已实现**；`rows` 含 rank、实体、component、value、weight；旧快照无物化行时 `rowCount` 为 0）
+- `GET /v1/snapshots/:id?includeAiStats=` — **快照 JSON**（含 **`items[].scoreBreakdown`**、**`scoreModel`** 及嵌套 **`topicRanking`**）+ 可选当前 `AiAnalysis` 计数与三类简报标记（**已实现**；`true`/`1` 时跳过快照 Redis 读且不回写缓存）  
 - `GET /v1/snapshots/:id/analyses?agentKind=&agent=&limit=&offset=` — **`AiAnalysis` 列表**（**已实现**；分页 **`total` + `analyses`**，管理台 **`?analysisKind=`** 与 API **`agentKind`** 对齐）  
+- `GET /v1/rankings/:topicRankingId/status` — **`TopicRanking` + 近期 `snapshots[]`**（**已实现**；每条快照含 **`hasScoreModel`**；非法 id **400**）  
 - `GET /v1/recommendations/similar-topics?topicId=` — 推荐占位  
 
 ---
 
 ## 13. 前端（Next.js）
 
-**已有**：管理台多页、ECharts、快照对比、搜索、爬取、Outbox、ES 健康等；**话题版本** 页含 **`TrendAnalysis` 快照摘要**、**近期快照**、**policyJson 编辑（PATCH）**；**实体** 页 **rank-history** JSON + **`/entities/rank-history`** 折线图；**`/trends`** 热点表（`GET /v1/trends/hot`）。**快照详情** `/snapshots/:id` 支持 **`?analysisKind=`** / **`?analysisPage=`** / **`?analysisLimit=`**，与 **`GET /v1/snapshots/:id/analyses`** 分页对齐。
+**已有**：管理台多页、ECharts、快照对比、搜索、爬取、**Outbox**（**Kafka / CH / ES 实体 / ES 爬取 / `ranking.followup.requested`** 快捷筛选，表格多类 **`payload` 摘要**，JSON 契约键高亮）、ES 健康等；**话题版本** 页含 **`TrendAnalysis` 快照摘要**、**近期快照**（含 **`hasScoreModel`** / 分解 API）、**热榜预览**（**`resolved.hasScoreModel`**、**score-breakdowns** 链）、**policyJson 编辑（PATCH）**；**实体** 页 **rank-history** JSON + **`/entities/rank-history`** 折线图；**`/trends`** 热点表（`GET /v1/trends/hot`）。**快照详情** `/snapshots/:id` 展示 **ScoreModel / `scoreBreakdown`**，**`AI 简报` 工具条**可打开 **`GET …/score-breakdowns`**，支持 **`?analysisKind=`** / **`?analysisPage=`** / **`?analysisLimit=`**，与 **`GET /v1/snapshots/:id/analyses`** 分页对齐。**快照对比** 说明中提及单元格 **`scoreBreakdown`** 与按列拉取关系表 JSON。
 
 **缺口（产品级）**：
 
@@ -323,7 +326,7 @@ sequenceDiagram
 ### Phase D — 商业化可靠性与合规
 
 1. 鉴权、多租户、PII 分类。  
-2. 法务可解释性：**ScoreBreakdown** 导出与审计日志。  
+2. 法务可解释性：**`RankingItem.scoreBreakdown`（JSON）+ 物化写入的 `ScoreModel` / `ScoreBreakdown` 行**；导出与审计日志（进行中）。  
 
 ---
 

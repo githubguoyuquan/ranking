@@ -215,9 +215,27 @@ export class RankingsController {
 
   @Get('v1/rankings/:topicRankingId/status')
   async rankingStatus(@Param('topicRankingId') topicRankingId: string) {
-    const row = await this.rankings.getTopicRankingStatus(BigInt(topicRankingId));
+    let trId: bigint;
+    try {
+      trId = BigInt(topicRankingId.trim());
+    } catch {
+      throw new BadRequestException('invalid topicRankingId');
+    }
+    const row = await this.rankings.getTopicRankingStatus(trId);
     if (!row) throw new NotFoundException();
-    return toPlainJson(row);
+    const plain = toPlainJson(row) as Record<string, unknown>;
+    const snaps = plain.snapshots;
+    if (Array.isArray(snaps)) {
+      for (const s of snaps) {
+        if (typeof s === 'object' && s !== null && !Array.isArray(s)) {
+          const o = s as Record<string, unknown>;
+          const mid = o.scoreModelId;
+          o.hasScoreModel =
+            mid != null && mid !== '' && String(mid) !== 'null';
+        }
+      }
+    }
+    return plain;
   }
 
   @Get('v1/jobs/ranking/:jobId')
@@ -229,11 +247,31 @@ export class RankingsController {
 
   @Get('v1/snapshots/:id')
   async snapshot(@Param('id') id: string, @Query() query: SnapshotQueryDto) {
-    const snap = await this.rankings.getSnapshotForApi(BigInt(id), {
+    let sid: bigint;
+    try {
+      sid = BigInt(id.trim());
+    } catch {
+      throw new BadRequestException('invalid snapshot id');
+    }
+    const snap = await this.rankings.getSnapshotForApi(sid, {
       includeAiStats: query.includeAiStats === true,
     });
     if (!snap) throw new NotFoundException();
     return snap;
+  }
+
+  /** `ScoreBreakdown` 关系表扁平导出（条目名次 + 实体 + 分量/权重）；无行时 `rowCount` 为 0 */
+  @Get('v1/snapshots/:id/score-breakdowns')
+  async snapshotScoreBreakdowns(@Param('id') id: string) {
+    let sid: bigint;
+    try {
+      sid = BigInt(id.trim());
+    } catch {
+      throw new BadRequestException('invalid snapshot id');
+    }
+    const payload = await this.rankings.getSnapshotRelationalScoreBreakdowns(sid);
+    if (!payload) throw new NotFoundException();
+    return payload;
   }
 
   /** 同一 `TopicRanking` 下至少 2 张、至多 10 张快照的 rank 并列对比 */

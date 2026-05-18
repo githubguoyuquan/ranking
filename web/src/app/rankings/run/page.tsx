@@ -30,9 +30,11 @@ import {
   nestRankingJobUrl,
   nestRankingRunUrl,
   nestRankingStatusUrl,
+  nestSnapshotScoreBreakdownsUrl,
   nestSnapshotV1Url,
 } from "@/lib/nest-api-urls";
 import { useAdminAppUrl } from "@/hooks/use-admin-app-url";
+import { formatTopicRankingStatusSummary } from "@/lib/format-topic-ranking-status";
 import { isIsoDateString } from "@/lib/iso-date";
 import { TIME_WINDOW_SET } from "@/lib/time-window";
 import Link from "next/link";
@@ -64,6 +66,7 @@ type EnqueueResponse = {
   topicRankingId?: string;
   dedupedSnapshot?: boolean;
   snapshotId?: string;
+  hasScoreModel?: boolean;
 };
 
 type JobPollBody = {
@@ -73,23 +76,6 @@ type JobPollBody = {
   failedReason?: string;
   returnvalue?: unknown;
 };
-
-function formatTopicRankingStatus(text: string): string {
-  try {
-    const o = JSON.parse(text) as {
-      status?: string;
-      lastError?: string | null;
-      snapshots?: Array<{ id: string | number | bigint }>;
-    };
-    const lines = [`DB status=${o.status ?? "?"}`];
-    if (o.lastError) lines.push(`lastError: ${o.lastError}`);
-    const sid = o.snapshots?.[0]?.id;
-    if (sid != null) lines.push(`latestSnapshotId: ${String(sid)}`);
-    return lines.join("\n");
-  } catch {
-    return text;
-  }
-}
 
 function parseSnapshotIdFromRankingResponse(text: string): string | undefined {
   try {
@@ -101,28 +87,68 @@ function parseSnapshotIdFromRankingResponse(text: string): string | undefined {
   return undefined;
 }
 
-function parseSnapshotIdFromJobReturn(value: unknown): string | undefined {
-  if (value == null) return undefined;
-  if (typeof value === "object") {
-    const o = value as Record<string, unknown>;
-    if (o.id != null && o.id !== "") return String(o.id);
-    return undefined;
+type RankingQuickOpen = {
+  snapshotId: string;
+  hasScoreModel?: boolean;
+};
+
+function pickQuickOpenFromSyncRankingBody(text: string): RankingQuickOpen | null {
+  try {
+    const o = JSON.parse(text) as {
+      id?: unknown;
+      hasScoreModel?: boolean;
+    };
+    if (o.id != null && o.id !== "") {
+      return {
+        snapshotId: String(o.id),
+        ...(typeof o.hasScoreModel === "boolean"
+          ? { hasScoreModel: o.hasScoreModel }
+          : {}),
+      };
+    }
+  } catch {
+    /* fall through */
   }
-  if (typeof value === "string") {
-    return parseSnapshotIdFromRankingResponse(value);
-  }
-  return undefined;
+  const sid = parseSnapshotIdFromRankingResponse(text);
+  return sid ? { snapshotId: sid } : null;
 }
 
-function extractSnapshotIdFromStatusJson(text: string): string | undefined {
+function extractQuickOpenFromStatusJson(text: string): RankingQuickOpen | null {
   try {
-    const o = JSON.parse(text) as { snapshots?: Array<{ id?: unknown }> };
-    const sid = o.snapshots?.[0]?.id;
-    if (sid != null && sid !== "") return String(sid);
+    const o = JSON.parse(text) as {
+      snapshots?: Array<{ id?: unknown; hasScoreModel?: boolean }>;
+    };
+    const latest = o.snapshots?.[0];
+    if (latest?.id == null || latest.id === "") return null;
+    return {
+      snapshotId: String(latest.id),
+      ...(typeof latest.hasScoreModel === "boolean"
+        ? { hasScoreModel: latest.hasScoreModel }
+        : {}),
+    };
   } catch {
-    return undefined;
+    return null;
   }
-  return undefined;
+}
+
+function parseQuickOpenFromJobReturn(value: unknown): RankingQuickOpen | null {
+  if (value == null) return null;
+  if (typeof value === "object") {
+    const o = value as Record<string, unknown>;
+    if (o.id != null && o.id !== "") {
+      return {
+        snapshotId: String(o.id),
+        ...(typeof o.hasScoreModel === "boolean"
+          ? { hasScoreModel: o.hasScoreModel }
+          : {}),
+      };
+    }
+    return null;
+  }
+  if (typeof value === "string") {
+    return pickQuickOpenFromSyncRankingBody(value);
+  }
+  return null;
 }
 
 function RunRankingForm() {
@@ -136,9 +162,7 @@ function RunRankingForm() {
   const [asyncMode, setAsyncMode] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<string>("");
-  const [quickOpen, setQuickOpen] = useState<{ snapshotId: string } | null>(
-    null,
-  );
+  const [quickOpen, setQuickOpen] = useState<RankingQuickOpen | null>(null);
   const [runMeta, setRunMeta] = useState<{
     jobId?: string;
     topicRankingId?: string;
@@ -224,9 +248,10 @@ function RunRankingForm() {
       const text = await res.text();
 
       if (!asyncMode) {
-        let snapId: string | undefined;
-        if (res.ok) snapId = parseSnapshotIdFromRankingResponse(text);
-        if (snapId) setQuickOpen({ snapshotId: snapId });
+        if (res.ok) {
+          const q = pickQuickOpenFromSyncRankingBody(text);
+          if (q) setQuickOpen(q);
+        }
         setResult(
           `${res.ok ? "" : `HTTP ${res.status}\n`}${formatMaybeJson(text)}`,
         );
@@ -248,7 +273,14 @@ function RunRankingForm() {
 
       if (enq.dedupedSnapshot) {
         const snap = enq.snapshotId != null ? String(enq.snapshotId) : "";
-        if (snap) setQuickOpen({ snapshotId: snap });
+        if (snap) {
+          setQuickOpen({
+            snapshotId: snap,
+            ...(typeof enq.hasScoreModel === "boolean"
+              ? { hasScoreModel: enq.hasScoreModel }
+              : {}),
+          });
+        }
         const trId =
           enq.topicRankingId != null ? String(enq.topicRankingId) : "";
         if (trId) setRunMeta({ topicRankingId: trId });
@@ -295,13 +327,13 @@ function RunRankingForm() {
                 row.status === "failed"
               ) {
                 lines.push(
-                  `[${i + 1}s] Job 已从队列移除，以 DB 为准：\n${formatTopicRankingStatus(stText)}`,
+                  `[${i + 1}s] Job 已从队列移除，以 DB 为准：\n${formatTopicRankingStatusSummary(stText)}`,
                 );
                 lines.push("");
                 lines.push(formatMaybeJson(stText));
                 if (row.status === "completed") {
-                  const sid = extractSnapshotIdFromStatusJson(stText);
-                  if (sid) setQuickOpen({ snapshotId: sid });
+                  const q = extractQuickOpenFromStatusJson(stText);
+                  if (q) setQuickOpen(q);
                 }
                 pollTerminal = true;
                 break;
@@ -348,8 +380,8 @@ function RunRankingForm() {
         }
 
         if (st === "completed") {
-          const sid = parseSnapshotIdFromJobReturn(job.returnvalue);
-          if (sid) setQuickOpen({ snapshotId: sid });
+          const q = parseQuickOpenFromJobReturn(job.returnvalue);
+          if (q) setQuickOpen(q);
           lines.push("");
           lines.push(
             job.returnvalue != null
@@ -604,37 +636,61 @@ function RunRankingForm() {
           ) : null}
 
           {quickOpen?.snapshotId ? (
-            <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
-              <span className="text-muted-foreground">快照：</span>
-              <Link
-                href={snapshotDetailAdminPath(quickOpen.snapshotId)}
-                className="font-medium text-primary underline-offset-4 hover:underline"
-              >
-                打开 #{quickOpen.snapshotId}
-              </Link>
-              <CopyTextButton
-                text={quickOpen.snapshotId}
-                idleLabel="复制 id"
-                className="h-6"
-              />
-              <CopyTextButton
-                text={abs(snapshotDetailAdminPath(quickOpen.snapshotId))}
-                idleLabel="复制快照页链接"
-                className="h-6"
-              />
-              <a
-                href={nestSnapshotV1Url(quickOpen.snapshotId)}
-                target="_blank"
-                rel="noreferrer"
-                className="text-xs text-primary underline-offset-4 hover:underline"
-              >
-                GET JSON
-              </a>
-              <CopyTextButton
-                text={nestSnapshotV1Url(quickOpen.snapshotId)}
-                idleLabel="复制快照 JSON URL"
-                className="h-6"
-              />
+            <div className="flex flex-col gap-1 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-muted-foreground">快照：</span>
+                <Link
+                  href={snapshotDetailAdminPath(quickOpen.snapshotId)}
+                  className="font-medium text-primary underline-offset-4 hover:underline"
+                >
+                  打开 #{quickOpen.snapshotId}
+                </Link>
+                <CopyTextButton
+                  text={quickOpen.snapshotId}
+                  idleLabel="复制 id"
+                  className="h-6"
+                />
+                <CopyTextButton
+                  text={abs(snapshotDetailAdminPath(quickOpen.snapshotId))}
+                  idleLabel="复制快照页链接"
+                  className="h-6"
+                />
+                <a
+                  href={nestSnapshotV1Url(quickOpen.snapshotId)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs text-primary underline-offset-4 hover:underline"
+                >
+                  GET JSON
+                </a>
+                <CopyTextButton
+                  text={nestSnapshotV1Url(quickOpen.snapshotId)}
+                  idleLabel="复制快照 JSON URL"
+                  className="h-6"
+                />
+                <a
+                  href={nestSnapshotScoreBreakdownsUrl(quickOpen.snapshotId)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs text-primary underline-offset-4 hover:underline"
+                >
+                  GET score-breakdowns
+                </a>
+                <CopyTextButton
+                  text={nestSnapshotScoreBreakdownsUrl(quickOpen.snapshotId)}
+                  idleLabel="复制 score-breakdowns URL"
+                  className="h-6"
+                />
+              </div>
+              {quickOpen.hasScoreModel === true ? (
+                <p className="text-xs text-muted-foreground">
+                  ScoreModel 已接（物化写入关系表路径）
+                </p>
+              ) : quickOpen.hasScoreModel === false ? (
+                <p className="text-xs text-muted-foreground">
+                  ScoreModel 未接（常见为旧快照或演示数据）
+                </p>
+              ) : null}
             </div>
           ) : null}
 

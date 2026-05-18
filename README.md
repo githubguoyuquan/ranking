@@ -63,7 +63,7 @@ npm run dev   # 默认 http://localhost:3001
 - 默认开启；单机不想连 Redis 时可设 `RANKING_CACHE_ENABLED=false`（关闭快照与热榜聚合两类缓存键；异步排行仍可能要 Redis）。  
 - `RANKING_CACHE_TTL_SECONDS`：默认 `604800`（7 天，与不可变快照一致）。  
 - `LEADERBOARD_CACHE_TTL_SECONDS`：默认 `120`；`GET /v1/topics/:slug/leaderboard` 的聚合 JSON（命中后短缓存，「最新窗口」语义用 TTL 消化变更）。  
-- `RANKING_CACHE_REDIS_DB`：默认 `0`；与 BullMQ 共用实例时键前缀为 `ranking:v1:snap:`、`ranking:v1:lb:`，一般无需换 DB。  
+- `RANKING_CACHE_REDIS_DB`：默认 `0`；与 BullMQ 共用实例时键前缀为 **`ranking:v2:snap:`**（快照 JSON）、**`ranking:v3:lb:`**（热榜聚合），一般无需换 DB。  
 - 排行物化成功后会 `warm` 缓存，首次读多走内存。
 
 ### ClickHouse（可选）
@@ -90,9 +90,10 @@ npm run dev   # 默认 http://localhost:3001
 
 - `KAFKA_BROKERS`：可**留空**则仅写 Outbox、不连 broker（无 Redpanda 时不报错）。需要发布时再设为例如 `localhost:19092`。可选 `KAFKAJS_LOG_LEVEL=WARN` 排查连接。
 - 可选：`KAFKA_TOPIC_RANKING_SNAPSHOT_COMPLETED`、`KAFKA_CLIENT_ID`  
-- 消息体：`{ type, payload, meta: { outboxId, createdAt } }`，`payload` 内含 `snapshotId`、`topicRankingId`、`topicVersionId` 等（字符串化 ID）  
-- `OutboxEvent.type` 另有 `clickhouse.ranking.snapshot.ingest`、`elasticsearch.entity.sync`、`elasticsearch.crawled_url.sync` 等，由各自 **进程内 Flusher** 消费，**不会**随 Kafka 发布。  
-- **运维排查**：`GET /admin/outbox?limit=50&pendingOnly=true&type=...` 只读列出积压行（无鉴权，勿暴露公网）。管理台 Outbox 页提供 **ES 实体 / ES 爬取 type 快捷按钮**、**清空 type**、**limit/type 框 Enter 加载**、**新标签打开与当前筛选一致的查询 URL**、**复制该 GET URL**（**无可复制文本时复制按钮禁用**；**limit 非法或非正按 40、超过 200 按 200**，与接口校验上限一致；**type 框 maxLength 120**，与 DTO `@MaxLength` 一致）。  
+- 消息体：`{ type, payload, meta: { outboxId, createdAt } }`，`payload` 内含 `snapshotId`、`topicRankingId`、`topicVersionId`、**`hasScoreModel`**、**`scoreModelId`**（无模型时为 `null`）等（字符串化 ID）；字段集由 **`buildRankingSnapshotCompletedOutboxPayload`**（`src/rankings/ranking-snapshot-completed-outbox-payload.ts`）固化。  
+- `OutboxEvent.type` 另有 `clickhouse.ranking.snapshot.ingest`、`elasticsearch.entity.sync`、`elasticsearch.crawled_url.sync`、`ranking.followup.requested`（需 **`RANKING_FOLLOWUP_OUTBOX=true`** 且跑 **`ranking-followup`** 任务时才写入）等，由各自 **进程内 Flusher** 或占位逻辑消费，**不会**随 Kafka 发布；**`payload`** 分别由 **`buildClickhouseRankingSnapshotOutboxPayload`**、**`buildElasticEntitySyncOutboxPayload`**、**`buildElasticCrawledUrlSyncOutboxPayload`**、**`buildRankingFollowupRequestedOutboxPayload`** 固化（路径见 **`src/outbox/outbox-admin.controller.ts`** 类注释中的列表）。  
+- **运维排查**：`GET /admin/outbox?limit=50&pendingOnly=true&type=...` 只读列出积压行（无鉴权，勿暴露公网）。**接口契约**见源码 **`src/outbox/outbox-admin.controller.ts`** 类注释；**OpenAPI 3 片段**：**`docs/openapi/admin-outbox.yaml`**（可导入 Swagger UI）。管理台 Outbox 页提供 **五种主要 `type` 快捷按钮**（含 ES 两行、Kafka 排行、CH、**`ranking.followup.requested`**）、**清空 type**、**limit/type 框 Enter 加载**、**新标签打开与当前筛选一致的查询 URL**、**复制该 GET URL**（**无可复制文本时复制按钮禁用**；**limit 非法或非正按 40、超过 200 按 200**，与接口校验上限一致；**type 框 maxLength 120**，与 DTO `@MaxLength` 一致）；表格在存在对应行时展示 **Kafka / CH / ES 实体 / ES 爬取 / followup** 等 **`payload` 摘要列**，原始 JSON 区对契约键名 **浅色高亮**。  
+- **OpenAPI 片段**：目录 **`docs/openapi/`**（另含 **`admin-entities.yaml`** → **`GET /admin/entities`**）；**`npm test`** 中 **`src/openapi/docs-openapi.spec.ts`** 会解析目录下全部 **`.yaml`** 并断言 **OpenAPI 3** 与 **`paths`** 非空。  
 - `OUTBOX_FLUSH_MS`：发布轮询间隔（毫秒，默认 2000）
 
 ## Run locally
@@ -127,7 +128,7 @@ curl -s -X POST http://localhost:3000/admin/seed-demo -H 'Content-Type: applicat
 
 ### 同步排行（小包络）
 
-`POST /v1/rankings/run`，body 不含 `async` 或 `"async": false`。管理台 **`/rankings/run`** 在成功物化快照时展示 **打开快照** 快捷链（覆盖：同步 JSON 的 `id`、异步 **completed** 的 `returnvalue.id`、**dedup** 的 `snapshotId`、以及 job **404** 后依 DB `status=completed` 从 `snapshots[0].id` 解析）。
+`POST /v1/rankings/run`，body 不含 `async` 或 `"async": false`。响应为快照对象（含 **`hasScoreModel`**、与 **`GET /v1/snapshots/:id`** 同类的嵌套 **`items`** 等）。管理台 **`/rankings/run`** 在成功物化快照时展示 **打开快照** 快捷链（覆盖：同步 JSON 的 `id`、异步 **completed** 的 `returnvalue.id`、**dedup** 的 `snapshotId`、以及 job **404** 后依 DB `status=completed` 从 `snapshots[0].id` 解析）。
 
 ### 异步排行（生产路径）
 
@@ -136,14 +137,16 @@ curl -s -X POST http://localhost:3000/v1/rankings/run \
   -H 'Content-Type: application/json' \
   -d '{"topicVersionId":"1","timeWindow":"WEEK","windowStart":"2026-05-10T00:00:00.000Z","windowEnd":"2026-05-17T00:00:00.000Z","asOf":"2026-05-20T12:00:00.000Z","async":true}'
 # → { "jobId": "...", "topicRankingId": "..." }
+# 同窗口已有快照未入队：`dedupedSnapshot: true`、`snapshotId`、`hasScoreModel`（可选）。
 
 curl -s http://localhost:3000/v1/jobs/ranking/<jobId>
 curl -s http://localhost:3000/v1/rankings/<topicRankingId>/status
+# status：`snapshots[]` 含 `scoreModelId` 及 **`hasScoreModel`**（是否已关联物化 **`ScoreModel`**）；`topicRankingId` 非合法 BigInt 时为 **400**。
 ```
 
-快照详情：`GET /v1/snapshots/{id}`（bigint 已转字符串）。可选 **`?includeAiStats=1`** 合并当前 **`AiAnalysis`** 条数与 **`hasFollowupBrief`** / **`hasTrendBrief`** / **`hasCredibilityBrief`**（**本条响应不走快照 Redis 缓存**）。管理台 `/snapshots/:id` 支持 **`?analysisKind=`**（与 API **`agentKind`** 一致）、**`?analysisPage=`**（默认 1）、**`?analysisLimit=`**（默认 50，最大 200）与简报分页。快照详情与 **快照对比** 表中的实体名可点进 **`/search?q=`**；得分分布 **ECharts 柱图点击柱条** 亦可跳到同名聚合搜索；**复制 snapshot id**、**复制 topicVersionId**、**复制 topicRankingId**、**新标签打开** **`GET /v1/snapshots/:id`**、**`GET /v1/snapshots/:id/analyses`** 与 **`GET /v1/rankings/:id/status`**。
+快照详情：`GET /v1/snapshots/{id}`（bigint 已转字符串；响应含 **`items[].scoreBreakdown`**、**`scoreModel`**（新物化快照）、嵌套 **`topicRanking`**）。**`GET /v1/snapshots/{id}/score-breakdowns`** 导出关系表 **`ScoreBreakdown`** 扁平行（审计/报表；旧快照可无行）。可选 **`?includeAiStats=1`** 合并当前 **`AiAnalysis`** 条数与 **`hasFollowupBrief`** / **`hasTrendBrief`** / **`hasCredibilityBrief`**（**本条响应不走快照 Redis 缓存**）。管理台 `/snapshots/:id` 支持 **`?analysisKind=`**（与 API **`agentKind`** 一致）、**`?analysisPage=`**（默认 1）、**`?analysisLimit=`**（默认 50，最大 200）与简报分页。快照详情与 **快照对比** 表中的实体名可点进 **`/search?q=`**；得分分布 **ECharts 柱图点击柱条** 亦可跳到同名聚合搜索；**复制 snapshot id**、**复制 topicVersionId**、**复制 topicRankingId**、**新标签打开** **`GET /v1/snapshots/:id`**、**`GET /v1/snapshots/:id/analyses`** 与 **`GET /v1/rankings/:id/status`**。
 
-同一 **`TopicRanking`** 下多张快照并列对比：`POST /v1/snapshots/compare`，body 为 `{"snapshotIds":["1","2"]}`（**2–10** 个 id，可去重）；可选 **`"includeAiStats": true`**，响应 **`snapshots[]`** 每项合并 **`aiAnalysisCount`**、**`hasFollowupBrief`**、**`hasTrendBrief`**、**`hasCredibilityBrief`**（与快照详情 `?includeAiStats=1` 同源统计）。管理台 **`/snapshots/compare`**（支持 `?ids=` 与 **`?includeAiStats=1`** 预勾选；**无查询串时不预填示例 id**；**2–10 个十进制 id（≤38 位）才允许对比/复制 POST 与路径**；**对比成功后地址栏与 ids 对齐**；**复制 POST 体**、**复制对比页路径**；页脚链至 **运行排行 / 索引 / 爬虫 / Outbox** 等）。侧栏在 **`/snapshots/:id` 详情**时同步高亮 **「快照对比」** 以便返回同类操作。
+同一 **`TopicRanking`** 下多张快照并列对比：`POST /v1/snapshots/compare`，body 为 `{"snapshotIds":["1","2"]}`（**2–10** 个 id，可去重）；可选 **`"includeAiStats": true`**，响应 **`snapshots[]`** 每项合并 **`aiAnalysisCount`**、**`hasFollowupBrief`**、**`hasTrendBrief`**、**`hasCredibilityBrief`**（与快照详情 `?includeAiStats=1` 同源统计）、**`hasScoreModel`**；**`rows[].bySnapshot[snapshotId]`** 可含 **`scoreBreakdown`**（与条目 JSON 字段同源）。管理台 **`/snapshots/compare`**（支持 `?ids=` 与 **`?includeAiStats=1`** 预勾选；**无查询串时不预填示例 id**；**2–10 个十进制 id（≤38 位）才允许对比/复制 POST 与路径**；**对比成功后地址栏与 ids 对齐**；**复制 POST 体**、**复制对比页路径**；页脚链至 **运行排行 / 索引 / 爬虫 / Outbox** 等）。侧栏在 **`/snapshots/:id` 详情**时同步高亮 **「快照对比」** 以便返回同类操作。
 
 ```bash
 curl -s -X POST http://localhost:3000/v1/snapshots/compare \
@@ -171,7 +174,7 @@ curl -s 'http://localhost:3000/v1/topics/global-female-singers/trend-analyses?li
 # 可选 &timeWindow=WEEK
 ```
 
-按话题 slug 列出近期 **`TopicRankSnapshot`**（默认 30 条，最大 100，按 `snapshotTime` 倒序）；每条含 **`aiAnalysisCount`**、**`hasFollowupBrief`**、**`hasTrendBrief`**、**`hasCredibilityBrief`**（按约定 `agent` 或对应 **`detailJson.agentKind`** 判定）。
+按话题 slug 列出近期 **`TopicRankSnapshot`**（默认 30 条，最大 100，按 `snapshotTime` 倒序）；每条含 **`aiAnalysisCount`**、**`hasFollowupBrief`**、**`hasTrendBrief`**、**`hasCredibilityBrief`**（按约定 `agent` 或对应 **`detailJson.agentKind`** 判定）、**`hasScoreModel`**（新物化是否已关联 **`ScoreModel`**，便于区分能否期望 **`GET …/score-breakdowns`** 有行）。
 
 ```bash
 curl -s 'http://localhost:3000/v1/topics/global-female-singers/snapshots?limit=25'
@@ -197,7 +200,7 @@ curl -s -X PATCH http://localhost:3000/v1/topic-versions/1/policy \
 
 默认：该话题**最新 effectiveFrom** 的 `TopicVersion` + **最近完成的** `TopicRanking`（含快照）+ 该 ranking 下**最新 snapshotTime** 的快照。
 
-可选查询串：`version`、`timeWindow`、`windowStart`（若带 `windowStart` 必须同时带 `timeWindow`）、**`includeAiStats=1`**（嵌套 `snapshot` 合并 `aiAnalysisCount` / `hasFollowupBrief` / `hasTrendBrief` / `hasCredibilityBrief`，与 `GET /v1/snapshots/:id?includeAiStats=1` 一致；热榜 Redis 键含该开关，避免与无统计体混读）。响应为 `{ resolved, snapshot }`，其中 `snapshot` 与快照详情 API 同形。管理台 **话题版本** 页（**slug 留空时仍按演示默认 `global-female-singers` 请求**，避免 `/topics//versions`）；**slug / 热榜 version 输入分别 maxLength 160 / 64**；**`timeWindow` / `windowStart` 输入 maxLength 16 / 80**；URL 预填超长 query 时同步截断；**热榜请求前校验** `timeWindow` 须在 Prisma 枚举内；**`windowStart` 非空时校验 ISO**；在加载热榜后会展示解析表，并支持 URL 预填：`?slug=`、`?version=`、`?timeWindow=`、`?windowStart=`；**Enter** 可在 slug / 热榜参数框内快捷触发请求；表格中 **实体名可点进 `/search?q=`**，并可打开 **`/entities?q=`**；热榜预览区可 **复制 snapshotId / topicVersionId**；**新标签**打开与当前 slug、热榜参数一致的 **`GET /v1/topics/:slug/versions`** 与 **`/leaderboard`**。
+可选查询串：`version`、`timeWindow`、`windowStart`（若带 `windowStart` 必须同时带 `timeWindow`）、**`includeAiStats=1`**（嵌套 `snapshot` 合并 `aiAnalysisCount` / `hasFollowupBrief` / `hasTrendBrief` / `hasCredibilityBrief`，与 `GET /v1/snapshots/:id?includeAiStats=1` 一致；热榜 Redis 键含该开关，避免与无统计体混读）。响应为 `{ resolved, snapshot }`，其中 **`resolved.hasScoreModel`** 标示当前嵌套快照是否已关联 **ScoreModel**，**`snapshot`** 与快照详情 API 同形。管理台 **话题版本** 页（**slug 留空时仍按演示默认 `global-female-singers` 请求**，避免 `/topics//versions`）；**slug / 热榜 version 输入分别 maxLength 160 / 64**；**`timeWindow` / `windowStart` 输入 maxLength 16 / 80**；URL 预填超长 query 时同步截断；**热榜请求前校验** `timeWindow` 须在 Prisma 枚举内；**`windowStart` 非空时校验 ISO**；在加载热榜后会展示解析表，并支持 URL 预填：`?slug=`、`?version=`、`?timeWindow=`、`?windowStart=`；**Enter** 可在 slug / 热榜参数框内快捷触发请求；表格中 **实体名可点进 `/search?q=`**，并可打开 **`/entities?q=`**；热榜预览区可 **复制 snapshotId / topicVersionId**；**新标签**打开与当前 slug、热榜参数一致的 **`GET /v1/topics/:slug/versions`** 与 **`/leaderboard`**。
 
 ```bash
 curl -s 'http://localhost:3000/v1/topics/global-female-singers/leaderboard'
@@ -227,6 +230,7 @@ curl -s 'http://localhost:3000/v1/snapshots/1?includeAiStats=1'
 curl -s http://localhost:3000/v1/snapshots/1/analyses
 # 响应体为 `{ filter, total, analyses }`；可选 ?agentKind= &agent= &limit=（默认 50，最大 200）&offset=
 curl -s 'http://localhost:3000/v1/snapshots/1/analyses?agentKind=trend&limit=20&offset=0'
+curl -s 'http://localhost:3000/v1/snapshots/1/score-breakdowns'
 curl -s 'http://localhost:3000/v1/search/crawled-urls?q=example&limit=10'
 curl -s 'http://localhost:3000/v1/search/crawled-urls-es?q=example&limit=10'
 # 可选 &sourceId=1&status=fetched

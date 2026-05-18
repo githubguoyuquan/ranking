@@ -33,6 +33,7 @@ import {
   nestTopicTrendAnalysesUrl,
   nestTopicVersionsUrl,
   nestTopicVersionPolicyUrl,
+  nestSnapshotScoreBreakdownsUrl,
 } from "@/lib/nest-api-urls";
 import { unifiedSearchAdminPathFromQuery } from "@/lib/unified-search-admin-path";
 import { isIsoDateString } from "@/lib/iso-date";
@@ -72,6 +73,7 @@ type LeaderboardPreview = {
     windowStart?: string;
     windowEnd?: string;
     snapshotTime?: string;
+    hasScoreModel?: boolean;
   };
   items: Array<{
     rank: number;
@@ -186,6 +188,12 @@ function parseLeaderboardPreview(data: unknown): LeaderboardPreview | null {
         r.windowEnd != null ? String(r.windowEnd) : undefined,
       snapshotTime:
         r.snapshotTime != null ? String(r.snapshotTime) : undefined,
+      hasScoreModel:
+        r.hasScoreModel === true
+          ? true
+          : r.hasScoreModel === false
+            ? false
+            : undefined,
     },
     items,
   };
@@ -219,6 +227,8 @@ type TopicSnapshotListItem = {
   hasTrendBrief?: boolean;
   /** credibility-v1 / agentKind=credibility */
   hasCredibilityBrief?: boolean;
+  /** 物化时是否写入 `ScoreModel`（新快照）；`GET …/score-breakdowns` 是否可能有行 */
+  hasScoreModel?: boolean;
   topicRanking: {
     id: string;
     timeWindow: string;
@@ -804,6 +814,11 @@ function TopicsPageInner() {
                 {lb.resolved.snapshotTime ? (
                   <> · 快照时间 {lb.resolved.snapshotTime}</>
                 ) : null}
+                {lb.resolved.hasScoreModel === true ? (
+                  <> · ScoreModel 已接</>
+                ) : lb.resolved.hasScoreModel === false ? (
+                  <> · ScoreModel 未接</>
+                ) : null}
               </p>
               <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
                 <Link
@@ -820,6 +835,19 @@ function TopicsPageInner() {
                 <CopyTextButton
                   text={lb.resolved.snapshotId}
                   idleLabel="复制 snapshotId"
+                  className="h-6"
+                />
+                <a
+                  href={nestSnapshotScoreBreakdownsUrl(lb.resolved.snapshotId)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-primary underline-offset-4 hover:underline"
+                >
+                  GET score-breakdowns
+                </a>
+                <CopyTextButton
+                  text={nestSnapshotScoreBreakdownsUrl(lb.resolved.snapshotId)}
+                  idleLabel="复制 score-breakdowns URL"
                   className="h-6"
                 />
                 <Link
@@ -1264,7 +1292,9 @@ function TopicsPageInner() {
             <code className="text-xs">aiAnalysisCount</code>、
             <code className="text-xs">hasFollowupBrief</code>、
             <code className="text-xs">hasTrendBrief</code>、
-            <code className="text-xs">hasCredibilityBrief</code>。可选 query：
+            <code className="text-xs">hasCredibilityBrief</code>、
+            <code className="text-xs">hasScoreModel</code>
+            （新物化快照已接 <code className="text-xs">ScoreModel</code>）。可选 query：
             <code className="text-xs">timeWindow</code>、<code className="text-xs">limit</code>（1–100）。
           </CardDescription>
         </CardHeader>
@@ -1318,6 +1348,9 @@ function TopicsPageInner() {
                       可信
                     </th>
                     <th scope="col" className="px-3 py-2 font-medium">
+                      模型
+                    </th>
+                    <th scope="col" className="px-3 py-2 font-medium">
                       {" "}
                     </th>
                   </tr>
@@ -1353,8 +1386,24 @@ function TopicsPageInner() {
                       <td className="px-3 py-2 text-muted-foreground">
                         {row.hasCredibilityBrief === true ? "是" : "—"}
                       </td>
+                      <td className="px-3 py-2 text-muted-foreground">
+                        {row.hasScoreModel === true ? "是" : "—"}
+                      </td>
                       <td className="px-3 py-2 text-right">
                         <span className="inline-flex flex-wrap items-center justify-end gap-x-2 gap-y-1">
+                          <a
+                            href={nestSnapshotScoreBreakdownsUrl(row.id)}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-primary underline-offset-2 hover:underline"
+                          >
+                            分解
+                          </a>
+                          <CopyTextButton
+                            text={nestSnapshotScoreBreakdownsUrl(row.id)}
+                            idleLabel="复制分解 API"
+                            className="h-6 px-2 text-xs"
+                          />
                           <Link
                             href={snapshotDetailAdminPath(row.id)}
                             className="text-primary underline-offset-2 hover:underline"

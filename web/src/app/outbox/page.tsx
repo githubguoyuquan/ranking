@@ -20,9 +20,39 @@ import {
   OUTBOX_LIMIT_INPUT_MAX_LEN,
   OUTBOX_LIST_LIMIT_MAX,
 } from "@/lib/admin-input-limits";
-import { ADMIN_HREF } from "@/lib/admin-web-paths";
+import {
+  ADMIN_HREF,
+  rankingsRunAdminPath,
+  snapshotDetailAdminPath,
+} from "@/lib/admin-web-paths";
+import {
+  OUTBOX_TYPE_CLICKHOUSE_RANKING_SNAPSHOT,
+  parseClickhouseRankingSnapshotOutboxPreview,
+  type ClickhouseRankingSnapshotOutboxPreview,
+} from "@/lib/outbox-clickhouse-ranking-payload";
+import {
+  OUTBOX_TYPE_ELASTIC_CRAWLED_URL_SYNC,
+  parseElasticCrawledUrlSyncOutboxPreview,
+  type ElasticCrawledUrlSyncOutboxPreview,
+} from "@/lib/outbox-elastic-crawled-url-payload";
+import {
+  OUTBOX_TYPE_ELASTIC_ENTITY_SYNC,
+  parseElasticEntitySyncOutboxPreview,
+  type ElasticEntitySyncOutboxPreview,
+} from "@/lib/outbox-elastic-entity-payload";
+import {
+  OUTBOX_TYPE_RANKING_FOLLOWUP_REQUESTED,
+  parseRankingFollowupRequestedOutboxPreview,
+  type RankingFollowupRequestedOutboxPreview,
+} from "@/lib/outbox-ranking-followup-payload";
+import {
+  OUTBOX_TYPE_RANKING_SNAPSHOT_COMPLETED,
+  parseRankingSnapshotCompletedOutboxPreview,
+  type RankingSnapshotCompletedOutboxPreview,
+} from "@/lib/outbox-ranking-snapshot-payload";
+import { unifiedSearchAdminPathFromQuery } from "@/lib/unified-search-admin-path";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useAdminAppUrl } from "@/hooks/use-admin-app-url";
 
 type OutboxRow = {
@@ -33,6 +63,16 @@ type OutboxRow = {
   leasedUntil?: string | null;
   attempts?: number;
   lastError?: string | null;
+  /** `type === ranking.snapshot.completed` 且 `payload` 可解析时 */
+  rankingKafkaPreview?: RankingSnapshotCompletedOutboxPreview;
+  /** `type === clickhouse.ranking.snapshot.ingest` 且 `payload` 可解析时 */
+  clickhouseRankingPreview?: ClickhouseRankingSnapshotOutboxPreview;
+  /** `type === elasticsearch.entity.sync` 且 `payload` 可解析时 */
+  elasticEntityPreview?: ElasticEntitySyncOutboxPreview;
+  /** `type === elasticsearch.crawled_url.sync` 且 `payload` 可解析时 */
+  elasticCrawledUrlPreview?: ElasticCrawledUrlSyncOutboxPreview;
+  /** `type === ranking.followup.requested` 且 `payload` 可解析时 */
+  followupPreview?: RankingFollowupRequestedOutboxPreview;
 };
 
 type OutboxTable = {
@@ -44,9 +84,26 @@ function normalizeOutboxRow(r: unknown): OutboxRow | null {
   if (typeof r !== "object" || r === null) return null;
   const o = r as Record<string, unknown>;
   if (o.id == null || o.type == null) return null;
+  const type = String(o.type);
+  const rankingKafkaPreview = parseRankingSnapshotCompletedOutboxPreview(
+    type,
+    o.payload,
+  );
+  const clickhouseRankingPreview =
+    parseClickhouseRankingSnapshotOutboxPreview(type, o.payload);
+  const elasticEntityPreview = parseElasticEntitySyncOutboxPreview(
+    type,
+    o.payload,
+  );
+  const elasticCrawledUrlPreview =
+    parseElasticCrawledUrlSyncOutboxPreview(type, o.payload);
+  const followupPreview = parseRankingFollowupRequestedOutboxPreview(
+    type,
+    o.payload,
+  );
   return {
     id: String(o.id),
-    type: String(o.type),
+    type,
     createdAt: o.createdAt != null ? String(o.createdAt) : undefined,
     publishedAt:
       o.publishedAt === null
@@ -67,6 +124,15 @@ function normalizeOutboxRow(r: unknown): OutboxRow | null {
         : o.lastError != null
           ? String(o.lastError)
           : null,
+    ...(rankingKafkaPreview != null ? { rankingKafkaPreview } : {}),
+    ...(clickhouseRankingPreview != null
+      ? { clickhouseRankingPreview }
+      : {}),
+    ...(elasticEntityPreview != null ? { elasticEntityPreview } : {}),
+    ...(elasticCrawledUrlPreview != null
+      ? { elasticCrawledUrlPreview }
+      : {}),
+    ...(followupPreview != null ? { followupPreview } : {}),
   };
 }
 
@@ -83,6 +149,60 @@ function truncate(s: string | null | undefined, n: number) {
   if (s == null || s === "") return "—";
   if (s.length <= n) return s;
   return `${s.slice(0, n)}…`;
+}
+
+/** pretty-printed JSON：常见 Outbox `payload` 键名（Kafka / CH / ES / followup） */
+const OUTBOX_JSON_CONTRACT_KEY_RE =
+  /"(?:schemaVersion|action|entityId|crawledUrlId|snapshotId|topicRankingId|topicVersionId|topicId|topicVersionLabel|timeWindow|snapshotTime|snapshotVersion|itemCount|confidenceScore|hasScoreModel|scoreModelId)"/g;
+
+function highlightOutboxJsonContractKeys(text: string): ReactNode {
+  const parts: ReactNode[] = [];
+  let last = 0;
+  const re = new RegExp(OUTBOX_JSON_CONTRACT_KEY_RE.source, "g");
+  let m: RegExpExecArray | null;
+  let k = 0;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) {
+      parts.push(text.slice(last, m.index));
+    }
+    parts.push(
+      <mark
+        key={`outbox-json-hl-${k++}`}
+        className="rounded bg-amber-200/55 px-px text-inherit dark:bg-amber-900/45"
+      >
+        {m[0]}
+      </mark>,
+    );
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) {
+    parts.push(text.slice(last));
+  }
+  return parts.length > 0 ? parts : text;
+}
+
+/** 列表 JSON 中是否出现排行快照完成 Outbox 行（用于说明文案） */
+function outLooksLikeRankingSnapshotOutboxJson(text: string): boolean {
+  return (
+    text.includes(OUTBOX_TYPE_RANKING_SNAPSHOT_COMPLETED) &&
+    (text.includes('"topicRankingId"') || text.includes('"snapshotTime"'))
+  );
+}
+
+function outLooksLikeClickhouseRankingOutboxJson(text: string): boolean {
+  return text.includes(OUTBOX_TYPE_CLICKHOUSE_RANKING_SNAPSHOT);
+}
+
+function outLooksLikeElasticEntityOutboxJson(text: string): boolean {
+  return text.includes(OUTBOX_TYPE_ELASTIC_ENTITY_SYNC);
+}
+
+function outLooksLikeElasticCrawledUrlOutboxJson(text: string): boolean {
+  return text.includes(OUTBOX_TYPE_ELASTIC_CRAWLED_URL_SYNC);
+}
+
+function outLooksLikeRankingFollowupOutboxJson(text: string): boolean {
+  return text.includes(OUTBOX_TYPE_RANKING_FOLLOWUP_REQUESTED);
 }
 
 /** 与后端 outbox 列表 API（`BACKEND_ADMIN.outbox`）的 limit 钳制一致（上限 `OUTBOX_LIST_LIMIT_MAX`） */
@@ -102,6 +222,25 @@ export default function OutboxPage() {
   const [out, setOut] = useState("");
   const [loading, setLoading] = useState(false);
   const [table, setTable] = useState<OutboxTable | null>(null);
+
+  const showRankingKafkaCols =
+    table != null &&
+    table.rows.some((r) => r.rankingKafkaPreview != null);
+
+  const showClickhouseRankingCols =
+    table != null &&
+    table.rows.some((r) => r.clickhouseRankingPreview != null);
+
+  const showElasticEntityCols =
+    table != null &&
+    table.rows.some((r) => r.elasticEntityPreview != null);
+
+  const showElasticCrawledUrlCols =
+    table != null &&
+    table.rows.some((r) => r.elasticCrawledUrlPreview != null);
+
+  const showFollowupCols =
+    table != null && table.rows.some((r) => r.followupPreview != null);
 
   const currentApiUrl = useMemo(() => {
     const params = new URLSearchParams({ limit: normalizeOutboxLimit(limit) });
@@ -195,8 +334,32 @@ export default function OutboxPage() {
             <code className="text-xs">{ENTITY_TYPE_MAX_LEN}</code> 字符，与 DTO <code className="text-xs">@MaxLength</code>{" "}
             一致）：如{" "}
             <code className="text-xs">elasticsearch.entity.sync</code>、
-            <code className="text-xs">elasticsearch.crawled_url.sync</code>
-            。            <code className="text-xs">limit</code> 需为正整数：非法或空视为{" "}
+            <code className="text-xs">elasticsearch.crawled_url.sync</code>、
+            <code className="text-xs">
+              {OUTBOX_TYPE_RANKING_SNAPSHOT_COMPLETED}
+            </code>
+            （Kafka 排行快照完成事件）。后者{" "}
+            <code className="text-xs">payload</code> 含{" "}
+            <code className="text-xs">schemaVersion</code>、字符串化 id、
+            <code className="text-xs">hasScoreModel</code>、
+            <code className="text-xs">scoreModelId</code>
+            （无模型时为 <code className="text-xs">null</code>）等。另有{" "}
+            <code className="text-xs">{OUTBOX_TYPE_CLICKHOUSE_RANKING_SNAPSHOT}</code>
+            （ClickHouse 排行快照入库，进程内 Flusher；{" "}
+            <code className="text-xs">payload</code> 为{" "}
+            <code className="text-xs">schemaVersion</code> + 字符串化{" "}
+            <code className="text-xs">snapshotId</code>）。
+            <code className="text-xs">elasticsearch.entity.sync</code> /{" "}
+            <code className="text-xs">elasticsearch.crawled_url.sync</code>{" "}
+            的 <code className="text-xs">payload</code> 见{" "}
+            <code className="text-xs">buildElastic*OutboxPayload</code>（
+            <code className="text-xs">src/search/elastic-*-sync-outbox-payload.ts</code>
+            ）。
+            <code className="text-xs">{OUTBOX_TYPE_RANKING_FOLLOWUP_REQUESTED}</code>（需{" "}
+            <code className="text-xs">RANKING_FOLLOWUP_OUTBOX=true</code>）见{" "}
+            <code className="text-xs">buildRankingFollowupRequestedOutboxPayload</code>。
+            {" "}
+            <code className="text-xs">limit</code> 需为正整数：非法或空视为{" "}
             <code className="text-xs">40</code>，超过 <code className="text-xs">{OUTBOX_LIST_LIMIT_MAX}</code>{" "}
             时按 {OUTBOX_LIST_LIMIT_MAX} 请求（与 DTO 上限一致）。在 limit / type 输入框按{" "}
             <kbd className="rounded border border-border bg-muted px-1 text-[10px]">Enter</kbd>{" "}
@@ -275,6 +438,44 @@ export default function OutboxPage() {
             </Button>
             <Button
               type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs"
+              disabled={loading}
+              onClick={() =>
+                void load({ type: OUTBOX_TYPE_RANKING_SNAPSHOT_COMPLETED })
+              }
+            >
+              {OUTBOX_TYPE_RANKING_SNAPSHOT_COMPLETED}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 max-w-[100%] truncate px-2 text-xs sm:max-w-none"
+              title={OUTBOX_TYPE_CLICKHOUSE_RANKING_SNAPSHOT}
+              disabled={loading}
+              onClick={() =>
+                void load({ type: OUTBOX_TYPE_CLICKHOUSE_RANKING_SNAPSHOT })
+              }
+            >
+              {OUTBOX_TYPE_CLICKHOUSE_RANKING_SNAPSHOT}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 max-w-[100%] truncate px-2 text-xs sm:max-w-none"
+              title={OUTBOX_TYPE_RANKING_FOLLOWUP_REQUESTED}
+              disabled={loading}
+              onClick={() =>
+                void load({ type: OUTBOX_TYPE_RANKING_FOLLOWUP_REQUESTED })
+              }
+            >
+              {OUTBOX_TYPE_RANKING_FOLLOWUP_REQUESTED}
+            </Button>
+            <Button
+              type="button"
               variant="ghost"
               size="sm"
               className="h-8 text-xs"
@@ -310,11 +511,62 @@ export default function OutboxPage() {
                 共 {table.count ?? table.rows.length} 条（表格最多展示本页 limit）
               </p>
               <div className="overflow-x-auto rounded-md border border-border">
-                <table className="w-full min-w-[56rem] text-left text-sm">
+                <table className="w-full min-w-[120rem] text-left text-sm">
                   <thead className="border-b border-border bg-muted/40 text-xs text-muted-foreground">
                     <tr>
                       <th scope="col" className="px-3 py-2 font-medium">id</th>
                       <th scope="col" className="px-3 py-2 font-medium">type</th>
+                      {showRankingKafkaCols ? (
+                        <>
+                          <th scope="col" className="px-3 py-2 font-medium">
+                            snapshotId
+                          </th>
+                          <th scope="col" className="px-3 py-2 font-medium">
+                            hasScoreModel
+                          </th>
+                          <th scope="col" className="px-3 py-2 font-medium">
+                            scoreModelId
+                          </th>
+                        </>
+                      ) : null}
+                      {showClickhouseRankingCols ? (
+                        <th scope="col" className="px-3 py-2 font-medium">
+                          CH snapshotId
+                        </th>
+                      ) : null}
+                      {showElasticEntityCols ? (
+                        <>
+                          <th scope="col" className="px-3 py-2 font-medium">
+                            ES entityId
+                          </th>
+                          <th scope="col" className="px-3 py-2 font-medium">
+                            ES action
+                          </th>
+                        </>
+                      ) : null}
+                      {showElasticCrawledUrlCols ? (
+                        <>
+                          <th scope="col" className="px-3 py-2 font-medium">
+                            crawlUrlId
+                          </th>
+                          <th scope="col" className="px-3 py-2 font-medium">
+                            crawl action
+                          </th>
+                        </>
+                      ) : null}
+                      {showFollowupCols ? (
+                        <>
+                          <th scope="col" className="px-3 py-2 font-medium">
+                            followup snapshot
+                          </th>
+                          <th scope="col" className="px-3 py-2 font-medium">
+                            topicVer → 跑榜
+                          </th>
+                          <th scope="col" className="px-3 py-2 font-medium">
+                            followup window
+                          </th>
+                        </>
+                      ) : null}
                       <th scope="col" className="px-3 py-2 font-medium">attempts</th>
                       <th scope="col" className="px-3 py-2 font-medium">created</th>
                       <th scope="col" className="px-3 py-2 font-medium">published</th>
@@ -337,6 +589,126 @@ export default function OutboxPage() {
                         <td className="max-w-[14rem] truncate px-3 py-1.5 text-xs">
                           {r.type}
                         </td>
+                        {showRankingKafkaCols ? (
+                          <>
+                            <td className="whitespace-nowrap px-3 py-1.5 font-mono text-xs">
+                              {r.rankingKafkaPreview ? (
+                                <Link
+                                  href={snapshotDetailAdminPath(
+                                    r.rankingKafkaPreview.snapshotId,
+                                  )}
+                                  className="text-primary underline-offset-4 hover:underline"
+                                >
+                                  {r.rankingKafkaPreview.snapshotId}
+                                </Link>
+                              ) : (
+                                "—"
+                              )}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-1.5 text-xs text-muted-foreground">
+                              {r.rankingKafkaPreview
+                                ? r.rankingKafkaPreview.hasScoreModel
+                                  ? "是"
+                                  : "否"
+                                : "—"}
+                            </td>
+                            <td className="max-w-[10rem] truncate px-3 py-1.5 font-mono text-xs text-muted-foreground">
+                              {r.rankingKafkaPreview?.scoreModelId ?? "—"}
+                            </td>
+                          </>
+                        ) : null}
+                        {showClickhouseRankingCols ? (
+                          <td className="whitespace-nowrap px-3 py-1.5 font-mono text-xs">
+                            {r.clickhouseRankingPreview ? (
+                              <Link
+                                href={snapshotDetailAdminPath(
+                                  r.clickhouseRankingPreview.snapshotId,
+                                )}
+                                className="text-primary underline-offset-4 hover:underline"
+                              >
+                                {r.clickhouseRankingPreview.snapshotId}
+                              </Link>
+                            ) : (
+                              "—"
+                            )}
+                          </td>
+                        ) : null}
+                        {showElasticEntityCols ? (
+                          <>
+                            <td className="whitespace-nowrap px-3 py-1.5 font-mono text-xs">
+                              {r.elasticEntityPreview ? (
+                                <Link
+                                  href={unifiedSearchAdminPathFromQuery(
+                                    r.elasticEntityPreview.entityId,
+                                  )}
+                                  className="text-primary underline-offset-4 hover:underline"
+                                >
+                                  {r.elasticEntityPreview.entityId}
+                                </Link>
+                              ) : (
+                                "—"
+                              )}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-1.5 text-xs text-muted-foreground">
+                              {r.elasticEntityPreview?.action ?? "—"}
+                            </td>
+                          </>
+                        ) : null}
+                        {showElasticCrawledUrlCols ? (
+                          <>
+                            <td className="max-w-[8rem] truncate px-3 py-1.5 font-mono text-xs">
+                              {r.elasticCrawledUrlPreview ? (
+                                <Link
+                                  href={ADMIN_HREF.crawl}
+                                  className="text-primary underline-offset-4 hover:underline"
+                                  title={r.elasticCrawledUrlPreview.crawledUrlId}
+                                >
+                                  {r.elasticCrawledUrlPreview.crawledUrlId}
+                                </Link>
+                              ) : (
+                                "—"
+                              )}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-1.5 text-xs text-muted-foreground">
+                              {r.elasticCrawledUrlPreview?.action ?? "—"}
+                            </td>
+                          </>
+                        ) : null}
+                        {showFollowupCols ? (
+                          <>
+                            <td className="whitespace-nowrap px-3 py-1.5 font-mono text-xs">
+                              {r.followupPreview ? (
+                                <Link
+                                  href={snapshotDetailAdminPath(
+                                    r.followupPreview.snapshotId,
+                                  )}
+                                  className="text-primary underline-offset-4 hover:underline"
+                                >
+                                  {r.followupPreview.snapshotId}
+                                </Link>
+                              ) : (
+                                "—"
+                              )}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-1.5 font-mono text-xs">
+                              {r.followupPreview ? (
+                                <Link
+                                  href={rankingsRunAdminPath(
+                                    r.followupPreview.topicVersionId,
+                                  )}
+                                  className="text-primary underline-offset-4 hover:underline"
+                                >
+                                  {r.followupPreview.topicVersionId}
+                                </Link>
+                              ) : (
+                                "—"
+                              )}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-1.5 text-xs text-muted-foreground">
+                              {r.followupPreview?.timeWindow ?? "—"}
+                            </td>
+                          </>
+                        ) : null}
                         <td className="whitespace-nowrap px-3 py-1.5 text-muted-foreground">
                           {r.attempts ?? "—"}
                         </td>
@@ -364,9 +736,73 @@ export default function OutboxPage() {
           ) : null}
 
           {out ? (
-            <pre className="max-h-[28rem] overflow-auto rounded-md bg-muted p-3 text-xs whitespace-pre-wrap">
-              {out}
-            </pre>
+            <div className="space-y-2">
+              {outLooksLikeRankingSnapshotOutboxJson(out) ? (
+                <p className="text-xs text-muted-foreground">
+                  检测到{" "}
+                  <code className="rounded bg-muted px-1">
+                    {OUTBOX_TYPE_RANKING_SNAPSHOT_COMPLETED}
+                  </code>
+                  ：其 <code className="rounded bg-muted px-1">payload</code>{" "}
+                  内各契约键名（含{" "}
+                  <code className="rounded bg-muted px-1">topicRankingId</code>、
+                  <code className="rounded bg-muted px-1">snapshotTime</code>、
+                  <code className="rounded bg-muted px-1">itemCount</code>、
+                  <code className="rounded bg-muted px-1">hasScoreModel</code>{" "}
+                  等）已在下方 JSON 中浅色标记。
+                </p>
+              ) : null}
+              {outLooksLikeClickhouseRankingOutboxJson(out) ? (
+                <p className="text-xs text-muted-foreground">
+                  检测到{" "}
+                  <code className="rounded bg-muted px-1">
+                    {OUTBOX_TYPE_CLICKHOUSE_RANKING_SNAPSHOT}
+                  </code>
+                  ：其 <code className="rounded bg-muted px-1">payload</code>{" "}
+                  内{" "}
+                  <code className="rounded bg-muted px-1">schemaVersion</code>、
+                  <code className="rounded bg-muted px-1">snapshotId</code>{" "}
+                  键名已参与下方高亮（与 Kafka 排行行共用键名样式）。
+                </p>
+              ) : null}
+              {outLooksLikeElasticEntityOutboxJson(out) ? (
+                <p className="text-xs text-muted-foreground">
+                  检测到{" "}
+                  <code className="rounded bg-muted px-1">
+                    {OUTBOX_TYPE_ELASTIC_ENTITY_SYNC}
+                  </code>
+                  ：<code className="rounded bg-muted px-1">entityId</code>、
+                  <code className="rounded bg-muted px-1">action</code>{" "}
+                  等键名已参与下方高亮。
+                </p>
+              ) : null}
+              {outLooksLikeElasticCrawledUrlOutboxJson(out) ? (
+                <p className="text-xs text-muted-foreground">
+                  检测到{" "}
+                  <code className="rounded bg-muted px-1">
+                    {OUTBOX_TYPE_ELASTIC_CRAWLED_URL_SYNC}
+                  </code>
+                  ：<code className="rounded bg-muted px-1">crawledUrlId</code>
+                  、<code className="rounded bg-muted px-1">action</code>{" "}
+                  已高亮。
+                </p>
+              ) : null}
+              {outLooksLikeRankingFollowupOutboxJson(out) ? (
+                <p className="text-xs text-muted-foreground">
+                  检测到{" "}
+                  <code className="rounded bg-muted px-1">
+                    {OUTBOX_TYPE_RANKING_FOLLOWUP_REQUESTED}
+                  </code>
+                  ：与 Kafka 排行行共享字段键名（如{" "}
+                  <code className="rounded bg-muted px-1">snapshotId</code>、
+                  <code className="rounded bg-muted px-1">topicRankingId</code>
+                  ）已高亮。
+                </p>
+              ) : null}
+              <pre className="max-h-[28rem] overflow-auto rounded-md bg-muted p-3 text-xs whitespace-pre-wrap">
+                {highlightOutboxJsonContractKeys(out)}
+              </pre>
+            </div>
           ) : null}
         </CardContent>
       </Card>

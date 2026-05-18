@@ -15,6 +15,7 @@ import {
 import { SnapshotAnalysesFilter } from "@/components/snapshot-analyses-filter";
 import { SnapshotAnalysesPagination } from "@/components/snapshot-analyses-pagination";
 import { SnapshotAnalyzeActions } from "@/components/snapshot-analyze-actions";
+import { SnapshotScoreBreakdownCell } from "@/components/snapshot-score-breakdown-cell";
 import { SnapshotBarChart } from "@/components/snapshot-bar-chart";
 import { DECIMAL_BIGINT_ID_MAX_DIGITS, isDecimalBigIntIdString } from "@/lib/decimal-id";
 import {
@@ -28,6 +29,7 @@ import { entitiesAdminPrefillPath } from "@/lib/entities-admin-path";
 import {
   nestRankingStatusUrl,
   nestSnapshotAnalysesUrl,
+  nestSnapshotScoreBreakdownsUrl,
   nestSnapshotV1Url,
 } from "@/lib/nest-api-urls";
 import { compareIdsFromRankingSnapshots } from "@/lib/snapshot-compare-pair";
@@ -50,6 +52,13 @@ type SnapshotPayload = {
   snapshotVersion?: string;
   snapshotTime?: string;
   confidenceScore?: number;
+  /** 物化时写入的权重模型（旧快照可能为 null） */
+  scoreModel?: {
+    id?: string;
+    name?: string;
+    version?: string;
+    weights?: unknown;
+  } | null;
   /** `GET /v1/snapshots/:id?includeAiStats=1` */
   aiAnalysisCount?: number;
   hasFollowupBrief?: boolean;
@@ -60,6 +69,8 @@ type SnapshotPayload = {
     previousRank?: number | null;
     rankChange?: number | null;
     popularityScore?: number;
+    /** `scoreEntity` 各 metricKey 加权贡献（与 `TopicVersion.policyJson.weights` 对齐） */
+    scoreBreakdown?: unknown;
     entity?: { canonicalName?: string | null };
   }>;
   topicRanking?: {
@@ -129,6 +140,7 @@ export default async function SnapshotPage({
   analysesApiQs.set("offset", String(listOffset));
   if (analysisKind !== "") analysesApiQs.set("agentKind", analysisKind);
   const analysesFetchUrl = nestSnapshotAnalysesUrl(id, analysesApiQs);
+  const scoreBreakdownsFetchUrl = nestSnapshotScoreBreakdownsUrl(id);
   const adminPageQs = buildSnapshotDetailAdminQuery({
     analysisKind,
     analysisPage,
@@ -333,6 +345,56 @@ export default async function SnapshotPage({
         </div>
       </div>
 
+      {data.scoreModel != null &&
+      typeof data.scoreModel === "object" &&
+      data.scoreModel.id != null &&
+      data.scoreModel.id !== "" ? (
+        <div className="rounded-md border border-border/70 bg-muted/25 px-3 py-2 text-xs text-muted-foreground">
+          <div className="font-medium text-foreground/90">ScoreModel（本快照物化所用权重模型）</div>
+          <p className="mt-1">
+            <code className="rounded bg-muted px-1">{data.scoreModel.id}</code>
+            {data.scoreModel.name != null && data.scoreModel.name !== "" ? (
+              <> · {data.scoreModel.name}</>
+            ) : null}
+            {data.scoreModel.version != null && data.scoreModel.version !== "" ? (
+              <>
+                {" "}
+                · <span className="break-all">{data.scoreModel.version}</span>
+              </>
+            ) : null}
+          </p>
+          <p className="mt-1 text-[11px] text-muted-foreground/90">
+            关系表 <code className="rounded bg-muted/80 px-1">ScoreBreakdown</code> 与条目一一对应；条目字段{" "}
+            <code className="rounded bg-muted/80 px-1">scoreBreakdown</code> 为同次打分的 JSON 投影。
+            扁平导出：<code className="rounded bg-muted/80 px-1">GET …/score-breakdowns</code>（页脚链）。
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <CopyTextButton
+              text={data.scoreModel.id}
+              idleLabel="复制 model id"
+              className="h-6"
+            />
+            {data.scoreModel.weights != null ? (
+              <>
+                <CopyTextButton
+                  text={JSON.stringify(data.scoreModel.weights, null, 2)}
+                  idleLabel="复制 weights JSON"
+                  className="h-6"
+                />
+                <details className="w-full min-w-0">
+                  <summary className="cursor-pointer text-primary underline-offset-2 hover:underline">
+                    查看 weights
+                  </summary>
+                  <pre className="mt-2 max-h-48 overflow-auto rounded border border-border/60 bg-background p-2 text-[11px] leading-snug">
+                    {JSON.stringify(data.scoreModel.weights, null, 2)}
+                  </pre>
+                </details>
+              </>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
       <Card>
         <CardHeader>
           <CardTitle className="text-base">得分分布（ECharts）</CardTitle>
@@ -352,7 +414,10 @@ export default async function SnapshotPage({
       <Card>
         <CardHeader>
           <CardTitle className="text-base">原始条目</CardTitle>
-          <CardDescription>含 rank / rankChange</CardDescription>
+          <CardDescription>
+            rank / rankChange · <code className="rounded bg-muted px-1 text-xs">scoreBreakdown</code>{" "}
+            为各信号经时间与 tier 衰减后的加权分量（展开查看）
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto rounded-md border border-border">
@@ -362,6 +427,9 @@ export default async function SnapshotPage({
                   <th scope="col" className="px-3 py-2 font-medium">#</th>
                   <th scope="col" className="px-3 py-2 font-medium">实体</th>
                   <th scope="col" className="px-3 py-2 font-medium">分数</th>
+                  <th scope="col" className="px-3 py-2 font-medium min-w-[7rem]">
+                    信号分解
+                  </th>
                   <th scope="col" className="px-3 py-2 font-medium">上次</th>
                   <th scope="col" className="px-3 py-2 font-medium">Δ</th>
                 </tr>
@@ -419,6 +487,9 @@ export default async function SnapshotPage({
                       </td>
                       <td className="px-3 py-2">
                         {row.popularityScore?.toFixed(4) ?? "—"}
+                      </td>
+                      <td className="px-3 py-2">
+                        <SnapshotScoreBreakdownCell raw={row.scoreBreakdown} />
                       </td>
                       <td className="px-3 py-2 text-muted-foreground">
                         {row.previousRank ?? "—"}
@@ -486,6 +557,19 @@ export default async function SnapshotPage({
             <CopyTextButton
               text={analysesFetchUrl}
               idleLabel="复制简报列表 URL"
+              className="h-6"
+            />
+            <a
+              href={scoreBreakdownsFetchUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-primary underline-offset-4 hover:underline"
+            >
+              GET ScoreBreakdown 表（JSON）
+            </a>
+            <CopyTextButton
+              text={scoreBreakdownsFetchUrl}
+              idleLabel="复制 score-breakdowns URL"
               className="h-6"
             />
             <Link

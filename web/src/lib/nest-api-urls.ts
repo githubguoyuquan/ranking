@@ -14,6 +14,7 @@ import {
   nestV1RankingStatusPath,
   nestV1SnapshotAnalysesPath,
   nestV1SnapshotPath,
+  nestV1SnapshotScoreBreakdownsPath,
   nestV1TopicLeaderboardPath,
   nestV1TopicSnapshotsPath,
   nestV1TopicTrendAnalysesPath,
@@ -71,6 +72,10 @@ export function nestSnapshotAnalysesUrl(
   query?: URLSearchParams,
 ): string {
   return nestAbs(nestV1SnapshotAnalysesPath(snapshotId, query));
+}
+
+export function nestSnapshotScoreBreakdownsUrl(snapshotId: string): string {
+  return nestAbs(nestV1SnapshotScoreBreakdownsPath(snapshotId));
 }
 
 export function nestSnapshotCompareUrl(): string {

@@ -8,7 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { claimOutboxBatchByType } from '../outbox/outbox-claim';
 import { OUTBOX_TYPE_ELASTIC_CRAWLED_URL_SYNC } from '../outbox/outbox.constants';
 import { ElasticService } from './elastic.service';
-import type { ElasticCrawledUrlSyncPayload } from './elastic-crawled-url-outbox';
+import type { ElasticCrawledUrlSyncPayload } from './elastic-crawled-url-sync-outbox-payload';
 
 const FLUSH_BATCH = 80;
 

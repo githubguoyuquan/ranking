@@ -1,0 +1,80 @@
+openapi: 3.0.3
+info:
+  title: Ranking platform — Admin entities (fragment)
+  description: |
+    只读列表 **`GET /admin/entities`**。实现：`src/search/search.controller.ts` → `listEntities`。
+
+    响应为 Prisma `Entity[]` 经 `toPlainJson`：**`id`** 为十进制字符串。无鉴权 — 生产勿暴露公网。
+  version: 0.1.0
+
+servers:
+  - url: http://localhost:3000
+    description: 本地 API（`PORT` 与环境一致）
+
+tags:
+  - name: Admin
+    description: 运维 / 排障
+
+paths:
+  /admin/entities:
+    get:
+      tags: [Admin]
+      summary: 列出实体（运营台 / 脚本）
+      description: |
+        按 `id` **倒序**。可选 `q` 时按 **`canonicalName`** **不区分大小写**子串过滤。
+        **`limit`**：原始为 query 字符串，服务端 `Number(limit) || 40` 后再 **clamp 到 1–100**。
+      operationId: adminListEntities
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: 可选；trim 后非空则过滤 `canonicalName`
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          description: 默认 40；有效范围 **1–100**（见实现 clamp）
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 40
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdminEntityRow"
+              example:
+                - id: "1"
+                  type: PERSON
+                  canonicalName: Example Artist
+                  aliases: []
+                  createdAt: "2026-05-17T12:00:00.000Z"
+
+components:
+  schemas:
+    AdminEntityRow:
+      type: object
+      description: Prisma `Entity` 经 `toPlainJson`
+      required: [id, type, canonicalName, createdAt]
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          example: PERSON
+        canonicalName:
+          type: string
+        aliases:
+          description: JSON 数组或 `null`
+          nullable: true
+          type: array
+          items: { type: string }
+        createdAt:
+          type: string
+          format: date-time

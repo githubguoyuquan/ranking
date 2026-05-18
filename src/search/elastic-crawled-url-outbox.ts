@@ -1,12 +1,13 @@
 import { OUTBOX_TYPE_ELASTIC_CRAWLED_URL_SYNC } from '../outbox/outbox.constants';
+import {
+  buildElasticCrawledUrlSyncOutboxPayload,
+  type ElasticCrawledUrlSyncAction,
+} from './elastic-crawled-url-sync-outbox-payload';
 
-export type ElasticCrawledUrlSyncAction = 'upsert' | 'delete';
-
-export type ElasticCrawledUrlSyncPayload = {
-  schemaVersion: 1;
-  action: ElasticCrawledUrlSyncAction;
-  crawledUrlId: string;
-};
+export type {
+  ElasticCrawledUrlSyncAction,
+  ElasticCrawledUrlSyncPayload,
+} from './elastic-crawled-url-sync-outbox-payload';
 
 /** 与 `CrawledUrl` 写操作放在同一 PG 事务内的 Outbox 行 */
 export function elasticCrawledUrlSyncOutboxCreate(
@@ -15,10 +16,6 @@ export function elasticCrawledUrlSyncOutboxCreate(
 ) {
   return {
     type: OUTBOX_TYPE_ELASTIC_CRAWLED_URL_SYNC,
-    payload: {
-      schemaVersion: 1 as const,
-      action,
-      crawledUrlId: crawledUrlId.toString(),
-    } satisfies ElasticCrawledUrlSyncPayload,
+    payload: buildElasticCrawledUrlSyncOutboxPayload(crawledUrlId, action),
   };
 }

@@ -41,6 +41,10 @@ export function nestV1SnapshotAnalysesPath(
   return nestV1PathWithQuery(path, query);
 }
 
+export function nestV1SnapshotScoreBreakdownsPath(snapshotId: string): string {
+  return `${V1}/snapshots/${encodeURIComponent(snapshotId)}/score-breakdowns`;
+}
+
 export function nestV1TopicVersionsPath(topicSlug: string): string {
   return `${V1}/topics/${encodeURIComponent(topicSlug)}/versions`;
 }
@@ -147,4 +151,5 @@ export const NEST_V1_DOC = {
   crawlSourceUrls: "/v1/crawl/sources/:sourceId/urls",
   crawlCheckpoint: "/v1/crawl/checkpoints/:crawlerName",
   snapshotsAnalyses: "/v1/snapshots/:id/analyses",
+  snapshotsScoreBreakdowns: "/v1/snapshots/:id/score-breakdowns",
 } as const;

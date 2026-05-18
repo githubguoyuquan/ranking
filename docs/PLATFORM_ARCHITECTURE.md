@@ -252,9 +252,9 @@ sequenceDiagram
 | URL 规范化指纹 | `urlFingerprint` | 保持 |
 | 内容哈希 | `contentHash` | 保持 |
 | 断点 | `CrawlCheckpoint` | 多爬虫名并发分区 |
-| 分布式 | 单机 Worker | **分片队列** + 租约 |
-| 代理/IP | 无 | 代理池 + 出口国别策略 |
-| 语义去重 | 无 | embedding 聚类 |
+| 分布式 | **BullMQ**：多 API / 专用 `crawl-worker` 进程共用 Redis 队列；`CRAWL_WORKER_CONCURRENCY`、`CRAWL_JOB_LOCK_MS` | 队列分片名 + 调度审计 |
+| 代理/IP | **`CRAWL_HTTP_PROXY`**、`Source.httpProxyUrl`（`fetch`+Playwright） | 代理池 + 出口国别策略、轮换 |
+| 语义去重 | **`CRAWL_SEMANTIC_DEDUP`**：同信源 `previewEmbedding` 余弦、`fetched_semantic_dup` | 跨信源 / 大规模 ANN（ES/pgvector） |
 | 幂等与续跑 | BullMQ jobId + DB 状态 | 与 Outbox 事务对齐 |
 
 ---
@@ -274,7 +274,8 @@ sequenceDiagram
 - `GET /v1/snapshots/:id?includeAiStats=` — **快照 JSON**（含 **`items[].scoreBreakdown`**、**`scoreModel`** 及嵌套 **`topicRanking`**）+ 可选当前 `AiAnalysis` 计数与三类简报标记（**已实现**；`true`/`1` 时跳过快照 Redis 读且不回写缓存）  
 - `GET /v1/snapshots/:id/analyses?agentKind=&agent=&limit=&offset=` — **`AiAnalysis` 列表**（**已实现**；分页 **`total` + `analyses`**，管理台 **`?analysisKind=`** 与 API **`agentKind`** 对齐）  
 - `GET /v1/rankings/:topicRankingId/status` — **`TopicRanking` + 近期 `snapshots[]`**（**已实现**；每条快照含 **`hasScoreModel`**；非法 id **400**）  
-- `GET /v1/recommendations/similar-topics?topicId=` — 推荐占位  
+- `GET /v1/recommendations/similar-topics?topicId=` — **已实现**：`TopicEmbedding` 余弦（见 README）  
+- `GET /v1/recommendations/similar-entities?entityId=` — **已实现**：ES kNN（见 README 搜索/推荐）  
 
 ---
 

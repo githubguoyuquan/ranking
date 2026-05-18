@@ -260,6 +260,8 @@ model Source {
   /// demo | http-fetch | http-playwright：后两者在开启真抓取时分别用 fetch 或 Playwright
   kind      String
   trustTier Int     @default(3)
+  /// 可选 HTTP(S) 代理（覆盖全局 CRAWL_HTTP_PROXY）；如 http://host:3128
+  httpProxyUrl String? @db.VarChar(2048)
 
   topic      Topic?       @relation(fields: [topicId], references: [id])
   urls       CrawledUrl[]
@@ -301,8 +303,17 @@ model CrawledUrl {
   pageTitle      String?  @db.VarChar(512)
   status         String
   fetchedAt      DateTime?
+  /// 语义去重：指向同信源下已索引的正文代表行（本行不写 ES 正文索引）
+  duplicateOfId BigInt?
+  /// 供同信源语义去重比对用的 embedding（仅 canonical `fetched` 行可能非空）
+  previewEmbedding       Json?
+  previewEmbeddingModel  String? @db.VarChar(128)
 
-  source Source @relation(fields: [sourceId], references: [id])
+  source      Source       @relation(fields: [sourceId], references: [id])
+  duplicateOf CrawledUrl?  @relation("CrawledUrlSemanticDup", fields: [duplicateOfId], references: [id], onDelete: SetNull)
+  duplicates  CrawledUrl[] @relation("CrawledUrlSemanticDup")
+
+  @@index([sourceId, status])
 }
 
 model AiAnalysis {

@@ -7,6 +7,7 @@
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
+    "start:crawl-worker": "node dist/crawl-worker.main",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
@@ -31,7 +32,8 @@
     "kafkajs": "^2.2.4",
     "playwright": "^1.60.0",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.1"
+    "rxjs": "^7.8.1",
+    "undici": "^6.25.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",

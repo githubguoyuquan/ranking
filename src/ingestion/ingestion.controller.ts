@@ -16,6 +16,7 @@ import {
   IsOptional,
   IsString,
   Max,
+  MaxLength,
   Min,
   MinLength,
 } from 'class-validator';
@@ -58,6 +59,11 @@ export class CreateSourceDto {
   @Min(1)
   @Max(5)
   trustTier?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2048)
+  httpProxyUrl?: string | null;
 
   @IsOptional()
   @IsString()
@@ -137,6 +143,7 @@ export class IngestionController {
         kind: body.kind,
         trustTier: body.trustTier,
         topicId: body.topicId ? BigInt(body.topicId) : undefined,
+        httpProxyUrl: body.httpProxyUrl?.trim() || null,
       }),
     );
   }

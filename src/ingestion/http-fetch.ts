@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import { fetch as undiciFetch, ProxyAgent } from 'undici';
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_BYTES = 2_000_000;
@@ -74,6 +75,20 @@ const UA =
   process.env.CRAWL_USER_AGENT ??
   'RankingPlatformCrawler/0.1 (+https://github.com/example/ranking; research)';
 
+export function normalizeCrawlProxyUrl(raw: string | null | undefined): string | undefined {
+  const s = raw?.trim();
+  if (!s) return undefined;
+  try {
+    const u = new URL(s);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+      return undefined;
+    }
+    return u.toString();
+  } catch {
+    return undefined;
+  }
+}
+
 const PAGE_TITLE_MAX_CHARS = 512;
 
 /** 从 HTML/XML 缓冲提取 `<title>` 纯文本（截断至 `PAGE_TITLE_MAX_CHARS`） */
@@ -113,7 +128,10 @@ function decodeBasicHtmlEntities(s: string): string {
     });
 }
 
-export async function fetchUrlForCrawl(urlStr: string): Promise<FetchCrawlResult> {
+export async function fetchUrlForCrawl(
+  urlStr: string,
+  opts?: { proxyUrl?: string | null; globalProxyFallback?: boolean },
+): Promise<FetchCrawlResult> {
   const viol = crawlUrlViolation(urlStr);
   if (viol) {
     return { ok: false, bytes: 0, error: viol };
@@ -122,11 +140,18 @@ export async function fetchUrlForCrawl(urlStr: string): Promise<FetchCrawlResult
   const ac = new AbortController();
   const t = setTimeout(() => ac.abort(), crawlTimeoutMs());
   let bytes = 0;
+  const proxyRaw =
+    normalizeCrawlProxyUrl(opts?.proxyUrl) ??
+    (opts?.globalProxyFallback !== false
+      ? normalizeCrawlProxyUrl(process.env.CRAWL_HTTP_PROXY)
+      : undefined);
+  const dispatcher = proxyRaw ? new ProxyAgent(proxyRaw) : undefined;
   try {
-    const res = await fetch(urlStr, {
+    const res = await undiciFetch(urlStr, {
       method: 'GET',
       redirect: 'follow',
       signal: ac.signal,
+      dispatcher,
       headers: {
         Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'User-Agent': UA,

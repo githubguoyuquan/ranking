@@ -5,6 +5,7 @@ import {
   crawlMaxBytes,
   crawlTimeoutMs,
   crawlUrlViolation,
+  normalizeCrawlProxyUrl,
   textPreviewMaxChars,
   type FetchCrawlResult,
 } from './http-fetch';
@@ -18,7 +19,10 @@ function sha256Hex(buf: Buffer): string {
 }
 
 /** 使用无头 Chromium 渲染后再取 HTML / innerText；需 `playwright` 与浏览器缓存（`npx playwright install chromium`）。 */
-export async function fetchUrlForCrawlPlaywright(urlStr: string): Promise<FetchCrawlResult> {
+export async function fetchUrlForCrawlPlaywright(
+  urlStr: string,
+  opts?: { proxyUrl?: string | null; globalProxyFallback?: boolean },
+): Promise<FetchCrawlResult> {
   const viol = crawlUrlViolation(urlStr);
   if (viol) {
     return { ok: false, bytes: 0, error: viol };
@@ -27,9 +31,18 @@ export async function fetchUrlForCrawlPlaywright(urlStr: string): Promise<FetchC
   const max = crawlMaxBytes();
   const timeout = crawlTimeoutMs();
   let browser;
+  const proxyRaw =
+    normalizeCrawlProxyUrl(opts?.proxyUrl) ??
+    (opts?.globalProxyFallback !== false
+      ? normalizeCrawlProxyUrl(process.env.CRAWL_HTTP_PROXY)
+      : undefined);
+
   try {
     browser = await chromium.launch({ headless: true });
-    const ctx = await browser.newContext({ userAgent: UA });
+    const ctx = await browser.newContext({
+      userAgent: UA,
+      ...(proxyRaw ? { proxy: { server: proxyRaw } } : {}),
+    });
     const page = await ctx.newPage();
     const res = await page.goto(urlStr, {
       waitUntil: 'domcontentloaded',

@@ -4,6 +4,8 @@ import { Queue } from 'bullmq';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ElasticService } from '../search/elastic.service';
+import { EmbeddingService } from '../search/embedding.service';
+import { DEFAULT_EMBEDDING_MODEL } from '../search/embedding.constants';
 import { elasticCrawledUrlSyncOutboxCreate } from '../search/elastic-crawled-url-outbox';
 import {
   buildCrawlJobId,
@@ -13,7 +15,16 @@ import {
   urlFingerprint,
 } from './crawl-job';
 import { clampCrawlTasksListTake } from './crawl-list-limits';
-import { crawlUrlViolation, fetchUrlForCrawl } from './http-fetch';
+import { CrawlHostThrottleService } from './crawl-host-throttle.service';
+import {
+  crawlSemanticDedupCandidateLimit,
+  crawlSemanticDedupEnabled,
+  crawlSemanticDedupMinChars,
+  crawlSemanticDedupText,
+  crawlSemanticDedupThreshold,
+  findNearestByCosine,
+} from './crawl-semantic-dedup';
+import { crawlUrlViolation, fetchUrlForCrawl, normalizeCrawlProxyUrl } from './http-fetch';
 import { fetchUrlForCrawlPlaywright } from './http-fetch-playwright';
 
 @Injectable()
@@ -21,6 +32,8 @@ export class IngestionService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly elastic: ElasticService,
+    private readonly embedding: EmbeddingService,
+    private readonly hostThrottle: CrawlHostThrottleService,
     @InjectQueue(CRAWL_QUEUE) private readonly crawlQueue: Queue<CrawlJobPayload>,
   ) {}
 
@@ -66,6 +79,7 @@ export class IngestionService {
     kind: string;
     trustTier?: number;
     topicId?: bigint;
+    httpProxyUrl?: string | null;
   }) {
     return this.prisma.source.create({
       data: {
@@ -74,6 +88,7 @@ export class IngestionService {
         kind: data.kind,
         trustTier: data.trustTier ?? 3,
         topicId: data.topicId,
+        httpProxyUrl: data.httpProxyUrl?.trim() || null,
       },
     });
   }
@@ -214,6 +229,14 @@ export class IngestionService {
     try {
       const urls = payload.seedUrls ?? [];
       const now = new Date();
+      const source = await this.prisma.source.findUnique({ where: { id: sourceId } });
+      if (!source) {
+        throw new NotFoundException('Source not found');
+      }
+      const proxyUrl =
+        normalizeCrawlProxyUrl(source.httpProxyUrl) ??
+        normalizeCrawlProxyUrl(process.env.CRAWL_HTTP_PROXY);
+
       const useHttp = await this.useHttpFetch(sourceId);
       const usePw = useHttp && (await this.usePlaywrightFetch(sourceId));
       let fetchErrors = 0;
@@ -240,6 +263,9 @@ export class IngestionService {
                 mimeType: null,
                 textPreview: null,
                 pageTitle: null,
+                duplicateOfId: null,
+                previewEmbedding: Prisma.JsonNull,
+                previewEmbeddingModel: null,
               },
             });
             await this.enqueueCrawledUrlEsOutbox(tx, row);
@@ -271,6 +297,9 @@ export class IngestionService {
                 mimeType: null,
                 textPreview: null,
                 pageTitle: null,
+                duplicateOfId: null,
+                previewEmbedding: Prisma.JsonNull,
+                previewEmbeddingModel: null,
               },
             });
             await this.enqueueCrawledUrlEsOutbox(tx, row);
@@ -278,10 +307,11 @@ export class IngestionService {
           continue;
         }
 
-        const fetched = usePw
-          ? await fetchUrlForCrawlPlaywright(u)
-          : await fetchUrlForCrawl(u);
-        if (fetched.ok) {
+        let host: string;
+        try {
+          host = new URL(u).hostname.toLowerCase();
+        } catch {
+          fetchErrors += 1;
           await this.prisma.$transaction(async (tx) => {
             const row = await tx.crawledUrl.upsert({
               where: { urlFingerprint: fp },
@@ -289,20 +319,76 @@ export class IngestionService {
                 sourceId,
                 url: u,
                 urlFingerprint: fp,
-                status: 'fetched',
-                contentHash: fetched.contentHash,
-                mimeType: fetched.mimeType,
-                textPreview: fetched.textPreview,
-                pageTitle: fetched.pageTitle,
+                status: 'fetch_failed',
+                contentHash: null,
                 fetchedAt: now,
+                mimeType: null,
+                textPreview: null,
+                pageTitle: null,
               },
               update: {
-                status: 'fetched',
+                status: 'fetch_failed',
+                contentHash: null,
+                fetchedAt: now,
+                mimeType: null,
+                textPreview: null,
+                pageTitle: null,
+                duplicateOfId: null,
+                previewEmbedding: Prisma.JsonNull,
+                previewEmbeddingModel: null,
+              },
+            });
+            await this.enqueueCrawledUrlEsOutbox(tx, row);
+          });
+          continue;
+        }
+        await this.hostThrottle.waitForHost(host);
+
+        const fetchOpts = { proxyUrl };
+        const fetched = usePw
+          ? await fetchUrlForCrawlPlaywright(u, fetchOpts)
+          : await fetchUrlForCrawl(u, fetchOpts);
+        if (fetched.ok) {
+          const sem = await this.resolveSemanticMeta(
+            sourceId,
+            fp,
+            fetched.pageTitle,
+            fetched.textPreview,
+          );
+          const isSemanticDup = Boolean(sem.canonicalId);
+          const status = isSemanticDup ? 'fetched_semantic_dup' : 'fetched';
+
+          await this.prisma.$transaction(async (tx) => {
+            const row = await tx.crawledUrl.upsert({
+              where: { urlFingerprint: fp },
+              create: {
+                sourceId,
+                url: u,
+                urlFingerprint: fp,
+                status,
                 contentHash: fetched.contentHash,
                 mimeType: fetched.mimeType,
                 textPreview: fetched.textPreview,
                 pageTitle: fetched.pageTitle,
                 fetchedAt: now,
+                duplicateOfId: sem.canonicalId,
+                previewEmbedding:
+                  !isSemanticDup && sem.vec ? sem.vec : Prisma.JsonNull,
+                previewEmbeddingModel:
+                  !isSemanticDup && sem.vec ? DEFAULT_EMBEDDING_MODEL : null,
+              },
+              update: {
+                status,
+                contentHash: fetched.contentHash,
+                mimeType: fetched.mimeType,
+                textPreview: fetched.textPreview,
+                pageTitle: fetched.pageTitle,
+                fetchedAt: now,
+                duplicateOfId: sem.canonicalId,
+                previewEmbedding:
+                  !isSemanticDup && sem.vec ? sem.vec : Prisma.JsonNull,
+                previewEmbeddingModel:
+                  !isSemanticDup && sem.vec ? DEFAULT_EMBEDDING_MODEL : null,
               },
             });
             await this.enqueueCrawledUrlEsOutbox(tx, row);
@@ -330,6 +416,9 @@ export class IngestionService {
                 mimeType: null,
                 textPreview: null,
                 pageTitle: null,
+                duplicateOfId: null,
+                previewEmbedding: Prisma.JsonNull,
+                previewEmbeddingModel: null,
               },
             });
             await this.enqueueCrawledUrlEsOutbox(tx, row);
@@ -381,6 +470,44 @@ export class IngestionService {
   private async ensureSource(id: bigint) {
     const s = await this.prisma.source.findUnique({ where: { id } });
     if (!s) throw new NotFoundException('Source not found');
+  }
+
+  /**
+   * OpenAI 向量与同信源近期 canonical 行比对；命中则返回 canonical `CrawledUrl.id`，否则返回本页向量供写入。
+   */
+  private async resolveSemanticMeta(
+    sourceId: bigint,
+    excludeUrlFingerprint: string,
+    pageTitle: string | null,
+    textPreview: string | null,
+  ): Promise<{ vec: number[] | null; canonicalId: bigint | null }> {
+    if (!crawlSemanticDedupEnabled() || !this.embedding.isConfigured()) {
+      return { vec: null, canonicalId: null };
+    }
+    const text = crawlSemanticDedupText(pageTitle, textPreview);
+    if (!text || text.length < crawlSemanticDedupMinChars()) {
+      return { vec: null, canonicalId: null };
+    }
+    let vec: number[];
+    try {
+      vec = await this.embedding.embedText(text);
+    } catch {
+      return { vec: null, canonicalId: null };
+    }
+    const rows = await this.prisma.crawledUrl.findMany({
+      where: {
+        sourceId,
+        status: 'fetched',
+        duplicateOfId: null,
+        urlFingerprint: { not: excludeUrlFingerprint },
+        previewEmbedding: { not: Prisma.DbNull },
+      },
+      orderBy: { id: 'desc' },
+      take: crawlSemanticDedupCandidateLimit(),
+      select: { id: true, previewEmbedding: true },
+    });
+    const canonicalId = findNearestByCosine(vec, rows, crawlSemanticDedupThreshold());
+    return { vec, canonicalId };
   }
 
   /** 全局开关或 Source.kind === http-fetch / http-playwright 时使用真抓取（GET 或 Playwright） */

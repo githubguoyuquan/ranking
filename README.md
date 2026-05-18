@@ -15,7 +15,7 @@
    - ✅ **Transactional Outbox**：快照提交事务内写入 `OutboxEvent`；`OutboxPublisherService` 定时发往 Kafka 兼容 broker（默认 topic `ranking.snapshot.completed`）。未配置 `KAFKA_BROKERS` 时仅积累 outbox 并打日志。  
    - ✅ 本地 **Redpanda**：`docker compose` 中 `redpanda`，宿主机端口 **19092**（`.env` 中 `KAFKA_BROKERS=localhost:19092`）  
    - ✅ 多实例 **Outbox**：`leasedUntil` 租约 + `FOR UPDATE SKIP LOCKED` 抢占，避免并行重复发布  
-   - ✅ **爬虫**：Checkpoint / `Source` / `CrawlTask` / `CrawledUrl` + BullMQ `crawl`；**`GET /v1/crawl/tasks`** 按 `limit`（1–100，默认 30）、可选 **`sourceId`** 列出近期任务（引擎监控 / 运营排障）；**可选真 HTTP**（`CRAWL_HTTP_FETCH` 或 `kind: http-fetch`）或 **Playwright**（`CRAWL_USE_PLAYWRIGHT` / `kind: http-playwright`）：`contentHash`、`textPreview`、基础 SSRF；未开真抓取时仍为桩 `fetched_stub`
+   - ✅ **爬虫**：Checkpoint / `Source` / `CrawlTask` / `CrawledUrl` + BullMQ `crawl`；**`GET /v1/crawl/tasks`** 按 `limit`（1–100，默认 30）、可选 **`sourceId`** 列出近期任务（引擎监控 / 运营排障）；**可选真 HTTP**（`CRAWL_HTTP_FETCH` 或 `kind: http-fetch`）或 **Playwright**（`CRAWL_USE_PLAYWRIGHT` / `kind: http-playwright`）：`contentHash`、`textPreview`、基础 SSRF；**`CRAWL_HTTP_PROXY` / `Source.httpProxyUrl`** 出站代理；**多实例**共用 Redis 消费同一 `crawl` 队列（`npm run start:crawl-worker` 独立 Worker 进程）；**`CRAWL_PER_HOST_MIN_INTERVAL_MS`** Redis 同 host 节流；**`CRAWL_SEMANTIC_DEDUP`** + `OPENAI_API_KEY` 时同信源正文 embedding 去重（`fetched_semantic_dup` / `duplicateOfId`，不重复入 ES）；未开真抓取时仍为桩 `fetched_stub`
 3. **P2 — Analytics & search**  
    - ✅ **ClickHouse**：compose、`metric_timeseries`、`AnalyticsModule`；`SYNC_RANKING_TO_CLICKHOUSE` + `CLICKHOUSE_URL` 时 `CLICKHOUSE_WRITE_MODE=direct`（默认）快照后直写，`outbox` 则同事务插入专用 Outbox 行并由 `ClickhouseOutboxFlusherService` 刷入；Outbox 按 `type` 分流，Kafka 仅发布 `ranking.snapshot.completed`  
    - ✅ **Redis 热读缓存**：`GET /v1/snapshots/:id` 长 TTL；`GET /v1/topics/:slug/leaderboard` 独立短 TTL 聚合缓存；无 Redis 或失败时降级查库  
@@ -109,6 +109,8 @@ npm run start:dev
 ```
 
 环境变量：`DATABASE_URL`、`REDIS_URL`（或 `REDIS_HOST` / `REDIS_PORT`）。**根目录须有 `.env`**（可从 `.env.example` 复制）；`npx prisma` 会自动读 `.env`，**跑应用**也会通过 `src/main.ts` 里的 `dotenv` 加载同一文件。
+
+**分布式爬虫**：队列任务在 **Redis（BullMQ）**，多实例会自然抢同一 `crawl` 队列。可额外起 **仅消费进程**（无 HTTP）：先 `npm run build`，再 **`npm run start:crawl-worker`**（与 API 使用相同 `DATABASE_URL` / `REDIS_URL` / 抓取相关环境变量）。调整单机并发用 **`CRAWL_WORKER_CONCURRENCY`**；长耗时抓取可调 **`CRAWL_JOB_LOCK_MS`**（默认约「HTTP 超时 + 120s」）。
 
 ### 探活与就绪
 

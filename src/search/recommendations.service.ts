@@ -3,8 +3,9 @@ import {
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
+import { AI_AUDIT_SOURCE_EMBEDDING_RECOMMEND } from '../ai-audit/ai-audit.constants';
 import { cosineSimilarity } from '../lib/vector-cosine';
+import { PrismaService } from '../prisma/prisma.service';
 import { DEFAULT_EMBEDDING_MODEL, EMBEDDING_DIMS } from './embedding.constants';
 import { ElasticService, type EntitySearchHit } from './elastic.service';
 import { EmbeddingService } from './embedding.service';
@@ -47,7 +48,10 @@ export class RecommendationsService {
     for (let i = 0; i < missing.length; i += chunk) {
       const part = missing.slice(i, i + chunk);
       const texts = part.map((t) => `${t.title}\n${t.slug}`);
-      const vecs = await this.embedding.embedMany(texts);
+      const vecs = await this.embedding.embedMany(texts, {
+        source: AI_AUDIT_SOURCE_EMBEDDING_RECOMMEND,
+        operation: 'topic_embedding_hydrate_batch',
+      });
       await this.prisma.topicEmbedding.createMany({
         data: part.map((t, j) => ({
           topicId: t.id,
@@ -73,7 +77,10 @@ export class RecommendationsService {
       select: { id: true, title: true, slug: true },
     });
     if (!topic) throw new NotFoundException('topic not found');
-    const v = await this.embedding.embedText(`${topic.title}\n${topic.slug}`);
+    const v = await this.embedding.embedText(`${topic.title}\n${topic.slug}`, {
+      source: AI_AUDIT_SOURCE_EMBEDDING_RECOMMEND,
+      operation: 'topic_anchor',
+    });
     await this.prisma.topicEmbedding.upsert({
       where: { topicId },
       create: {
@@ -144,7 +151,10 @@ export class RecommendationsService {
 
     let vec = await this.elastic.fetchEntityEmbeddingFromIndex(entityId);
     if (!vec) {
-      vec = await this.embedding.embedForEntity(entity.canonicalName, entity.aliases);
+      vec = await this.embedding.embedForEntity(entity.canonicalName, entity.aliases, {
+        source: AI_AUDIT_SOURCE_EMBEDDING_RECOMMEND,
+        operation: 'similar_entity_anchor',
+      });
       await this.elastic.upsertEntityFromRow(entity);
       vec = await this.elastic.fetchEntityEmbeddingFromIndex(entityId);
     }

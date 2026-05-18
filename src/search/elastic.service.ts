@@ -7,6 +7,7 @@ import {
 import { Client, errors } from '@elastic/elasticsearch';
 import type { KnnSearch } from '@elastic/elasticsearch/lib/api/types';
 import { CrawledUrl, Entity, Prisma } from '@prisma/client';
+import { AI_AUDIT_SOURCE_EMBEDDING_SEARCH } from '../ai-audit/ai-audit.constants';
 import { PrismaService } from '../prisma/prisma.service';
 import { EMBEDDING_DIMS } from './embedding.constants';
 import { EmbeddingService } from './embedding.service';
@@ -303,7 +304,10 @@ export class ElasticService implements OnModuleDestroy {
           return a.length > 0 ? `${name}\n${a}` : name;
         });
         try {
-          const vecs = await this.embedding.embedMany(texts);
+          const vecs = await this.embedding.embedMany(texts, {
+            source: AI_AUDIT_SOURCE_EMBEDDING_SEARCH,
+            operation: 'entity_reindex_batch',
+          });
           chunk.forEach((e, j) => {
             if (vecs[j]?.length === EMBEDDING_DIMS) {
               vectorsById.set(e.id.toString(), vecs[j]);

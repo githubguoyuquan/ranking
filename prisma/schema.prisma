@@ -13,6 +13,17 @@ enum TopicKind {
   SUBJECTIVE_TREND
 }
 
+enum AiAuditCategory {
+  CHAT_COMPLETION
+  EMBEDDING
+}
+
+enum AiQuotaDecision {
+  ALLOWED
+  DENIED_DAILY_CAP
+  SKIPPED_NO_API_KEY
+}
+
 enum TimeWindow {
   REALTIME
   DAY
@@ -127,6 +138,7 @@ model TopicRankSnapshot {
   scoreModel   ScoreModel?  @relation(fields: [scoreModelId], references: [id])
   items        RankingItem[]
   analyses     AiAnalysis[]
+  aiAudits     AiAuditEvent[]
 
   @@unique([topicRankingId, snapshotVersion])
   @@unique([topicRankingId, snapshotTime])
@@ -326,8 +338,40 @@ model AiAnalysis {
   createdAt  DateTime @default(now())
 
   snapshot TopicRankSnapshot @relation(fields: [snapshotId], references: [id])
+  audits   AiAuditEvent[]
 
   @@index([snapshotId, agent])
+}
+
+model AiAuditEvent {
+  id        BigInt   @id @default(autoincrement())
+  createdAt DateTime @default(now())
+
+  category  AiAuditCategory
+  operation String          @db.VarChar(160)
+  model     String?         @db.VarChar(128)
+  snapshotId BigInt?
+  aiAnalysisId BigInt?
+
+  success       Boolean
+  quotaDecision AiQuotaDecision?
+  errorMessage  String?          @db.VarChar(2000)
+
+  promptTokens     Int?
+  completionTokens Int?
+  totalTokens      Int?
+
+  requestId String? @db.VarChar(128)
+  source    String  @default("api") @db.VarChar(32)
+  metadata  Json?
+
+  snapshot TopicRankSnapshot? @relation(fields: [snapshotId], references: [id], onDelete: SetNull)
+  analysis AiAnalysis?        @relation(fields: [aiAnalysisId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([category, createdAt])
+  @@index([snapshotId, createdAt])
+  @@index([source, createdAt])
 }
 
 model EntityRelation {

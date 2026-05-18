@@ -1,6 +1,7 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { bullMqConnectionFromEnv } from './config/redis';
+import { AiAuditModule } from './ai-audit/ai-audit.module';
 import { AgentModule } from './agent/agent.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { CacheModule } from './cache/cache.module';
@@ -18,6 +19,7 @@ import { SearchModule } from './search/search.module';
       connection: bullMqConnectionFromEnv(),
     }),
     CacheModule,
+    AiAuditModule,
     KafkaModule,
     PrismaModule,
     AnalyticsModule,

@@ -315,8 +315,9 @@ sequenceDiagram
 
 1. **编排骨架（已有）**：主排行物化成功后入队 **`ranking-followup`**（`post-snapshot`），与 `ranking` 队列解耦；Worker 内 **`RANKING_FOLLOWUP_ANALYZE_PIPELINE`**（逗号 DAG）或 **`RANKING_FOLLOWUP_ANALYZE*`** 布尔组合（见 `README` / `.env.example`）；可选 Outbox `ranking.followup.requested`。  
 2. BullMQ DAG 深化：`ranking.completed` → `trend` → `summary` → `credibility`（逐步替换/串联 follow-up 内逻辑）。  
-3. 多 **`AiAnalysis.agent` 名约定**（**已有**：`rules-v1`、`post-snapshot-summary-v1`；预留 `trend-v1`、`credibility-v1`）与 **detailJson.agentKind**；**`AI_ANALYSIS_DAILY_CAP`** 为全局软配额占位。  
-4. Prompt 模板与**配额/审计**（生产必须）。
+3. 多 **`AiAnalysis.agent` 名约定**（**已有**：`rules-v1`、`post-snapshot-summary-v1`；预留 `trend-v1`、`credibility-v1`）与 **detailJson.agentKind**；**`AI_ANALYSIS_DAILY_CAP`**（UTC 日）限制 **`AiAnalysis` 持久化**；**`AI_EMBEDDING_DAILY_CAP`** 限制当日 **成功** embedding **批次数**（一次 `embedMany` 计 1）；**`AI_EMBEDDING_AUDIT`** 控制 embedding 是否写入 **`AiAuditEvent`**（默认开启）。  
+4. **运维只读**：**`GET /admin/ai/spectrum`**（当日配额、chat/embedding 审计计数、`recentSnapshotsWithAi`）；**`GET /admin/ai/audit-events`**（`limit`、`category`、`source`）；生产需网关鉴权。  
+5. Prompt 模板与**进一步深化配额策略**（按租户/按模型等）。
 
 ### Phase C — 规模
 

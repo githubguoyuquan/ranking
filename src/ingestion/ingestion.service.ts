@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { Prisma } from '@prisma/client';
+import { AI_AUDIT_SOURCE_EMBEDDING_INGESTION } from '../ai-audit/ai-audit.constants';
 import { PrismaService } from '../prisma/prisma.service';
 import { ElasticService } from '../search/elastic.service';
 import { EmbeddingService } from '../search/embedding.service';
@@ -490,7 +491,10 @@ export class IngestionService {
     }
     let vec: number[];
     try {
-      vec = await this.embedding.embedText(text);
+      vec = await this.embedding.embedText(text, {
+        source: AI_AUDIT_SOURCE_EMBEDDING_INGESTION,
+        operation: 'crawl_semantic_dedup',
+      });
     } catch {
       return { vec: null, canonicalId: null };
     }

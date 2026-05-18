@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AiAuditModule } from '../ai-audit/ai-audit.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { ElasticCrawledUrlOutboxFlusherService } from './elastic-crawled-url-outbox-flusher.service';
 import { ElasticEntityOutboxFlusherService } from './elastic-entity-outbox-flusher.service';
@@ -9,7 +10,7 @@ import { RecommendationsService } from './recommendations.service';
 import { SearchController } from './search.controller';
 
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, AiAuditModule],
   controllers: [SearchController, RecommendationsController],
   providers: [
     EmbeddingService,

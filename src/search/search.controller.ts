@@ -25,6 +25,7 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
+import { AI_AUDIT_SOURCE_EMBEDDING_SEARCH } from '../ai-audit/ai-audit.constants';
 import { toPlainJson } from '../lib/json';
 import { PrismaService } from '../prisma/prisma.service';
 import { elasticEntitySyncOutboxCreate } from './elastic-entity-outbox';
@@ -231,7 +232,10 @@ export class SearchController {
           'semantic search requires OPENAI_API_KEY',
         );
       }
-      const vec = await this.embedding.embedText(q);
+      const vec = await this.embedding.embedText(q, {
+        source: AI_AUDIT_SOURCE_EMBEDDING_SEARCH,
+        operation: 'v1_entity_semantic',
+      });
       const hits = await this.elastic.searchEntitiesByVector(vec, lim);
       return toPlainJson({
         query: q,
@@ -505,7 +509,10 @@ export class SearchController {
         };
       }
       try {
-        const vec = await this.embedding.embedText(q);
+        const vec = await this.embedding.embedText(q, {
+          source: AI_AUDIT_SOURCE_EMBEDDING_SEARCH,
+          operation: 'aggregate_entity_semantic',
+        });
         const hits = await this.elastic.searchEntitiesByVector(vec, lim);
         return { source: 'elasticsearch', hits, vectorSearch: true };
       } catch (e) {

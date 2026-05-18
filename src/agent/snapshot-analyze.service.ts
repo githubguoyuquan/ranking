@@ -1,5 +1,10 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
+import {
+  AI_AUDIT_SOURCE_API,
+  AI_AUDIT_SOURCE_RANKING_FOLLOWUP,
+} from '../ai-audit/ai-audit.constants';
+import { AiAuditService } from '../ai-audit/ai-audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   AI_AGENT_CREDIBILITY_V1,
@@ -9,9 +14,19 @@ import {
   resolveAiAnalysisAgentKind,
 } from './ai-agent.constants';
 
+type LlmSummaryResult = {
+  text: string;
+  usedLlm: boolean;
+  model: string | null;
+  usage: { prompt: number; completion: number; total: number } | null;
+};
+
 @Injectable()
 export class SnapshotAnalyzeService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AiAuditService,
+  ) {}
 
   async listAnalyses(
     snapshotId: bigint,
@@ -88,13 +103,41 @@ export class SnapshotAnalyzeService {
     return where;
   }
 
+  /**
+   * @param ctx.auditSource — `api`（默认）或 `ranking_followup` 等，用于配额审计图谱
+   */
   async analyzeSnapshot(
     snapshotId: bigint,
     opts: { agent?: string; topN?: number; chainContext?: string },
+    ctx?: { auditSource?: string },
   ) {
-    const quota = await this.checkAnalysisDailyCap();
-    if (!quota.ok) {
-      throw new BadRequestException(`AiAnalysis quota: ${quota.reason}`);
+    const auditSource =
+      ctx?.auditSource === AI_AUDIT_SOURCE_RANKING_FOLLOWUP
+        ? AI_AUDIT_SOURCE_RANKING_FOLLOWUP
+        : AI_AUDIT_SOURCE_API;
+    const requestId = this.audit.newRequestId();
+    const { start: dayStart } = this.audit.utcDayBounds();
+    const cap = this.readAnalysisDailyCap();
+
+    if (cap !== null) {
+      const preCount = await this.audit.countAnalysesSince(dayStart);
+      if (preCount >= cap) {
+        await this.audit.recordChatAttempt({
+          category: 'CHAT_COMPLETION',
+          operation: 'analyzeSnapshot',
+          model: process.env.OPENAI_MODEL?.trim() ?? null,
+          snapshotId,
+          aiAnalysisId: null,
+          success: false,
+          quotaDecision: 'DENIED_DAILY_CAP',
+          requestId,
+          source: auditSource,
+          metadata: { phase: 'pre_flight', cap },
+        });
+        throw new BadRequestException(
+          `AiAnalysis quota: daily cap ${cap} (UTC) reached`,
+        );
+      }
     }
 
     const topN = Math.min(Math.max(opts.topN ?? 8, 1), 50);
@@ -116,51 +159,86 @@ export class SnapshotAnalyzeService {
         `#${it.rank} ${it.entity.canonicalName} (${it.trendType}, popularity ${it.popularityScore.toFixed(2)})`,
     );
     const names = snap.items.map((i) => i.entity.canonicalName);
-    let summary = `本榜前 ${snap.items.length} 名：${names.join('、')}。`;
-    summary = await this.maybeOpenAiSummary(
+    const baseline = `本榜前 ${snap.items.length} 名：${names.join('、')}。`;
+    const llm = await this.maybeOpenAiSummary(
       lines.join('\n'),
-      summary,
+      baseline,
       agentResolved,
       opts.chainContext,
     );
 
-    return this.prisma.aiAnalysis.create({
-      data: {
-        snapshotId,
-        agent: agentResolved,
-        summary,
-        detailJson: {
-          schemaVersion: 1,
-          topN,
-          lines,
-          snapshotVersion: snap.snapshotVersion,
-          agentKind: resolveAiAnalysisAgentKind(agentResolved),
-          usedChainContext: Boolean(opts.chainContext?.trim()),
+    return this.prisma.$transaction(async (tx) => {
+      if (cap !== null) {
+        const n = await tx.aiAnalysis.count({
+          where: { createdAt: { gte: dayStart } },
+        });
+        if (n >= cap) {
+          await this.audit.recordChatInTx(tx, {
+            category: 'CHAT_COMPLETION',
+            operation: 'analyzeSnapshot',
+            model: llm.model,
+            snapshotId,
+            aiAnalysisId: null,
+            success: false,
+            quotaDecision: 'DENIED_DAILY_CAP',
+            requestId,
+            source: auditSource,
+            promptTokens: llm.usage?.prompt ?? null,
+            completionTokens: llm.usage?.completion ?? null,
+            totalTokens: llm.usage?.total ?? null,
+            metadata: { phase: 'post_llm_race', cap },
+          });
+          throw new BadRequestException(
+            `AiAnalysis quota: daily cap ${cap} (UTC) reached (post-check)`,
+          );
+        }
+      }
+
+      const row = await tx.aiAnalysis.create({
+        data: {
+          snapshotId,
+          agent: agentResolved,
+          summary: llm.text,
+          detailJson: {
+            schemaVersion: 1,
+            topN,
+            lines,
+            snapshotVersion: snap.snapshotVersion,
+            agentKind: resolveAiAnalysisAgentKind(agentResolved),
+            usedChainContext: Boolean(opts.chainContext?.trim()),
+            auditRequestId: requestId,
+          },
+          confidence: process.env.OPENAI_API_KEY?.trim() ? 0.85 : 0.55,
         },
-        confidence: process.env.OPENAI_API_KEY?.trim() ? 0.85 : 0.55,
-      },
+      });
+
+      await this.audit.recordChatInTx(tx, {
+        category: 'CHAT_COMPLETION',
+        operation: 'analyzeSnapshot',
+        model: llm.model,
+        snapshotId,
+        aiAnalysisId: row.id,
+        success: true,
+        quotaDecision: llm.usedLlm ? 'ALLOWED' : 'SKIPPED_NO_API_KEY',
+        promptTokens: llm.usage?.prompt ?? null,
+        completionTokens: llm.usage?.completion ?? null,
+        totalTokens: llm.usage?.total ?? null,
+        requestId,
+        source: auditSource,
+        metadata: { agent: agentResolved, topN },
+      });
+
+      return row;
     });
   }
 
-  /**
-   * 全局「软配额」占位（按 UTC 日 `AiAnalysis` 条数）。生产请改为多租户 Redis / DB 计费等。
-   */
-  private async checkAnalysisDailyCap(): Promise<
-    { ok: true } | { ok: false; reason: string }
-  > {
+  /** UTC 自然日 `AiAnalysis` 条数上限；未配置则不限制 */
+  private readAnalysisDailyCap(): number | null {
     const raw = process.env.AI_ANALYSIS_DAILY_CAP?.trim();
-    if (!raw) return { ok: true };
+    if (!raw) return null;
     const cap = Number(raw);
-    if (!Number.isFinite(cap) || cap < 0) return { ok: true };
-    const since = new Date();
-    since.setUTCHours(0, 0, 0, 0);
-    const count = await this.prisma.aiAnalysis.count({
-      where: { createdAt: { gte: since } },
-    });
-    if (count >= cap) {
-      return { ok: false, reason: `daily cap ${cap} (UTC) reached` };
-    }
-    return { ok: true };
+    if (!Number.isFinite(cap) || cap < 0) return null;
+    return cap;
   }
 
   private buildUserPromptRankingBlock(rankingLines: string, chainContext?: string): string {
@@ -201,11 +279,18 @@ export class SnapshotAnalyzeService {
     fallback: string,
     agent: string,
     chainContext?: string,
-  ): Promise<string> {
+  ): Promise<LlmSummaryResult> {
     const key = process.env.OPENAI_API_KEY?.trim();
-    if (!key) return fallback;
-
     const model = process.env.OPENAI_MODEL?.trim() || 'gpt-4o-mini';
+    if (!key) {
+      return {
+        text: fallback,
+        usedLlm: false,
+        model: null,
+        usage: null,
+      };
+    }
+
     const userContent = this.buildUserPromptRankingBlock(context, chainContext);
     try {
       const res = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -227,14 +312,38 @@ export class SnapshotAnalyzeService {
           temperature: 0.4,
         }),
       });
-      if (!res.ok) return fallback;
+      if (!res.ok) {
+        return { text: fallback, usedLlm: false, model, usage: null };
+      }
       const data = (await res.json()) as {
         choices?: { message?: { content?: string } }[];
+        usage?: {
+          prompt_tokens?: number;
+          completion_tokens?: number;
+          total_tokens?: number;
+        };
       };
       const text = data.choices?.[0]?.message?.content?.trim();
-      return text && text.length > 0 ? text : fallback;
+      const u = data.usage;
+      const usage =
+        u &&
+        typeof u.prompt_tokens === 'number' &&
+        typeof u.completion_tokens === 'number' &&
+        typeof u.total_tokens === 'number'
+          ? {
+              prompt: u.prompt_tokens,
+              completion: u.completion_tokens,
+              total: u.total_tokens,
+            }
+          : null;
+      return {
+        text: text && text.length > 0 ? text : fallback,
+        usedLlm: Boolean(text && text.length > 0),
+        model,
+        usage,
+      };
     } catch {
-      return fallback;
+      return { text: fallback, usedLlm: false, model, usage: null };
     }
   }
 }

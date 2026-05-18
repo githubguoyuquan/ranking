@@ -51,6 +51,7 @@ import {
   parseFollowupAnalyzePipeline,
 } from '../agent/ai-agent.constants';
 import { SnapshotAnalyzeService } from '../agent/snapshot-analyze.service';
+import { AI_AUDIT_SOURCE_RANKING_FOLLOWUP } from '../ai-audit/ai-audit.constants';
 import {
   parseScoreBreakdownJson,
   stableWeightsFingerprint,
@@ -885,11 +886,15 @@ export class RankingsService {
     chainContext?: string,
   ): Promise<{ ok: true; summary: string } | { ok: false }> {
     try {
-      const row = await this.snapshotAnalyze.analyzeSnapshot(snapshotId, {
-        agent,
-        topN: this.rankingFollowupAnalyzeTopN(),
-        chainContext,
-      });
+      const row = await this.snapshotAnalyze.analyzeSnapshot(
+        snapshotId,
+        {
+          agent,
+          topN: this.rankingFollowupAnalyzeTopN(),
+          chainContext,
+        },
+        { auditSource: AI_AUDIT_SOURCE_RANKING_FOLLOWUP },
+      );
       return { ok: true, summary: row.summary };
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);

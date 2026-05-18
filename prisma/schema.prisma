@@ -57,8 +57,20 @@ model Topic {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  versions TopicVersion[]
-  sources  Source[]
+  versions  TopicVersion[]
+  sources   Source[]
+  embedding TopicEmbedding?
+}
+
+/// 话题语义向量（OpenAI embedding；用于相似话题推荐）
+model TopicEmbedding {
+  topicId   BigInt   @id
+  model     String   @default("text-embedding-3-small")
+  dims      Int
+  vector    Json
+  updatedAt DateTime @updatedAt
+
+  topic Topic @relation(fields: [topicId], references: [id], onDelete: Cascade)
 }
 
 model TopicVersion {

@@ -19,7 +19,7 @@ describe('docs/openapi', () => {
     const paths = doc.paths as Record<string, unknown> | undefined;
     expect(paths).toBeTruthy();
     expect(Object.keys(paths!).length).toBeGreaterThan(0);
-    for (const [_pathKey, pathItem] of Object.entries(paths!)) {
+    for (const pathItem of Object.values(paths!)) {
       expect(pathItem).toBeTruthy();
     }
   });

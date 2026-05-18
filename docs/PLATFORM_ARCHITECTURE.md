@@ -235,13 +235,13 @@ sequenceDiagram
 
 ## 10. 搜索与推荐
 
-**已有**：`GET /v1/search` 聚合实体+爬取；ES/ PG 双路径；管理台高亮。
+**已有**：`GET /v1/search` 聚合实体+爬取；ES/ PG 双路径；实体索引 **`dense_vector`（1536，`cosine`）** 与 OpenAI embedding；**`semantic=1` / `entitySemantic=1`** 走 kNN；**`GET /v1/recommendations/similar-topics`**（PG `TopicEmbedding` + 余弦）、**`GET /v1/recommendations/similar-entities`**（ES kNN）。管理台高亮。
 
 **缺口**：
 
 - **时间检索**：`windowStart`/`snapshotTime` 范围 DSL；
-- **语义 / 向量**：引入 embedding 与 hybrid search；
-- **推荐**：`TopicRanking` 协同、「相似实体」走 `EntityRelation` + 向量近邻。
+- **Hybrid**：lexical + vector 线性融合与 RRF；
+- **推荐**：`TopicRanking` 协同、更大规模话题向量迁 ES/Qdrant。
 
 ---
 

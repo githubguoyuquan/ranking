@@ -51,8 +51,8 @@ class OutboxListQueryDto {
  * 常见 **`type` → `payload` 契约**（写入侧由下列 **builder** 固化；常量见 `src/outbox/outbox.constants.ts`）：
  * - `ranking.snapshot.completed`（**Kafka**）→ `buildRankingSnapshotCompletedOutboxPayload`（`src/rankings/ranking-snapshot-completed-outbox-payload.ts`）
  * - `clickhouse.ranking.snapshot.ingest`（**ClickHouse Flusher**）→ `buildClickhouseRankingSnapshotOutboxPayload`（`src/rankings/clickhouse-ranking-snapshot-outbox-payload.ts`）
- * - `elasticsearch.entity.sync`（**ES 实体 Flusher**）→ `buildElasticEntitySyncOutboxPayload`（`src/search/elastic-entity-sync-outbox-payload.ts`；同事务封装见 `elasticEntitySyncOutboxCreate`）
- * - `elasticsearch.crawled_url.sync`（**ES 爬取 Flusher**）→ `buildElasticCrawledUrlSyncOutboxPayload`（`src/search/elastic-crawled-url-sync-outbox-payload.ts`；封装见 `elasticCrawledUrlSyncOutboxCreate`）
+ * - `elasticsearch.entity.sync`（**ES 实体 Flusher**）→ **`buildElasticEntitySyncOutboxPayload`**（**`payload`**：`src/search/elastic-entity-sync-outbox-payload.ts`；同事务 **`type`+`payload`**：`elasticEntitySyncOutboxCreate`，`src/search/elastic-entity-outbox.ts`）
+ * - `elasticsearch.crawled_url.sync`（**ES 爬取 Flusher**）→ **`buildElasticCrawledUrlSyncOutboxPayload`**（**`payload`**：`src/search/elastic-crawled-url-sync-outbox-payload.ts`；封装 **`elasticCrawledUrlSyncOutboxCreate`，`src/search/elastic-crawled-url-outbox.ts`**）
  * - `ranking.followup.requested`（**不经 Kafka**；需 `RANKING_FOLLOWUP_OUTBOX`）→ `buildRankingFollowupRequestedOutboxPayload`（`src/rankings/ranking-followup-requested-outbox-payload.ts`）
  *
  * 管理台 **`/outbox`**：上述各类 **快捷 `type`、表格摘要列、JSON 契约键高亮**（见 `README`）。

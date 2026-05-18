@@ -5,8 +5,11 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { Client, errors } from '@elastic/elasticsearch';
+import type { KnnSearch } from '@elastic/elasticsearch/lib/api/types';
 import { CrawledUrl, Entity, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { EMBEDDING_DIMS } from './embedding.constants';
+import { EmbeddingService } from './embedding.service';
 import { ELASTIC_INDEX_CRAWLED_URLS, ELASTIC_INDEX_ENTITIES } from './elastic.constants';
 
 function aliasesToText(aliases: Prisma.JsonValue | null | undefined): string {
@@ -34,6 +37,8 @@ function entityToEsDoc(e: Pick<Entity, 'id' | 'type' | 'canonicalName' | 'aliase
   };
 }
 
+type EntityEsDoc = EntityEsSource & { embedding?: number[] };
+
 type CrawledUrlEsSource = {
   crawledUrlId: string;
   sourceId: string;
@@ -50,6 +55,8 @@ export type EntitySearchHit = {
   score: number;
   canonicalName: string;
   type: string;
+  /** 命中方式：全文或 kNN 向量 */
+  match?: 'lexical' | 'vector';
   /** Elasticsearch `highlight` 字段：含 `<em>...</em>`，便于前端展示 */
   highlights?: Record<string, string[]>;
 };
@@ -98,7 +105,10 @@ export class ElasticService implements OnModuleDestroy {
   private entityIndexReady = false;
   private crawledUrlIndexReady = false;
 
-  constructor(private readonly prisma: PrismaService) {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly embedding: EmbeddingService,
+  ) {
     const node = process.env.ELASTICSEARCH_NODE?.trim();
     if (!node) {
       this.logger.warn('ELASTICSEARCH_NODE not set — Elasticsearch features disabled');
@@ -146,12 +156,41 @@ export class ElasticService implements OnModuleDestroy {
               fields: { keyword: { type: 'keyword', ignore_above: 256 } },
             },
             aliases: { type: 'text', analyzer: 'standard' },
+            embedding: {
+              type: 'dense_vector',
+              dims: EMBEDDING_DIMS,
+              index: true,
+              similarity: 'cosine',
+            },
           },
         },
       });
       this.logger.log(`Created index ${ELASTIC_INDEX_ENTITIES}`);
     }
+    await this.patchEntityIndexEmbeddingMapping();
     this.entityIndexReady = true;
+  }
+
+  /** 旧集群逐字段补 `embedding`（新索引已在 create 中带齐） */
+  private async patchEntityIndexEmbeddingMapping(): Promise<void> {
+    if (!this.client) return;
+    try {
+      await this.client.indices.putMapping({
+        index: ELASTIC_INDEX_ENTITIES,
+        properties: {
+          embedding: {
+            type: 'dense_vector',
+            dims: EMBEDDING_DIMS,
+            index: true,
+            similarity: 'cosine',
+          },
+        },
+      });
+    } catch (e) {
+      this.logger.debug(
+        `entity index embedding mapping: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
   }
 
   async ensureCrawledUrlIndex(): Promise<void> {
@@ -188,11 +227,22 @@ export class ElasticService implements OnModuleDestroy {
   async upsertEntityFromRow(e: Entity): Promise<void> {
     if (!this.client) return;
     await this.ensureEntityIndex();
+    const doc: EntityEsDoc = { ...entityToEsDoc(e) };
+    if (this.embedding.isConfigured()) {
+      try {
+        const vec = await this.embedding.embedForEntity(e.canonicalName, e.aliases);
+        if (vec.length === EMBEDDING_DIMS) doc.embedding = vec;
+      } catch (err) {
+        this.logger.warn(
+          `skip entity ${e.id} embedding: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
     try {
       await this.client.index({
         index: ELASTIC_INDEX_ENTITIES,
         id: e.id.toString(),
-        document: entityToEsDoc(e),
+        document: doc,
         refresh: true,
       });
     } catch (err) {
@@ -242,12 +292,42 @@ export class ElasticService implements OnModuleDestroy {
     const entities = await this.prisma.entity.findMany();
     if (entities.length === 0) return 0;
 
+    const vectorsById = new Map<string, number[]>();
+    const batch = 64;
+    if (this.embedding.isConfigured()) {
+      for (let i = 0; i < entities.length; i += batch) {
+        const chunk = entities.slice(i, i + batch);
+        const texts = chunk.map((e) => {
+          const a = aliasesToText(e.aliases);
+          const name = e.canonicalName.trim();
+          return a.length > 0 ? `${name}\n${a}` : name;
+        });
+        try {
+          const vecs = await this.embedding.embedMany(texts);
+          chunk.forEach((e, j) => {
+            if (vecs[j]?.length === EMBEDDING_DIMS) {
+              vectorsById.set(e.id.toString(), vecs[j]);
+            }
+          });
+        } catch (err) {
+          this.logger.warn(
+            `reindex entity embeddings batch @${i}: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
+      }
+    }
+
     const operations: object[] = [];
     for (const e of entities) {
       operations.push({
         index: { _index: ELASTIC_INDEX_ENTITIES, _id: e.id.toString() },
       });
-      operations.push(entityToEsDoc(e));
+      const doc: EntityEsDoc = { ...entityToEsDoc(e) };
+      const v = vectorsById.get(e.id.toString());
+      if (v) doc.embedding = v;
+      operations.push(doc);
     }
 
     const res = await this.client.bulk({ operations, refresh: true });
@@ -317,10 +397,107 @@ export class ElasticService implements OnModuleDestroy {
         score: hit._score ?? 0,
         canonicalName: src?.canonicalName ?? '',
         type: src?.type ?? '',
+        match: 'lexical',
         ...(highlights && Object.keys(highlights).length > 0 ? { highlights } : {}),
       });
     }
     return out;
+  }
+
+  /** kNN 语义检索（需索引中存在 `embedding` 且 API 可用 query vector） */
+  async searchEntitiesByVector(queryVector: number[], limit: number): Promise<EntitySearchHit[]> {
+    return this.runEntityKnnSearch(queryVector, limit, null);
+  }
+
+  /** 与给定向量最近的实体；`excludeEntityId` 排除自身 */
+  async knnSimilarEntities(
+    queryVector: number[],
+    excludeEntityId: bigint,
+    limit: number,
+  ): Promise<EntitySearchHit[]> {
+    return this.runEntityKnnSearch(queryVector, limit, excludeEntityId);
+  }
+
+  private async runEntityKnnSearch(
+    queryVector: number[],
+    limit: number,
+    excludeEntityId: bigint | null,
+  ): Promise<EntitySearchHit[]> {
+    if (!this.client) {
+      throw new ServiceUnavailableException('Elasticsearch not configured (ELASTICSEARCH_NODE)');
+    }
+    if (queryVector.length !== EMBEDDING_DIMS) {
+      throw new ServiceUnavailableException(
+        `query vector dim ${queryVector.length} (expected ${EMBEDDING_DIMS})`,
+      );
+    }
+    await this.ensureEntityIndex();
+
+    const size = Math.min(Math.max(limit, 1), 50);
+    const knn: KnnSearch = {
+      field: 'embedding',
+      query_vector: queryVector,
+      k: size,
+      num_candidates: Math.min(400, Math.max(size * 20, 50)),
+      ...(excludeEntityId !== null
+        ? {
+            filter: {
+              bool: {
+                must_not: [{ term: { entityId: excludeEntityId.toString() } }],
+              },
+            },
+          }
+        : {}),
+    };
+
+    let res;
+    try {
+      res = await this.client.search({
+        index: ELASTIC_INDEX_ENTITIES,
+        knn,
+        size,
+        _source: ['entityId', 'canonicalName', 'type'],
+      });
+    } catch (e) {
+      this.logger.warn(`runEntityKnnSearch: ${e instanceof Error ? e.message : String(e)}`);
+      throw new ServiceUnavailableException(
+        `Elasticsearch kNN failed: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+
+    const out: EntitySearchHit[] = [];
+    for (const hit of res.hits.hits) {
+      const src = hit._source as
+        | { entityId?: string; canonicalName?: string; type?: string }
+        | undefined;
+      out.push({
+        entityId: src?.entityId ?? String(hit._id ?? ''),
+        score: hit._score ?? 0,
+        canonicalName: src?.canonicalName ?? '',
+        type: src?.type ?? '',
+        match: 'vector',
+      });
+    }
+    return out;
+  }
+
+  /** 读取已索引实体的向量（无字段或缺失时返回 null） */
+  async fetchEntityEmbeddingFromIndex(entityId: bigint): Promise<number[] | null> {
+    if (!this.client) return null;
+    await this.ensureEntityIndex();
+    try {
+      const g = await this.client.get({
+        index: ELASTIC_INDEX_ENTITIES,
+        id: entityId.toString(),
+        _source: ['embedding'],
+      });
+      const emb = (g._source as { embedding?: number[] } | undefined)?.embedding;
+      if (!emb || emb.length !== EMBEDDING_DIMS) return null;
+      return emb;
+    } catch (e: unknown) {
+      if (e instanceof errors.ResponseError && e.statusCode === 404) return null;
+      throw e;
+    }
   }
 
   /** Flusher：仅索引 `status=fetched`；否则删 ES 文档 */

@@ -12,9 +12,10 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
+  IsBoolean,
   IsIn,
   IsInt,
   IsOptional,
@@ -28,6 +29,7 @@ import { toPlainJson } from '../lib/json';
 import { PrismaService } from '../prisma/prisma.service';
 import { elasticEntitySyncOutboxCreate } from './elastic-entity-outbox';
 import { ElasticService } from './elastic.service';
+import { EmbeddingService } from './embedding.service';
 
 class SearchEntitiesQueryDto {
   @IsString()
@@ -50,6 +52,14 @@ class SearchEntitiesQueryDto {
   @IsOptional()
   @IsIn(['es', 'pg', 'auto'])
   engine?: 'es' | 'pg' | 'auto';
+
+  /** `true` / `1`：对查询句做 embedding，走 ES kNN（需 OPENAI_API_KEY + ELASTICSEARCH_NODE） */
+  @IsOptional()
+  @Transform(
+    ({ value }) => value === true || value === 'true' || value === '1' || value === 1,
+  )
+  @IsBoolean()
+  semantic?: boolean;
 }
 
 class SearchCrawledUrlsQueryDto {
@@ -111,6 +121,14 @@ class UnifiedSearchQueryDto {
   @IsOptional()
   @IsIn(['auto', 'es', 'pg'])
   entityIndex?: 'auto' | 'es' | 'pg';
+
+  /** 实体块走向量 kNN（需 OPENAI_API_KEY + ES；与 `entityIndex=pg` 互斥时以语义检索优先报错见响应 detail） */
+  @IsOptional()
+  @Transform(
+    ({ value }) => value === true || value === 'true' || value === '1' || value === 1,
+  )
+  @IsBoolean()
+  entitySemantic?: boolean;
 }
 
 export class CreateEntityAdminDto {
@@ -166,6 +184,7 @@ export class SearchController {
   constructor(
     private readonly elastic: ElasticService,
     private readonly prisma: PrismaService,
+    private readonly embedding: EmbeddingService,
   ) {}
 
   @Get('v1/search/health')
@@ -188,7 +207,7 @@ export class SearchController {
     const entityPref = query.entityIndex ?? 'auto';
 
     const [entities, crawledUrls] = await Promise.all([
-      this.unifiedEntitiesPart(q, lim, entityPref),
+      this.unifiedEntitiesPart(q, lim, entityPref, query.entitySemantic === true),
       this.unifiedCrawledPart(q, lim, crawlPref, crawlSourceId, crawlStatus),
     ]);
 
@@ -200,6 +219,28 @@ export class SearchController {
     const q = query.q.trim();
     const lim = query.limit ?? 20;
     const engine = query.engine ?? 'es';
+
+    if (query.semantic) {
+      if (!this.elastic.isEnabled()) {
+        throw new BadRequestException(
+          'semantic search requires Elasticsearch (ELASTICSEARCH_NODE)',
+        );
+      }
+      if (!this.embedding.isConfigured()) {
+        throw new ServiceUnavailableException(
+          'semantic search requires OPENAI_API_KEY',
+        );
+      }
+      const vec = await this.embedding.embedText(q);
+      const hits = await this.elastic.searchEntitiesByVector(vec, lim);
+      return toPlainJson({
+        query: q,
+        engine: 'elasticsearch',
+        mode: 'vector',
+        count: hits.length,
+        hits,
+      });
+    }
 
     if (engine === 'pg' || (engine === 'auto' && !this.elastic.isEnabled())) {
       const hits = await this.searchEntitiesPostgres(q, lim);
@@ -431,6 +472,7 @@ export class SearchController {
     q: string,
     lim: number,
     entityPref: 'auto' | 'es' | 'pg',
+    entitySemantic: boolean,
   ): Promise<{
     source: 'elasticsearch' | 'postgresql' | 'off';
     hits: Array<{
@@ -438,11 +480,45 @@ export class SearchController {
       score: number;
       canonicalName: string;
       type: string;
+      match?: 'lexical' | 'vector';
       highlights?: Record<string, string[]>;
     }>;
     detail?: string;
     error?: string;
+    vectorSearch?: boolean;
   }> {
+    if (entitySemantic) {
+      if (!this.embedding.isConfigured()) {
+        return {
+          source: 'off',
+          hits: [],
+          detail: 'entitySemantic requires OPENAI_API_KEY',
+          vectorSearch: true,
+        };
+      }
+      if (!this.elastic.isEnabled()) {
+        return {
+          source: 'off',
+          hits: [],
+          detail: 'entitySemantic requires ELASTICSEARCH_NODE',
+          vectorSearch: true,
+        };
+      }
+      try {
+        const vec = await this.embedding.embedText(q);
+        const hits = await this.elastic.searchEntitiesByVector(vec, lim);
+        return { source: 'elasticsearch', hits, vectorSearch: true };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return {
+          source: 'elasticsearch',
+          hits: [],
+          error: msg,
+          vectorSearch: true,
+        };
+      }
+    }
+
     const useEs =
       entityPref === 'es' || (entityPref === 'auto' && this.elastic.isEnabled());
 

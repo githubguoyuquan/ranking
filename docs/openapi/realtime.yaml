@@ -1,0 +1,30 @@
+openapi: 3.0.3
+info:
+  title: ranking-platform — Realtime (fragment)
+  version: "0.1"
+paths:
+  /v1/realtime/stream:
+    get:
+      summary: Server-Sent Events — ranking snapshot notifications
+      description: |
+        Subscribes to Redis Pub/Sub (channel `REALTIME_REDIS_CHANNEL` or default `ranking:realtime:v1`).
+        Emits JSON lines in SSE `data` fields: `snapshot_ready`, `ranking_failed`, and periodic `ping`.
+        Requires at least one of query params `topics` (comma-separated topic slugs) or `topicRankingIds`.
+      parameters:
+        - name: topics
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Comma-separated `Topic.slug` values to filter events.
+        - name: topicRankingIds
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Comma-separated `TopicRanking.id` (decimal) values to filter events.
+      responses:
+        "200":
+          description: text/event-stream
+        "400":
+          description: Missing filters or SSE disabled

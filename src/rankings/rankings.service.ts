@@ -11,6 +11,7 @@ import {
   TrendType,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { RealtimePublisherService } from '../realtime/realtime-publisher.service';
 import {
   aiConfidence,
   classifyTrend,
@@ -106,8 +107,64 @@ export class RankingsService {
     private readonly snapshotAnalyze: SnapshotAnalyzeService,
     private readonly rankingCache: RankingCacheService,
     private readonly elastic: ElasticService,
+    private readonly realtime: RealtimePublisherService,
     @Optional() private readonly clickhouse?: ClickhouseService,
   ) {}
+
+  private async emitSnapshotReadyEvent(
+    snapshot: TopicRankSnapshot,
+    topicRanking: Pick<TopicRanking, 'id'>,
+    topicVersion: { id: bigint; topicId: bigint },
+    opts?: { deduped?: boolean },
+  ): Promise<void> {
+    try {
+      const topic = await this.prisma.topic.findUnique({
+        where: { id: topicVersion.topicId },
+        select: { slug: true },
+      });
+      if (!topic) return;
+      await this.realtime.publish({
+        type: 'snapshot_ready',
+        topicSlug: topic.slug,
+        topicVersionId: topicVersion.id.toString(),
+        topicRankingId: topicRanking.id.toString(),
+        snapshotId: snapshot.id.toString(),
+        hasScoreModel: snapshot.scoreModelId != null,
+        deduped: opts?.deduped,
+      });
+    } catch (e) {
+      this.logger.warn(
+        `realtime snapshot_ready: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
+
+  private async emitRankingFailedEvent(
+    topicRankingId: bigint,
+    topicVersionId: bigint,
+    err: unknown,
+  ): Promise<void> {
+    try {
+      const tv = await this.prisma.topicVersion.findUnique({
+        where: { id: topicVersionId },
+        select: { topic: { select: { slug: true } } },
+      });
+      const slug = tv?.topic.slug;
+      if (!slug) return;
+      const msg = err instanceof Error ? err.message : String(err);
+      await this.realtime.publish({
+        type: 'ranking_failed',
+        topicSlug: slug,
+        topicVersionId: topicVersionId.toString(),
+        topicRankingId: topicRankingId.toString(),
+        error: msg.slice(0, 500),
+      });
+    } catch (e) {
+      this.logger.warn(
+        `realtime ranking_failed: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
 
   async seedDemo(slug = 'global-female-singers') {
     const topic = await this.prisma.topic.upsert({
@@ -571,6 +628,7 @@ export class RankingsService {
         topicVersion.topicId,
         args.timeWindow,
       );
+      await this.emitSnapshotReadyEvent(snapshot, topicRanking, topicVersion);
       return this.serializeSnapshot(snapshot);
     } catch (err) {
       await this.prisma.topicRanking.update({
@@ -580,6 +638,7 @@ export class RankingsService {
           lastError: err instanceof Error ? err.message : String(err),
         },
       });
+      await this.emitRankingFailedEvent(topicRanking.id, topicVersion.id, err);
       throw err;
     }
   }
@@ -642,6 +701,9 @@ export class RankingsService {
           completedAt: new Date(),
           lastError: null,
         },
+      });
+      await this.emitSnapshotReadyEvent(existingSnap, topicRanking, topicVersion, {
+        deduped: true,
       });
       return {
         jobId: buildRankingJobId(this.toPayload(topicRanking.id, args)),
@@ -713,6 +775,7 @@ export class RankingsService {
         topicVersion.topicId,
         args.timeWindow,
       );
+      await this.emitSnapshotReadyEvent(snap, topicRanking, topicVersion);
       return this.serializeSnapshot(snap);
     } catch (err) {
       await this.prisma.topicRanking.update({
@@ -722,6 +785,7 @@ export class RankingsService {
           lastError: err instanceof Error ? err.message : String(err),
         },
       });
+      await this.emitRankingFailedEvent(topicRankingId, args.topicVersionId, err);
       throw err;
     }
   }

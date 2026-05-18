@@ -281,13 +281,12 @@ sequenceDiagram
 
 ## 13. 前端（Next.js）
 
-**已有**：管理台多页、ECharts、快照对比、搜索、爬取、**Outbox**（**Kafka / CH / ES 实体 / ES 爬取 / `ranking.followup.requested`** 快捷筛选，表格多类 **`payload` 摘要**，JSON 契约键高亮）、ES 健康等；**话题版本** 页含 **`TrendAnalysis` 快照摘要**、**近期快照**（含 **`hasScoreModel`** / 分解 API）、**热榜预览**（**`resolved.hasScoreModel`**、**score-breakdowns** 链）、**policyJson 编辑（PATCH）**；**实体** 页 **rank-history** JSON + **`/entities/rank-history`** 折线图；**`/trends`** 热点表（`GET /v1/trends/hot`）。**快照详情** `/snapshots/:id` 展示 **ScoreModel / `scoreBreakdown`**，**`AI 简报` 工具条**可打开 **`GET …/score-breakdowns`**，支持 **`?analysisKind=`** / **`?analysisPage=`** / **`?analysisLimit=`**，与 **`GET /v1/snapshots/:id/analyses`** 分页对齐。**快照对比** 说明中提及单元格 **`scoreBreakdown`** 与按列拉取关系表 JSON。
+**已有**：管理台多页、ECharts、快照对比、搜索、爬取、**Outbox**（**Kafka / CH / ES 实体 / ES 爬取 / `ranking.followup.requested`** 快捷筛选，表格多类 **`payload` 摘要**，JSON 契约键高亮）、ES 健康等；**话题版本** 页含 **`TrendAnalysis` 快照摘要**、**近期快照**（含 **`hasScoreModel`** / 分解 API）、**热榜预览**（**`resolved.hasScoreModel`**、**score-breakdowns** 链）、**policyJson 编辑（PATCH）**；**热榜 SSE**：`GET /v1/realtime/stream`（Redis Pub/Sub，快照 **`snapshot_ready`** / **`ranking_failed`**）；**实体** 页 **rank-history** JSON + **`/entities/rank-history`** 折线图；**`/trends`** 热点表（`GET /v1/trends/hot`）。**快照详情** `/snapshots/:id` 展示 **ScoreModel / `scoreBreakdown`**，**`AI 简报` 工具条**可打开 **`GET …/score-breakdowns`**，支持 **`?analysisKind=`** / **`?analysisPage=`** / **`?analysisLimit=`**，与 **`GET /v1/snapshots/:id/analyses`** 分页对齐。**快照对比** 说明中提及单元格 **`scoreBreakdown`** 与按列拉取关系表 JSON。
 
 **缺口（产品级）**：
 
 - 实体时间线 **深度分析**（多话题叠加对比、事件标注、分享视图）  
 - **版本 diff** 报告（AI 生成 + 人机审）  
-- REALTIME 榜的 **SSE/WebSocket** 刷新  
 
 ---
 

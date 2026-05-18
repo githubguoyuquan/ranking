@@ -34,12 +34,13 @@ import {
   nestSnapshotV1Url,
 } from "@/lib/nest-api-urls";
 import { useAdminAppUrl } from "@/hooks/use-admin-app-url";
+import { useRankingRealtimeSse } from "@/hooks/use-ranking-realtime-sse";
 import { formatTopicRankingStatusSummary } from "@/lib/format-topic-ranking-status";
 import { isIsoDateString } from "@/lib/iso-date";
 import { TIME_WINDOW_SET } from "@/lib/time-window";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 
 const defaults = {
   topicVersionId: "",
@@ -167,6 +168,31 @@ function RunRankingForm() {
     jobId?: string;
     topicRankingId?: string;
   } | null>(null);
+
+  const runMetaTrRef = useRef<string | undefined>(undefined);
+  runMetaTrRef.current = runMeta?.topicRankingId;
+
+  const { connectionState: rankingSseState } = useRankingRealtimeSse({
+    topicRankingIds:
+      asyncMode && runMeta?.topicRankingId ? [runMeta.topicRankingId] : [],
+    enabled: Boolean(asyncMode && runMeta?.topicRankingId),
+    onSnapshotReady: (p) => {
+      if (p.topicRankingId !== runMetaTrRef.current) return;
+      setQuickOpen({
+        snapshotId: p.snapshotId,
+        hasScoreModel: p.hasScoreModel,
+      });
+      setResult((prev) =>
+        `${prev.trimEnd()}\n\n[SSE] 快照就绪 snapshotId=${p.snapshotId}`,
+      );
+    },
+    onRankingFailed: (p) => {
+      if (p.topicRankingId !== runMetaTrRef.current) return;
+      setResult((prev) =>
+        `${prev.trimEnd()}\n\n[SSE] 物化失败：${p.error}`,
+      );
+    },
+  });
 
   const runRequestBodyJson = useMemo(
     () =>
@@ -577,14 +603,27 @@ function RunRankingForm() {
                 <code className="rounded bg-muted px-1 text-xs">
                   GET {NEST_V1_DOC.rankingsStatus}
                 </code>
-                。
+                。入队成功后可并行监听{" "}
+                <code className="rounded bg-muted px-1 text-xs">
+                  GET {NEST_V1_DOC.realtimeStream}
+                </code>
+                （<code className="rounded bg-muted px-1 text-xs">topicRankingIds</code>
+                ），快照物化完成时抢先推送。
               </AlertDescription>
             </Alert>
           ) : null}
 
           {runMeta &&
           (runMeta.jobId || runMeta.topicRankingId) ? (
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+            <div className="flex flex-col gap-1 rounded-md border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+              <p className="text-[11px] leading-relaxed" aria-live="polite">
+                实时 SSE（job / ranking）：
+                {rankingSseState === "off" && "未订阅"}
+                {rankingSseState === "connecting" && "连接中…"}
+                {rankingSseState === "open" && "已连接"}
+                {rankingSseState === "error" && "连接异常（浏览器会自动重连）"}
+              </p>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
               {runMeta.jobId ? (
                 <>
                   <a
@@ -632,6 +671,7 @@ function RunRankingForm() {
                   />
                 </>
               ) : null}
+              </div>
             </div>
           ) : null}
 

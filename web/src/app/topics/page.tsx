@@ -38,9 +38,10 @@ import {
 import { unifiedSearchAdminPathFromQuery } from "@/lib/unified-search-admin-path";
 import { isIsoDateString } from "@/lib/iso-date";
 import { TIME_WINDOW_SET } from "@/lib/time-window";
+import { useRankingRealtimeSse } from "@/hooks/use-ranking-realtime-sse";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const POLICY_METRIC_KEYS = ["streams", "mentions", "social", "news"] as const;
 type PolicyMetricKey = (typeof POLICY_METRIC_KEYS)[number];
@@ -399,6 +400,8 @@ function TopicsPageInner() {
   const [lbQueryTimeWindow, setLbQueryTimeWindow] = useState("");
   const [lbQueryWindowStart, setLbQueryWindowStart] = useState("");
   const [lbIncludeAiStats, setLbIncludeAiStats] = useState(false);
+  const [lbRealtimeSse, setLbRealtimeSse] = useState(true);
+  const [listsRefreshNonce, setListsRefreshNonce] = useState(0);
 
   const slugForApi = slug.trim() || "global-female-singers";
 
@@ -465,7 +468,7 @@ function TopicsPageInner() {
     return () => {
       cancelled = true;
     };
-  }, [trendAnalysesApiUrl]);
+  }, [trendAnalysesApiUrl, listsRefreshNonce]);
 
   const [snapshotRows, setSnapshotRows] = useState<TopicSnapshotListItem[]>(
     [],
@@ -501,7 +504,7 @@ function TopicsPageInner() {
     return () => {
       cancelled = true;
     };
-  }, [topicSnapshotsApiUrl]);
+  }, [topicSnapshotsApiUrl, listsRefreshNonce]);
 
   useEffect(() => {
     const s = searchParams.get("slug");
@@ -580,6 +583,18 @@ function TopicsPageInner() {
       setLeaderboardLoading(false);
     }
   }
+
+  const loadLeaderboardRef = useRef(loadLeaderboard);
+  loadLeaderboardRef.current = loadLeaderboard;
+
+  const { connectionState: lbSseState } = useRankingRealtimeSse({
+    topics: lbRealtimeSse ? [slugForApi] : [],
+    enabled: lbRealtimeSse && Boolean(slugForApi),
+    onSnapshotReady: () => {
+      void loadLeaderboardRef.current?.();
+      setListsRefreshNonce((n) => n + 1);
+    },
+  });
 
   async function load() {
     setLoading(true);
@@ -766,6 +781,28 @@ function TopicsPageInner() {
               热榜 JSON 含 AI 简报统计（<code className="rounded bg-muted px-1 text-xs">includeAiStats=1</code>
               ，与 <code className="rounded bg-muted px-1 text-xs">GET /v1/snapshots/:id</code> 一致）
             </Label>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="lb-realtime-sse"
+                className="size-4 rounded border border-input accent-primary"
+                checked={lbRealtimeSse}
+                onChange={(e) => setLbRealtimeSse(e.target.checked)}
+              />
+              <Label htmlFor="lb-realtime-sse" className="text-sm font-normal text-muted-foreground">
+                热榜实时刷新（<code className="rounded bg-muted px-1 text-xs">GET {NEST_V1_DOC.realtimeStream}</code>
+                ，需 Redis；当前 slug=<code className="rounded bg-muted px-1 text-xs">{slugForApi}</code>）
+              </Label>
+            </div>
+            <p className="text-xs text-muted-foreground" aria-live="polite">
+              SSE：
+              {lbSseState === "off" && "未订阅"}
+              {lbSseState === "connecting" && "连接中…"}
+              {lbSseState === "open" && "已连接"}
+              {lbSseState === "error" && "连接异常（将自动重试）"}
+            </p>
           </div>
           <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
             <CopyTextButton

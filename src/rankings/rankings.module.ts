@@ -2,6 +2,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { AnalyticsModule } from '../analytics/analytics.module';
 import { AgentModule } from '../agent/agent.module';
+import { RealtimeModule } from '../realtime/realtime.module';
 import { SearchModule } from '../search/search.module';
 import { RANKING_FOLLOWUP_QUEUE } from './ranking-followup-job';
 import { RankingFollowupProcessor } from './ranking-followup.processor';
@@ -14,6 +15,7 @@ import { RankingsService } from './rankings.service';
   imports: [
     AnalyticsModule,
     AgentModule,
+    RealtimeModule,
     SearchModule,
     BullModule.registerQueue({
       name: RANKING_QUEUE,

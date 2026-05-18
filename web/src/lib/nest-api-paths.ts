@@ -133,6 +133,10 @@ export function nestV1PathWithQuery(
   return qs ? `${path}?${qs}` : path;
 }
 
+export function nestV1RealtimeStreamPath(params: URLSearchParams): string {
+  return nestV1PathWithQuery(`${V1}/realtime/stream`, params);
+}
+
 /**
  * 文档/界面展示用（含 `:param` 占位），**勿**用于实际 HTTP path。
  */
@@ -152,4 +156,5 @@ export const NEST_V1_DOC = {
   crawlCheckpoint: "/v1/crawl/checkpoints/:crawlerName",
   snapshotsAnalyses: "/v1/snapshots/:id/analyses",
   snapshotsScoreBreakdowns: "/v1/snapshots/:id/score-breakdowns",
+  realtimeStream: "/v1/realtime/stream",
 } as const;

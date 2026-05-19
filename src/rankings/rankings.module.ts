@@ -1,5 +1,6 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
+import { runsRankingWorkers } from '../config/process-role';
 import { TrendAnalysisSchedulerService } from './trend-analysis-scheduler.service';
 import { AnalyticsModule } from '../analytics/analytics.module';
 import { AgentModule } from '../agent/agent.module';
@@ -30,9 +31,9 @@ import { RankingsService } from './rankings.service';
   controllers: [RankingsController],
   providers: [
     RankingsService,
-    RankingProcessor,
-    RankingFollowupProcessor,
-    TrendAnalysisSchedulerService,
+    ...(runsRankingWorkers()
+      ? [RankingProcessor, RankingFollowupProcessor, TrendAnalysisSchedulerService]
+      : []),
   ],
   exports: [RankingsService],
 })

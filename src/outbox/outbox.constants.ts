@@ -16,3 +16,9 @@ export const OUTBOX_TYPE_ELASTIC_ENTITY_SYNC = 'elasticsearch.entity.sync';
 
 /** CrawledUrl（真抓取成功等）同步 ES 全文索引（同事务插入，由 ElasticCrawledUrlOutboxFlusher 消费） */
 export const OUTBOX_TYPE_ELASTIC_CRAWLED_URL_SYNC = 'elasticsearch.crawled_url.sync';
+
+/** 爬取 URL 已落库（Kafka 事件网；与 ES sync 行可并存） */
+export const OUTBOX_TYPE_CRAWL_URL_FETCHED = 'crawl.url.fetched';
+
+/** AgentRun 完成（Kafka 事件网） */
+export const OUTBOX_TYPE_AI_AGENT_RUN_COMPLETED = 'ai.agent.run.completed';

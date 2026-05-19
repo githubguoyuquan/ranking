@@ -1,0 +1,12 @@
+{
+  "$id": "https://ranking.platform/schemas/kafka/elasticsearch-crawled-url-sync-payload-v1.json",
+  "title": "ElasticsearchCrawledUrlSyncPayloadV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "action", "crawledUrlId"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "action": { "type": "string", "enum": ["upsert", "delete"] },
+    "crawledUrlId": { "type": "string", "pattern": "^[0-9]+$" }
+  }
+}

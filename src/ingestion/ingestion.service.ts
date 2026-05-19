@@ -8,6 +8,7 @@ import { ElasticService } from '../search/elastic.service';
 import { EmbeddingService } from '../search/embedding.service';
 import { DEFAULT_EMBEDDING_MODEL } from '../search/embedding.constants';
 import { elasticCrawledUrlSyncOutboxCreate } from '../search/elastic-crawled-url-outbox';
+import { OUTBOX_TYPE_CRAWL_URL_FETCHED } from '../outbox/outbox.constants';
 import {
   buildCrawlJobId,
   CRAWL_JOB_NAME,
@@ -15,6 +16,7 @@ import {
   type CrawlJobPayload,
   urlFingerprint,
 } from './crawl-job';
+import { buildCrawlUrlFetchedOutboxPayload } from './crawl-url-fetched-outbox-payload';
 import { clampCrawlTasksListTake } from './crawl-list-limits';
 import { AgentOrchestrationService } from '../agent-orchestration/agent-orchestration.service';
 import { CrawlHostThrottleService } from './crawl-host-throttle.service';
@@ -399,6 +401,23 @@ export class IngestionService {
               },
             });
             await this.enqueueCrawledUrlEsOutbox(tx, row);
+            if (process.env.KAFKA_MESH_CRAWL_EVENTS !== 'false') {
+              await tx.outboxEvent.create({
+                data: {
+                  type: OUTBOX_TYPE_CRAWL_URL_FETCHED,
+                  payload: buildCrawlUrlFetchedOutboxPayload({
+                    crawledUrlId: row.id,
+                    sourceId,
+                    url: u,
+                    status,
+                    contentHash: fetched.contentHash,
+                    pageTitle: fetched.pageTitle,
+                    duplicateOfId: sem.canonicalId,
+                    fetchedAt: now,
+                  }),
+                },
+              });
+            }
           });
         } else {
           fetchErrors += 1;

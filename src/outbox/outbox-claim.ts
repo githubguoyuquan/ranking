@@ -7,6 +7,7 @@ export type ClaimedOutboxRow = {
   payload: Prisma.JsonValue;
   createdAt: Date;
   publishedAt: Date | null;
+  kafkaPublishedAt: Date | null;
   leasedUntil: Date | null;
   attempts: number;
   lastError: string | null;
@@ -34,6 +35,31 @@ export async function claimOutboxBatchByType(
     SET "leasedUntil" = NOW() + (${leaseSeconds} * INTERVAL '1 second')
     FROM c
     WHERE o.id = c.id
-    RETURNING o.id, o.type, o.payload, o."createdAt", o."publishedAt", o."leasedUntil", o.attempts, o."lastError"
+    RETURNING o.id, o.type, o.payload, o."createdAt", o."publishedAt", o."kafkaPublishedAt", o."leasedUntil", o.attempts, o."lastError"
+  `;
+}
+
+/** 批量抢占任一 Kafka 路由类型且尚未 Kafka 发布的 Outbox 行 */
+export async function claimOutboxBatchForKafkaTypes(
+  prisma: PrismaService,
+  params: { types: string[]; limit: number; leaseSeconds: number },
+): Promise<ClaimedOutboxRow[]> {
+  const { types, limit, leaseSeconds } = params;
+  if (types.length === 0) return [];
+  return prisma.$queryRaw<ClaimedOutboxRow[]>`
+    WITH c AS (
+      SELECT id FROM "OutboxEvent"
+      WHERE "kafkaPublishedAt" IS NULL
+        AND type IN (${Prisma.join(types)})
+        AND ("leasedUntil" IS NULL OR "leasedUntil" < NOW())
+      ORDER BY id ASC
+      LIMIT ${limit}
+      FOR UPDATE SKIP LOCKED
+    )
+    UPDATE "OutboxEvent" AS o
+    SET "leasedUntil" = NOW() + (${leaseSeconds} * INTERVAL '1 second')
+    FROM c
+    WHERE o.id = c.id
+    RETURNING o.id, o.type, o.payload, o."createdAt", o."publishedAt", o."kafkaPublishedAt", o."leasedUntil", o.attempts, o."lastError"
   `;
 }

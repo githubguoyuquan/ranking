@@ -2,9 +2,11 @@ import 'dotenv/config';
 
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import { WorkerAppModule } from './worker-app.module';
+
+process.env.PROCESS_ROLE = 'crawl';
 
 async function bootstrap() {
+  const { WorkerAppModule } = await import('./worker-app.module');
   const logger = new Logger('CrawlWorker');
   const app = await NestFactory.createApplicationContext(WorkerAppModule, {
     logger: ['error', 'warn', 'log'],

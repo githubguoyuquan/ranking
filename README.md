@@ -29,6 +29,14 @@
    - ✅ **Playwright 爬取**：`CRAWL_USE_PLAYWRIGHT` 或 `Source.kind=http-playwright`；依赖 `playwright` + `npx playwright install chromium`  
    - ✅ **Elasticsearch 高亮**：实体与 `ranking_crawled_urls` 检索返回 `<em>` 高亮片段（管理台搜索页展示）
 
+## 微服务进程 / Kafka 事件网 / 多 AZ（已实现骨架）
+
+- **进程拆分**：`PROCESS_ROLE=api|worker|crawl|all`；`npm run start:platform-worker`、`start:crawl-worker`；见 `docs/architecture/SERVICE_BOUNDARIES.md`
+- **Kafka 全量路由**：7 类 Outbox 事件 + `kafkaPublishedAt` 与 ES/CH `publishedAt` 双轨；`GET /admin/kafka/events`；`docs/kafka/EVENT_CATALOG.md`
+- **Schema Registry**：`KAFKA_SCHEMA_REGISTRY_URL`（Redpanda `18081` / Confluent 兼容 REST）
+- **生产 Helm**：`deploy/helm/ranking/` 多 Deployment + PDB + topologySpread；`docs/ops/PRODUCTION.md`
+- **Dockerfile**：同镜像 `ranking-platform`，按 command 区分 API/Worker
+
 ## Phase C / D — 规模与合规（已实现骨架）
 
 **规模（Phase C）**

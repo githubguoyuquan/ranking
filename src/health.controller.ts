@@ -4,6 +4,7 @@ import type { Response } from 'express';
 import { RedisHealthService } from './cache/redis-health.service';
 import { KafkaEventSchemaService } from './kafka/kafka-event-schema.service';
 import { KafkaProducerService } from './kafka/kafka-producer.service';
+import { SchemaRegistryService } from './kafka/schema-registry.service';
 import { toPlainJson } from './lib/json';
 import { PrismaService } from './prisma/prisma.service';
 
@@ -14,6 +15,7 @@ export class HealthController {
     private readonly redisHealth: RedisHealthService,
     private readonly kafka: KafkaProducerService,
     private readonly kafkaSchemas: KafkaEventSchemaService,
+    private readonly schemaRegistry: SchemaRegistryService,
   ) {}
 
   @Get()
@@ -87,9 +89,13 @@ export class HealthController {
   /** 可选；未配置 `KAFKA_BROKERS` 时 `configured: false`。含已加载的 Kafka JSON Schema 路由摘要。 */
   @Get('kafka')
   async kafkaHealth() {
-    const ping = await this.kafka.ping();
+    const [ping, registry] = await Promise.all([
+      this.kafka.ping(),
+      this.schemaRegistry.ping(),
+    ]);
     return toPlainJson({
       ...ping,
+      schemaRegistry: registry,
       kafkaEvents: this.kafkaSchemas.describeLoaded(),
       schemaValidationSkipped: process.env.KAFKA_SKIP_SCHEMA_VALIDATION === 'true',
     });

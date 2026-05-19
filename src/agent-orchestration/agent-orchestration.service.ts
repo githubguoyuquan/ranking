@@ -26,6 +26,8 @@ import { SnapshotAnalyzeService } from '../agent/snapshot-analyze.service';
 import type { RankingPolicyJson } from '../domain/policy-json';
 import { toPlainJson } from '../lib/json';
 import { PrismaService } from '../prisma/prisma.service';
+import { OUTBOX_TYPE_AI_AGENT_RUN_COMPLETED } from '../outbox/outbox.constants';
+import { buildAiAgentRunCompletedOutboxPayload } from './ai-agent-run-outbox-payload';
 import { AgentRunService } from './agent-run.service';
 import {
   AI_AGENT_JOB_NAME,
@@ -178,10 +180,12 @@ export class AgentOrchestrationService {
     try {
       const output = await this.executeAgent(data.agent, data.input);
       await this.agentRuns.markCompleted(runId, output as Prisma.InputJsonValue);
+      await this.emitAgentRunKafkaOutbox(runId, data, 'completed');
       return toPlainJson({ ok: true, agent: data.agent, output }) as Record<string, unknown>;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       await this.agentRuns.markFailed(runId, msg);
+      await this.emitAgentRunKafkaOutbox(runId, data, 'failed');
       this.logger.warn(`agent ${data.agent} failed: ${msg}`);
       return { ok: false, agent: data.agent, error: msg };
     }
@@ -314,6 +318,30 @@ export class AgentOrchestrationService {
     return this.prisma.topicProposal.update({
       where: { id: proposalId },
       data: { status: 'rejected' },
+    });
+  }
+
+  private async emitAgentRunKafkaOutbox(
+    runId: bigint,
+    data: AiAgentJobPayload,
+    status: 'completed' | 'failed',
+  ): Promise<void> {
+    if (process.env.KAFKA_MESH_AI_AGENT_EVENTS === 'false') return;
+    const run = await this.prisma.agentRun.findUnique({ where: { id: runId } });
+    if (!run) return;
+    await this.prisma.outboxEvent.create({
+      data: {
+        type: OUTBOX_TYPE_AI_AGENT_RUN_COMPLETED,
+        payload: buildAiAgentRunCompletedOutboxPayload({
+          agentRunId: runId,
+          correlationId: data.correlationId,
+          agent: data.agent,
+          status,
+          snapshotId: run.snapshotId,
+          topicId: run.topicId,
+          finishedAt: new Date(),
+        }),
+      },
     });
   }
 

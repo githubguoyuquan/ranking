@@ -1,0 +1,48 @@
+{{- if .Values.platformWorker.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ranking.fullname" . }}-platform-worker
+  labels:
+    {{- include "ranking.labels" . | nindent 4 }}
+    app.kubernetes.io/component: platform-worker
+spec:
+  replicas: {{ .Values.platformWorker.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "ranking.labels" . | nindent 6 }}
+      app.kubernetes.io/component: platform-worker
+  template:
+    metadata:
+      labels:
+        {{- include "ranking.labels" . | nindent 8 }}
+        app.kubernetes.io/component: platform-worker
+    spec:
+      {{- if .Values.global.topologySpread.enabled }}
+      topologySpreadConstraints:
+        - maxSkew: {{ .Values.global.topologySpread.maxSkew }}
+          topologyKey: {{ .Values.global.topologySpread.topologyKey }}
+          whenUnsatisfiable: {{ .Values.global.topologySpread.whenUnsatisfiable }}
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/component: platform-worker
+      {{- end }}
+      containers:
+        - name: platform-worker
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["node", "dist/platform-worker.main.js"]
+          env:
+            - name: PROCESS_ROLE
+              value: {{ .Values.platformWorker.processRole | quote }}
+            - name: DATABASE_URL
+              value: {{ .Values.env.DATABASE_URL | quote }}
+            - name: REDIS_URL
+              value: {{ .Values.env.REDIS_URL | quote }}
+            - name: KAFKA_BROKERS
+              value: {{ .Values.env.KAFKA_BROKERS | quote }}
+            - name: KAFKA_SCHEMA_REGISTRY_URL
+              value: {{ .Values.env.KAFKA_SCHEMA_REGISTRY_URL | quote }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+{{- end }}

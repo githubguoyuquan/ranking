@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { runsOutboxSideEffectFlushers } from '../config/process-role';
 import { AiAuditModule } from '../ai-audit/ai-audit.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { ElasticCrawledUrlOutboxFlusherService } from './elastic-crawled-url-outbox-flusher.service';
@@ -16,8 +17,9 @@ import { SearchController } from './search.controller';
     EmbeddingService,
     ElasticService,
     RecommendationsService,
-    ElasticEntityOutboxFlusherService,
-    ElasticCrawledUrlOutboxFlusherService,
+    ...(runsOutboxSideEffectFlushers()
+      ? [ElasticEntityOutboxFlusherService, ElasticCrawledUrlOutboxFlusherService]
+      : []),
   ],
   exports: [ElasticService, EmbeddingService, RecommendationsService],
 })

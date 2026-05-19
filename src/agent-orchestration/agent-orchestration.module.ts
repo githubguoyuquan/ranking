@@ -1,5 +1,6 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
+import { runsAiAgentWorkers } from '../config/process-role';
 import { AgentModule } from '../agent/agent.module';
 import { SearchModule } from '../search/search.module';
 import { AgentOrchestrationController } from './agent-orchestration.controller';
@@ -22,7 +23,7 @@ import { TopicMergeAgent } from './agents/topic-merge.agent';
   providers: [
     AgentRunService,
     AgentOrchestrationService,
-    AiAgentProcessor,
+    ...(runsAiAgentWorkers() ? [AiAgentProcessor] : []),
     TopicDiscoveryAgent,
     TopicMergeAgent,
     FactCheckAgent,

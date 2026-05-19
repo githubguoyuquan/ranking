@@ -1,0 +1,11 @@
+{
+  "$id": "https://ranking.platform/schemas/kafka/clickhouse-ranking-snapshot-ingest-payload-v1.json",
+  "title": "ClickhouseRankingSnapshotIngestPayloadV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "snapshotId"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "snapshotId": { "type": "string", "pattern": "^[0-9]+$" }
+  }
+}

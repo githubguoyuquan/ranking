@@ -1,0 +1,12 @@
+{
+  "$id": "https://ranking.platform/schemas/kafka/elasticsearch-entity-sync-payload-v1.json",
+  "title": "ElasticsearchEntitySyncPayloadV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "action", "entityId"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "action": { "type": "string", "enum": ["upsert", "delete"] },
+    "entityId": { "type": "string", "pattern": "^[0-9]+$" }
+  }
+}

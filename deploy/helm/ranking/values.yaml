@@ -1,17 +1,48 @@
-replicaCount: 2
+global:
+  topologySpread:
+    enabled: false
+    maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: ScheduleAnyway
 
 image:
-  repository: ranking-api
+  repository: ranking-platform
   tag: "0.1.0"
   pullPolicy: IfNotPresent
 
-service:
-  port: 3000
+api:
+  enabled: true
+  replicaCount: 2
+  processRole: api
+  service:
+    port: 3000
+
+platformWorker:
+  enabled: true
+  replicaCount: 1
+  processRole: worker
+
+crawlWorker:
+  enabled: false
+  replicaCount: 1
+  processRole: crawl
+
+web:
+  enabled: false
+  replicaCount: 1
+  service:
+    port: 3001
+
+pdb:
+  enabled: true
+  minAvailable: 1
 
 env:
   DATABASE_URL: ""
   REDIS_URL: ""
   API_AUTH_REQUIRED: "true"
+  KAFKA_BROKERS: ""
+  KAFKA_SCHEMA_REGISTRY_URL: ""
 
 resources:
   requests:

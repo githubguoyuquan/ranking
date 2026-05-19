@@ -1,0 +1,33 @@
+{
+  "$id": "https://ranking.platform/schemas/kafka/crawl-url-fetched-payload-v1.json",
+  "title": "CrawlUrlFetchedPayloadV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "crawledUrlId",
+    "sourceId",
+    "url",
+    "status",
+    "contentHash",
+    "pageTitle",
+    "duplicateOfId",
+    "fetchedAt"
+  ],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "crawledUrlId": { "type": "string", "pattern": "^[0-9]+$" },
+    "sourceId": { "type": "string", "pattern": "^[0-9]+$" },
+    "url": { "type": "string", "minLength": 1 },
+    "status": { "type": "string", "minLength": 1 },
+    "contentHash": { "type": ["string", "null"] },
+    "pageTitle": { "type": ["string", "null"] },
+    "duplicateOfId": {
+      "oneOf": [
+        { "type": "string", "pattern": "^[0-9]+$" },
+        { "type": "null" }
+      ]
+    },
+    "fetchedAt": { "type": "string", "format": "date-time" }
+  }
+}

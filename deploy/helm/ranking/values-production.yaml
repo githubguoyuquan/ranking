@@ -1,0 +1,44 @@
+# 生产 / 多 AZ 参考值（按集群调整）
+global:
+  topologySpread:
+    enabled: true
+    maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: ScheduleAnyway
+
+api:
+  enabled: true
+  replicaCount: 3
+  processRole: api
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+
+platformWorker:
+  enabled: true
+  replicaCount: 2
+  processRole: worker
+
+crawlWorker:
+  enabled: true
+  replicaCount: 2
+  processRole: crawl
+
+web:
+  enabled: true
+  replicaCount: 2
+
+pdb:
+  enabled: true
+  minAvailable: 1
+
+env:
+  API_AUTH_REQUIRED: "true"
+  KAFKA_BROKERS: ""
+  KAFKA_SCHEMA_REGISTRY_URL: ""
+  DATABASE_URL: ""
+  REDIS_URL: ""

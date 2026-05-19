@@ -1,0 +1,36 @@
+{
+  "$id": "https://ranking.platform/schemas/kafka/ai-agent-run-completed-payload-v1.json",
+  "title": "AiAgentRunCompletedPayloadV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "agentRunId",
+    "correlationId",
+    "agent",
+    "status",
+    "snapshotId",
+    "topicId",
+    "finishedAt"
+  ],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "agentRunId": { "type": "string", "pattern": "^[0-9]+$" },
+    "correlationId": { "type": "string", "minLength": 1 },
+    "agent": { "type": "string", "minLength": 1 },
+    "status": { "type": "string", "enum": ["completed", "failed"] },
+    "snapshotId": {
+      "oneOf": [
+        { "type": "string", "pattern": "^[0-9]+$" },
+        { "type": "null" }
+      ]
+    },
+    "topicId": {
+      "oneOf": [
+        { "type": "string", "pattern": "^[0-9]+$" },
+        { "type": "null" }
+      ]
+    },
+    "finishedAt": { "type": "string", "format": "date-time" }
+  }
+}

@@ -18,7 +18,10 @@
 | 趋势分析 | 环比/同比/MA/异常 | 物化成功写入**快照级** `TrendAnalysis`（`entityId` 空）+ **`GET /v1/topics/:slug/trend-analyses`**；`scoring` 含 EWMA/斜率/波动分类 | 缺**独立周期作业**（回填/同比）、**异常阈值**与告警配置 |
 | 抓取：增量、断点、去重 | checkpoint、fingerprint | `CrawlCheckpoint`、`CrawledUrl.urlFingerprint`、`contentHash`、`pageTitle`；BullMQ 异步任务 | **非分布式**；无代理池/全球调度；无 **AI 语义去重** |
 | 向量语义 / 亿级 ES | Qdrant/Milvus + ES | ES 实体 + 爬取文档索引；无向量库 | 引入向量服务 + `embedding` 流水线 + 索引策略 |
-| Kafka 事件网 | 全链路事件 | Outbox → Kafka（快照完成等）；多类型 Outbox flush | 非完整事件溯源；无 Schema Registry |
+| Kafka 事件网 | 全链路事件 | **7 类** Outbox→Kafka + `kafkaPublishedAt` 与 Flusher 双轨；`GET /admin/kafka/events` | 消费方/CDC 仍在演进 |
+| Schema Registry | 中心化契约 | Redpanda SR + `KAFKA_SCHEMA_REGISTRY_URL` REST 注册 | 消息仍为 JSON 封套（非 Avro wire） |
+| 微服务拆分 | 多进程/多服务 | `PROCESS_ROLE` + `platform-worker` / `crawl-worker` + Helm 多 Deployment | 未拆独立仓库 |
+| 多 AZ 运维 | K8s 生产 | `values-production.yaml` PDB + topologySpread + `docs/ops/PRODUCTION.md` | 托管服务与 DR 演练待落地 |
 | AI Agent 体系 | 多 Agent | `POST /admin/snapshots/:id/analyze` + `AiAnalysis` | **单点分析**；缺 Topic Discovery / Merge / Dedup / FactCheck 等待办服务 |
 | 搜索与推荐 | 语义、时间、趋势检索 + 推荐 | 统一搜索 PG+ES、管理台高亮 | 缺 **向量检索**、缺 **推荐与相似排行** API |
 | 微服务 | DDD+拆服务 | **单体 Nest** | 按限界上下文拆分为独立服务（可选） |

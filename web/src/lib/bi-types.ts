@@ -9,6 +9,24 @@ export type BiOverview = {
     crawlTasksLast24h: number;
     aiAnalysesToday: number;
     rankingQueue: Record<string, number>;
+    scheduleEnabledSources?: number;
+    scheduleRuns24h?: number;
+    searchPrimary?: string;
+  };
+  crawlGlobal?: {
+    scheduler: {
+      enabled: boolean;
+      region: string | null;
+      enabledSources: number;
+      runsLast24h: number;
+    };
+    tasksByStatus: Record<string, number>;
+    sourcesByRegion: Array<{ region: string; count: number }>;
+  };
+  searchScale?: {
+    primary: string;
+    elasticsearch: Record<string, unknown>;
+    qdrantConfigured: boolean;
   };
   health: {
     postgresql: { ok: boolean };
@@ -20,6 +38,13 @@ export type BiOverview = {
   charts: {
     snapshotsByDay: Array<{ day: string; count: number }>;
     trendTypeMix: Array<{ trendType: string; count: number }>;
+    clickhouseTopicPopularity?: Array<{
+      day: string;
+      topic_id: number;
+      avg_value: number;
+      sample_count: number;
+    }>;
+    outboxPendingByType?: Array<{ type: string; count: number }>;
   };
   hotMovers: Array<{
     entityId: string;

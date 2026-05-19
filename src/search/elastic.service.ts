@@ -122,6 +122,68 @@ export class ElasticService implements OnModuleDestroy {
     return this.client !== null;
   }
 
+  private usesWriteAlias(): boolean {
+    return process.env.ELASTICSEARCH_USE_WRITE_ALIAS === 'true';
+  }
+
+  private refreshOnWrite(): boolean | 'wait_for' {
+    return process.env.ELASTICSEARCH_REFRESH_ON_WRITE === 'true';
+  }
+
+  /** 写入：`-write` 别名或物理索引 */
+  resolveWriteIndex(base: string): string {
+    return this.usesWriteAlias() ? `${base}-write` : base;
+  }
+
+  /** 检索：含 rollover 物理分片 */
+  resolveSearchIndex(base: string): string {
+    return this.usesWriteAlias() ? `${base}*` : base;
+  }
+
+  scaleHints(): Record<string, unknown> {
+    return {
+      useWriteAlias: this.usesWriteAlias(),
+      refreshOnWrite: this.refreshOnWrite() === true,
+      bulkBatchSize: Number(process.env.ELASTICSEARCH_BULK_BATCH_SIZE ?? '500') || 500,
+      indexShards: process.env.ELASTICSEARCH_INDEX_SHARDS?.trim() || '3',
+      indexReplicas: process.env.ELASTICSEARCH_INDEX_REPLICAS?.trim() || '1',
+      rolloverMaxDocs: process.env.ELASTICSEARCH_ROLLOVER_MAX_DOCS?.trim() || '50000000',
+      rolloverMaxAge: process.env.ELASTICSEARCH_ROLLOVER_MAX_AGE?.trim() || '30d',
+    };
+  }
+
+  /**
+   * 亿级索引模板：多分片、慢 refresh、rollover 别名条件（需 ILM/运维配合集群）。
+   */
+  async ensureBillionScaleTemplates(): Promise<unknown> {
+    if (!this.client) return { ok: false, detail: 'ELASTICSEARCH_NODE not set' };
+    const shards = Number(process.env.ELASTICSEARCH_INDEX_SHARDS ?? '3') || 3;
+    const replicas = Number(process.env.ELASTICSEARCH_INDEX_REPLICAS ?? '1') || 1;
+    const maxDocs = Number(process.env.ELASTICSEARCH_ROLLOVER_MAX_DOCS ?? '50000000') || 50_000_000;
+    const templates: Record<string, unknown> = {};
+    for (const pattern of [`${ELASTIC_INDEX_ENTITIES}*`, `${ELASTIC_INDEX_CRAWLED_URLS}*`]) {
+      const name = `ranking_${pattern.replace(/\*/g, '')}_template`;
+      await this.client.indices.putIndexTemplate({
+        name,
+        index_patterns: [pattern],
+        template: {
+          settings: {
+            number_of_shards: shards,
+            number_of_replicas: replicas,
+            refresh_interval: '30s',
+            'index.max_result_window': 10000,
+          },
+        },
+      });
+      templates[pattern] = { template: name, shards, replicas, maxDocs };
+    }
+    return {
+      ok: true,
+      templates,
+      hint: 'Enable ELASTICSEARCH_USE_WRITE_ALIAS=true and POST bootstrap-aliases before bulk ingest',
+    };
+  }
+
   async onModuleDestroy(): Promise<void> {
     await this.client?.close();
   }
@@ -241,10 +303,10 @@ export class ElasticService implements OnModuleDestroy {
     }
     try {
       await this.client.index({
-        index: ELASTIC_INDEX_ENTITIES,
+        index: this.resolveWriteIndex(ELASTIC_INDEX_ENTITIES),
         id: e.id.toString(),
         document: doc,
-        refresh: true,
+        ...(this.refreshOnWrite() ? { refresh: this.refreshOnWrite() } : {}),
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -259,9 +321,9 @@ export class ElasticService implements OnModuleDestroy {
     await this.ensureEntityIndex();
     try {
       await this.client.delete({
-        index: ELASTIC_INDEX_ENTITIES,
+        index: this.resolveWriteIndex(ELASTIC_INDEX_ENTITIES),
         id: id.toString(),
-        refresh: true,
+        ...(this.refreshOnWrite() ? { refresh: this.refreshOnWrite() } : {}),
       });
     } catch (e: unknown) {
       if (e instanceof errors.ResponseError && e.statusCode === 404) return;
@@ -274,9 +336,9 @@ export class ElasticService implements OnModuleDestroy {
     if (!this.client) return;
     try {
       await this.client.delete({
-        index: ELASTIC_INDEX_ENTITIES,
+        index: this.resolveWriteIndex(ELASTIC_INDEX_ENTITIES),
         id: id.toString(),
-        refresh: true,
+        ...(this.refreshOnWrite() ? { refresh: this.refreshOnWrite() } : {}),
       });
     } catch (e: unknown) {
       if (e instanceof errors.ResponseError && e.statusCode === 404) return;
@@ -323,25 +385,34 @@ export class ElasticService implements OnModuleDestroy {
       }
     }
 
-    const operations: object[] = [];
-    for (const e of entities) {
-      operations.push({
-        index: { _index: ELASTIC_INDEX_ENTITIES, _id: e.id.toString() },
+    const writeIndex = this.resolveWriteIndex(ELASTIC_INDEX_ENTITIES);
+    const batchSize = Number(process.env.ELASTICSEARCH_BULK_BATCH_SIZE ?? '500') || 500;
+    let indexed = 0;
+    for (let i = 0; i < entities.length; i += batchSize) {
+      const chunk = entities.slice(i, i + batchSize);
+      const operations: object[] = [];
+      for (const e of chunk) {
+        operations.push({
+          index: { _index: writeIndex, _id: e.id.toString() },
+        });
+        const doc: EntityEsDoc = { ...entityToEsDoc(e) };
+        const v = vectorsById.get(e.id.toString());
+        if (v) doc.embedding = v;
+        operations.push(doc);
+      }
+      const res = await this.client.bulk({
+        operations,
+        ...(this.refreshOnWrite() ? { refresh: this.refreshOnWrite() } : {}),
       });
-      const doc: EntityEsDoc = { ...entityToEsDoc(e) };
-      const v = vectorsById.get(e.id.toString());
-      if (v) doc.embedding = v;
-      operations.push(doc);
+      if (res.errors) {
+        const first = res.items.find((it) => 'index' in it && it.index?.error);
+        const errMsg = first && 'index' in first ? first.index?.error?.reason : 'bulk errors';
+        this.logger.error(`Elasticsearch bulk: ${errMsg}`);
+        throw new ServiceUnavailableException(`Elasticsearch bulk failed: ${errMsg}`);
+      }
+      indexed += chunk.length;
     }
-
-    const res = await this.client.bulk({ operations, refresh: true });
-    if (res.errors) {
-      const first = res.items.find((i) => 'index' in i && i.index?.error);
-      const errMsg = first && 'index' in first ? first.index?.error?.reason : 'bulk errors';
-      this.logger.error(`Elasticsearch bulk: ${errMsg}`);
-      throw new ServiceUnavailableException(`Elasticsearch bulk failed: ${errMsg}`);
-    }
-    return entities.length;
+    return indexed;
   }
 
   async searchEntities(
@@ -357,7 +428,7 @@ export class ElasticService implements OnModuleDestroy {
     let res;
     try {
       res = await this.client.search({
-        index: ELASTIC_INDEX_ENTITIES,
+        index: this.resolveSearchIndex(ELASTIC_INDEX_ENTITIES),
         query: {
           multi_match: {
             query: q,
@@ -457,7 +528,7 @@ export class ElasticService implements OnModuleDestroy {
     let res;
     try {
       res = await this.client.search({
-        index: ELASTIC_INDEX_ENTITIES,
+        index: this.resolveSearchIndex(ELASTIC_INDEX_ENTITIES),
         knn,
         size,
         _source: ['entityId', 'canonicalName', 'type'],
@@ -491,7 +562,7 @@ export class ElasticService implements OnModuleDestroy {
     await this.ensureEntityIndex();
     try {
       const g = await this.client.get({
-        index: ELASTIC_INDEX_ENTITIES,
+        index: this.resolveSearchIndex(ELASTIC_INDEX_ENTITIES),
         id: entityId.toString(),
         _source: ['embedding'],
       });
@@ -514,10 +585,10 @@ export class ElasticService implements OnModuleDestroy {
     }
     try {
       await this.client.index({
-        index: ELASTIC_INDEX_CRAWLED_URLS,
+        index: this.resolveWriteIndex(ELASTIC_INDEX_CRAWLED_URLS),
         id: r.id.toString(),
         document: crawledUrlToEsDoc(r),
-        refresh: true,
+        ...(this.refreshOnWrite() ? { refresh: this.refreshOnWrite() } : {}),
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -531,9 +602,9 @@ export class ElasticService implements OnModuleDestroy {
     await this.ensureCrawledUrlIndex();
     try {
       await this.client.delete({
-        index: ELASTIC_INDEX_CRAWLED_URLS,
+        index: this.resolveWriteIndex(ELASTIC_INDEX_CRAWLED_URLS),
         id: id.toString(),
-        refresh: true,
+        ...(this.refreshOnWrite() ? { refresh: this.refreshOnWrite() } : {}),
       });
     } catch (e: unknown) {
       if (e instanceof errors.ResponseError && e.statusCode === 404) return;
@@ -549,22 +620,31 @@ export class ElasticService implements OnModuleDestroy {
     const rows = await this.prisma.crawledUrl.findMany({ where: { status: 'fetched' } });
     if (rows.length === 0) return 0;
 
-    const operations: object[] = [];
-    for (const r of rows) {
-      operations.push({
-        index: { _index: ELASTIC_INDEX_CRAWLED_URLS, _id: r.id.toString() },
+    const writeIndex = this.resolveWriteIndex(ELASTIC_INDEX_CRAWLED_URLS);
+    const batchSize = Number(process.env.ELASTICSEARCH_BULK_BATCH_SIZE ?? '500') || 500;
+    let indexed = 0;
+    for (let i = 0; i < rows.length; i += batchSize) {
+      const chunk = rows.slice(i, i + batchSize);
+      const operations: object[] = [];
+      for (const r of chunk) {
+        operations.push({
+          index: { _index: writeIndex, _id: r.id.toString() },
+        });
+        operations.push(crawledUrlToEsDoc(r));
+      }
+      const res = await this.client.bulk({
+        operations,
+        ...(this.refreshOnWrite() ? { refresh: this.refreshOnWrite() } : {}),
       });
-      operations.push(crawledUrlToEsDoc(r));
+      if (res.errors) {
+        const first = res.items.find((it) => 'index' in it && it.index?.error);
+        const errMsg = first && 'index' in first ? first.index?.error?.reason : 'bulk errors';
+        this.logger.error(`Elasticsearch crawled-url bulk: ${errMsg}`);
+        throw new ServiceUnavailableException(`Elasticsearch bulk failed: ${errMsg}`);
+      }
+      indexed += chunk.length;
     }
-
-    const res = await this.client.bulk({ operations, refresh: true });
-    if (res.errors) {
-      const first = res.items.find((i) => 'index' in i && i.index?.error);
-      const errMsg = first && 'index' in first ? first.index?.error?.reason : 'bulk errors';
-      this.logger.error(`Elasticsearch crawled-url bulk: ${errMsg}`);
-      throw new ServiceUnavailableException(`Elasticsearch bulk failed: ${errMsg}`);
-    }
-    return rows.length;
+    return indexed;
   }
 
   async searchCrawledUrlDocs(
@@ -589,7 +669,7 @@ export class ElasticService implements OnModuleDestroy {
     let res;
     try {
       res = await this.client.search({
-        index: ELASTIC_INDEX_CRAWLED_URLS,
+        index: this.resolveSearchIndex(ELASTIC_INDEX_CRAWLED_URLS),
         query: {
           bool: {
             must: [

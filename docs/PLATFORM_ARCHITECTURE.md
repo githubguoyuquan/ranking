@@ -16,8 +16,8 @@
 | 历史时间线 | `RankingItemHistory` + 分析 | `RankingItemHistory` + **`GET /v1/entities/:id/rank-history`**；话题侧 **`GET /v1/topics/:slug/snapshots`** / **`trend-analyses`** | 缺 **CH↔PG 运营报表**、§13 曲线可视化与实时推送 |
 | 时间衰减 / 权重 | 指数/分段/可配置 | `src/domain/scoring.ts`：`timeWeight`、`blendedObservation`、`scoreEntity` | 算法已有；**物化排行时未保证全链路使用该套权重**（需接 EntityMetric/外部信号） |
 | 趋势分析 | 环比/同比/MA/异常 | 物化成功写入**快照级** `TrendAnalysis`（`entityId` 空）+ **`GET /v1/topics/:slug/trend-analyses`**；`scoring` 含 EWMA/斜率/波动分类 | 缺**独立周期作业**（回填/同比）、**异常阈值**与告警配置 |
-| 抓取：增量、断点、去重 | checkpoint、fingerprint | `CrawlCheckpoint`、`CrawledUrl.urlFingerprint`、`contentHash`、`pageTitle`；BullMQ 异步任务 | **非分布式**；无代理池/全球调度；无 **AI 语义去重** |
-| 向量语义 / 亿级 ES | Qdrant/Milvus + ES | ES 实体 + 爬取文档索引；无向量库 | 引入向量服务 + `embedding` 流水线 + 索引策略 |
+| 抓取：增量、断点、去重 | checkpoint、fingerprint | `CrawlCheckpoint`、`CrawledUrl`；**全球调度** `CrawlSchedulerService` + `region` 队列分片 | 多区域 K8s 生产落地、调度 SLA 与配额 |
+| 向量语义 / 亿级 ES | Qdrant/Milvus + ES | **Qdrant 主检索** + ES 写别名/rollover 模板/bulk 分批 | 托管 ES 集群 ILM、跨集群 DR、 crawl 语义 ANN 全量 |
 | Kafka 事件网 | 全链路事件 | **7 类** Outbox→Kafka + `kafkaPublishedAt` 与 Flusher 双轨；`GET /admin/kafka/events` | 消费方/CDC 仍在演进 |
 | Schema Registry | 中心化契约 | Redpanda SR + `KAFKA_SCHEMA_REGISTRY_URL` REST 注册 | 消息仍为 JSON 封套（非 Avro wire） |
 | 微服务拆分 | 多进程/多服务 | `PROCESS_ROLE` + `platform-worker` / `crawl-worker` + Helm 多 Deployment | 未拆独立仓库 |

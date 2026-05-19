@@ -31,6 +31,7 @@ import {
   findNearestByCosine,
 } from './crawl-semantic-dedup';
 import { pickCrawlProxyFromPool } from './crawl-proxy-pool';
+import { CrawlRegionalQueueService } from './crawl-regional-queue.service';
 import { crawlUrlViolation, fetchUrlForCrawl, normalizeCrawlProxyUrl } from './http-fetch';
 import { fetchUrlForCrawlPlaywright } from './http-fetch-playwright';
 
@@ -42,6 +43,7 @@ export class IngestionService {
     private readonly embedding: EmbeddingService,
     private readonly hostThrottle: CrawlHostThrottleService,
     @InjectQueue(CRAWL_QUEUE) private readonly crawlQueue: Queue<CrawlJobPayload>,
+    private readonly regionalQueue: CrawlRegionalQueueService,
     private readonly agentOrchestration: AgentOrchestrationService,
   ) {}
 
@@ -88,6 +90,12 @@ export class IngestionService {
     trustTier?: number;
     topicId?: bigint;
     httpProxyUrl?: string | null;
+    scheduleEnabled?: boolean;
+    scheduleIntervalMinutes?: number | null;
+    scheduleCron?: string | null;
+    scheduleTimezone?: string;
+    region?: string | null;
+    schedulePriority?: number;
   }) {
     return this.prisma.source.create({
       data: {
@@ -97,6 +105,59 @@ export class IngestionService {
         trustTier: data.trustTier ?? 3,
         topicId: data.topicId,
         httpProxyUrl: data.httpProxyUrl?.trim() || null,
+        scheduleEnabled: data.scheduleEnabled ?? false,
+        scheduleIntervalMinutes: data.scheduleIntervalMinutes ?? null,
+        scheduleCron: data.scheduleCron?.trim() || null,
+        scheduleTimezone: data.scheduleTimezone?.trim() || 'UTC',
+        region: data.region?.trim() || null,
+        schedulePriority: data.schedulePriority ?? 0,
+      },
+    });
+  }
+
+  async patchSource(
+    id: bigint,
+    data: {
+      name?: string;
+      baseUrl?: string;
+      kind?: string;
+      trustTier?: number;
+      httpProxyUrl?: string | null;
+      scheduleEnabled?: boolean;
+      scheduleIntervalMinutes?: number | null;
+      scheduleCron?: string | null;
+      scheduleTimezone?: string;
+      region?: string | null;
+      schedulePriority?: number;
+    },
+  ) {
+    await this.ensureSource(id);
+    return this.prisma.source.update({
+      where: { id },
+      data: {
+        ...(data.name !== undefined ? { name: data.name } : {}),
+        ...(data.baseUrl !== undefined ? { baseUrl: data.baseUrl } : {}),
+        ...(data.kind !== undefined ? { kind: data.kind } : {}),
+        ...(data.trustTier !== undefined ? { trustTier: data.trustTier } : {}),
+        ...(data.httpProxyUrl !== undefined
+          ? { httpProxyUrl: data.httpProxyUrl?.trim() || null }
+          : {}),
+        ...(data.scheduleEnabled !== undefined
+          ? { scheduleEnabled: data.scheduleEnabled }
+          : {}),
+        ...(data.scheduleIntervalMinutes !== undefined
+          ? { scheduleIntervalMinutes: data.scheduleIntervalMinutes }
+          : {}),
+        ...(data.scheduleCron !== undefined
+          ? { scheduleCron: data.scheduleCron?.trim() || null }
+          : {}),
+        ...(data.scheduleTimezone !== undefined
+          ? { scheduleTimezone: data.scheduleTimezone.trim() || 'UTC' }
+          : {}),
+        ...(data.region !== undefined ? { region: data.region?.trim() || null } : {}),
+        ...(data.schedulePriority !== undefined
+          ? { schedulePriority: data.schedulePriority }
+          : {}),
       },
     });
   }
@@ -182,8 +243,10 @@ export class IngestionService {
     crawlerName?: string;
     cursor?: string;
     seedUrls?: string[];
+    /** 覆盖队列区域（默认读信源 `region`） */
+    queueRegion?: string | null;
   }) {
-    await this.ensureSource(args.sourceId);
+    const source = await this.ensureSource(args.sourceId);
     const crawlerName =
       args.crawlerName ?? `source:${args.sourceId.toString()}`;
 
@@ -203,18 +266,30 @@ export class IngestionService {
       seedUrls: args.seedUrls,
     };
 
+    const queueRegion = args.queueRegion ?? source.region;
+
     if (args.async) {
       const jobId = buildCrawlJobId(payload);
+      const queue =
+        this.regionalQueue.resolveQueueName(queueRegion) ===
+        this.regionalQueue.resolveQueueName(null)
+          ? this.crawlQueue
+          : null;
       try {
-        await this.crawlQueue.add(CRAWL_JOB_NAME, payload, {
-          jobId,
-          attempts: 3,
-          backoff: { type: 'exponential', delay: 3000 },
-          removeOnComplete: 500,
-          removeOnFail: 1000,
-        });
+        if (queue) {
+          await queue.add(CRAWL_JOB_NAME, payload, {
+            jobId,
+            attempts: 3,
+            backoff: { type: 'exponential', delay: 3000 },
+            removeOnComplete: 500,
+            removeOnFail: 1000,
+          });
+        } else {
+          await this.regionalQueue.addJob(queueRegion, payload, { jobId });
+        }
       } catch {
-        const job = await this.crawlQueue.getJob(jobId);
+        const q = queue ?? this.regionalQueue.getQueue(queueRegion);
+        const job = await q.getJob(jobId);
         if (!job) throw new Error('Failed to enqueue crawl job');
       }
     } else {
@@ -500,6 +575,7 @@ export class IngestionService {
   private async ensureSource(id: bigint) {
     const s = await this.prisma.source.findUnique({ where: { id } });
     if (!s) throw new NotFoundException('Source not found');
+    return s;
   }
 
   /**

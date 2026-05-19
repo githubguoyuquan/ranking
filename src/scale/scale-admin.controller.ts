@@ -9,6 +9,7 @@ import { ElasticRolloverService } from './elastic-rollover.service';
 import { crawlProxyPoolStatus } from '../ingestion/crawl-proxy-pool';
 import { resolveCrawlQueueName } from '../ingestion/crawl-queue-name';
 import { QdrantService } from './qdrant.service';
+import { ElasticService } from '../search/elastic.service';
 
 class EnsurePartitionsDto {
   @IsOptional()
@@ -42,6 +43,7 @@ export class ScaleAdminController {
     private readonly partitions: PostgresPartitionService,
     private readonly rollover: ElasticRolloverService,
     private readonly qdrant: QdrantService,
+    private readonly elastic: ElasticService,
   ) {}
 
   @Get('status')
@@ -68,8 +70,16 @@ export class ScaleAdminController {
         proxyPool: crawlProxyPoolStatus(),
         semanticDedupCrossSource: process.env.CRAWL_SEMANTIC_DEDUP_CROSS_SOURCE === 'true',
         workerShard: process.env.CRAWL_QUEUE_SHARD?.trim() || null,
+        schedulerRegion: process.env.CRAWL_SCHEDULER_REGION?.trim() || null,
+        schedulerDisabled: process.env.CRAWL_SCHEDULER_DISABLED === 'true',
       },
+      elasticsearchScale: this.elastic.scaleHints(),
     });
+  }
+
+  @Post('elasticsearch/ensure-templates')
+  async ensureEsTemplates() {
+    return toPlainJson(await this.elastic.ensureBillionScaleTemplates());
   }
 
   @Post('postgres/ensure-partitions')

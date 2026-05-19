@@ -8,6 +8,8 @@ import { PrismaReadService } from '../scale/prisma-read.service';
 import { RankingsService } from '../rankings/rankings.service';
 import { RedisHealthService } from '../cache/redis-health.service';
 import { ElasticService } from '../search/elastic.service';
+import { QdrantSearchService } from '../search/qdrant-search.service';
+import { resolveSearchPrimary } from '../search/search-primary';
 
 @Injectable()
 export class BiService {
@@ -19,9 +21,20 @@ export class BiService {
     private readonly kafka: KafkaProducerService,
     private readonly redisHealth: RedisHealthService,
     private readonly elastic: ElasticService,
+    private readonly qdrant: QdrantSearchService,
   ) {}
 
-  async getOverview(): Promise<Record<string, unknown>> {
+  async getTopicTimeseries(days: number) {
+    const rows = await this.clickhouse.queryTopicPopularityTrend(days);
+    return { ok: this.clickhouse.isEnabled(), days, rows };
+  }
+
+  async getEntityRankSparkline(entityId: bigint, days: number) {
+    const rows = await this.clickhouse.queryEntityRankSparkline(entityId, days);
+    return { ok: this.clickhouse.isEnabled(), entityId: entityId.toString(), days, rows };
+  }
+
+  async getOverview(chartDays = 14): Promise<Record<string, unknown>> {
     const now = new Date();
     const dayStart = new Date(now);
     dayStart.setUTCHours(0, 0, 0, 0);
@@ -41,11 +54,17 @@ export class BiService {
       trendTypeRows,
       recentSnapshots,
       hotPayload,
+      crawlByStatus,
+      crawlByRegion,
+      outboxByType,
+      scheduleEnabledSources,
+      scheduleRuns24h,
       dbPing,
       redisPing,
       chPing,
       kafkaStatus,
       esHealth,
+      chTopicTrend,
     ] = await Promise.all([
       this.prisma.topic.count(),
       this.prisma.entity.count(),
@@ -104,16 +123,42 @@ export class BiService {
         },
       }),
       this.rankings.listHotTrends(undefined, 10),
+      this.prisma.crawlTask.groupBy({
+        by: ['status'],
+        where: { createdAt: { gte: since24h } },
+        _count: { id: true },
+      }),
+      this.prisma.$queryRaw<{ region: string | null; count: bigint }[]>`
+        SELECT COALESCE(region, 'global') AS region, COUNT(*)::bigint AS count
+        FROM "Source"
+        GROUP BY 1
+        ORDER BY count DESC
+      `,
+      this.prisma.$queryRaw<{ type: string; count: bigint }[]>`
+        SELECT type, COUNT(*)::bigint AS count
+        FROM "OutboxEvent"
+        WHERE "publishedAt" IS NULL
+        GROUP BY type
+        ORDER BY count DESC
+        LIMIT 20
+      `,
+      this.prisma.source.count({ where: { scheduleEnabled: true } }),
+      this.prisma.crawlScheduleRun.count({
+        where: { scheduledAt: { gte: since24h } },
+      }),
       this.prisma.$queryRaw<{ n: number }[]>(Prisma.sql`SELECT 1 AS n`),
       this.redisHealth.ping(),
       this.clickhouse.ping(),
       this.kafka.ping(),
       this.elastic.ping(),
+      this.clickhouse.queryTopicPopularityTrend(chartDays),
     ]);
 
     const rankingQueue = Object.fromEntries(
       rankingsByStatus.map((r) => [r.status, r._count.id]),
     );
+
+    const primarySearch = resolveSearchPrimary(this.qdrant, this.elastic);
 
     return toPlainJson({
       generatedAt: now.toISOString(),
@@ -126,6 +171,9 @@ export class BiService {
         crawlTasksLast24h: crawlTasksRecent,
         aiAnalysesToday,
         rankingQueue,
+        scheduleEnabledSources,
+        scheduleRuns24h,
+        searchPrimary: primarySearch,
       },
       health: {
         postgresql: { ok: dbPing[0]?.n === 1 },
@@ -134,6 +182,26 @@ export class BiService {
         kafka: kafkaStatus,
         elasticsearch: esHealth,
       },
+      crawlGlobal: {
+        scheduler: {
+          enabled: process.env.CRAWL_SCHEDULER_DISABLED !== 'true',
+          region: process.env.CRAWL_SCHEDULER_REGION?.trim() || null,
+          enabledSources: scheduleEnabledSources,
+          runsLast24h: scheduleRuns24h,
+        },
+        tasksByStatus: Object.fromEntries(
+          crawlByStatus.map((r) => [r.status, r._count.id]),
+        ),
+        sourcesByRegion: crawlByRegion.map((r) => ({
+          region: r.region ?? 'global',
+          count: Number(r.count),
+        })),
+      },
+      searchScale: {
+        primary: primarySearch,
+        elasticsearch: this.elastic.scaleHints(),
+        qdrantConfigured: this.qdrant.isEnabled(),
+      },
       charts: {
         snapshotsByDay: snapshotsByDay.map((r) => ({
           day: r.day instanceof Date ? r.day.toISOString().slice(0, 10) : String(r.day),
@@ -141,6 +209,11 @@ export class BiService {
         })),
         trendTypeMix: trendTypeRows.map((r) => ({
           trendType: r.trendType,
+          count: Number(r.count),
+        })),
+        clickhouseTopicPopularity: chTopicTrend,
+        outboxPendingByType: outboxByType.map((r) => ({
+          type: r.type,
           count: Number(r.count),
         })),
       },

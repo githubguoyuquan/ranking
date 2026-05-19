@@ -388,14 +388,43 @@ model Source {
   trustTier Int     @default(3)
   /// 可选 HTTP(S) 代理（覆盖全局 CRAWL_HTTP_PROXY）；如 http://host:3128
   httpProxyUrl String? @db.VarChar(2048)
+  /// 全球调度：启用后由 `CrawlSchedulerService` 按间隔/区域入队
+  scheduleEnabled          Boolean   @default(false)
+  /// 轮询间隔（分钟）；与 `scheduleCron` 二选一，优先 interval
+  scheduleIntervalMinutes  Int?
+  /// 标准 5 段 cron（UTC 或 scheduleTimezone）；如 0 star/6 star star star
+  scheduleCron             String?   @db.VarChar(64)
+  scheduleTimezone         String    @default("UTC") @db.VarChar(64)
+  /// 区域标签 → BullMQ crawl:region；空则默认 crawl 或 CRAWL_QUEUE_SHARD
+  region                   String?   @db.VarChar(64)
+  schedulePriority         Int       @default(0)
+  lastScheduledAt          DateTime?
 
   tenant     Tenant?      @relation(fields: [tenantId], references: [id], onDelete: SetNull)
   topic      Topic?       @relation(fields: [topicId], references: [id])
   urls       CrawledUrl[]
   crawlTasks CrawlTask[]
   topicProposals TopicProposal[]
+  scheduleRuns CrawlScheduleRun[]
 
   @@index([tenantId])
+  @@index([scheduleEnabled, region])
+}
+
+/// 全球调度审计（计划入队 / 跳过 / 失败）
+model CrawlScheduleRun {
+  id           BigInt   @id @default(autoincrement())
+  sourceId     BigInt
+  crawlTaskId  BigInt?
+  region       String?  @db.VarChar(64)
+  status       String   @db.VarChar(32)
+  detail       String?  @db.Text
+  scheduledAt  DateTime @default(now())
+
+  source Source @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@index([sourceId, scheduledAt])
+  @@index([scheduledAt])
 }
 
 model CrawlTask {

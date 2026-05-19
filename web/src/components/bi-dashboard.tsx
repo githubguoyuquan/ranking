@@ -109,6 +109,8 @@ export function BiDashboard() {
   const lineRef = useRef<HTMLDivElement>(null);
   const pieRef = useRef<HTMLDivElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
+  const chRef = useRef<HTMLDivElement>(null);
+  const outboxRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
     try {
@@ -158,6 +160,15 @@ export function BiDashboard() {
   const snapshotsByDay = data?.charts.snapshotsByDay ?? [];
   const trendMix = data?.charts.trendTypeMix ?? [];
   const hot = data?.hotMovers ?? [];
+  const chTopic = data?.charts.clickhouseTopicPopularity ?? [];
+  const outboxTypes = data?.charts.outboxPendingByType ?? [];
+  const chByDay = (() => {
+    const m = new Map<string, number>();
+    for (const r of chTopic) {
+      m.set(r.day, (m.get(r.day) ?? 0) + r.avg_value);
+    }
+    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  })();
 
   useEcharts(
     lineRef,
@@ -258,6 +269,62 @@ export function BiDashboard() {
     [hot],
   );
 
+  useEcharts(
+    chRef,
+    chByDay.length
+      ? {
+          backgroundColor: "transparent",
+          textStyle: { color: CHART_TEXT },
+          grid: { left: 48, right: 16, top: 28, bottom: 36 },
+          tooltip: { trigger: "axis" },
+          xAxis: {
+            type: "category",
+            data: chByDay.map((d) => d[0].slice(5)),
+            axisLine: { lineStyle: { color: CHART_GRID } },
+          },
+          yAxis: {
+            type: "value",
+            splitLine: { lineStyle: { color: CHART_GRID } },
+          },
+          series: [
+            {
+              type: "line",
+              smooth: true,
+              data: chByDay.map((d) => Math.round(d[1] * 100) / 100),
+              lineStyle: { color: "#22d3ee", width: 2 },
+            },
+          ],
+        }
+      : null,
+    [chByDay],
+  );
+
+  useEcharts(
+    outboxRef,
+    outboxTypes.length
+      ? {
+          backgroundColor: "transparent",
+          textStyle: { color: CHART_TEXT },
+          grid: { left: 120, right: 24, top: 16, bottom: 28 },
+          tooltip: { trigger: "axis" },
+          xAxis: { type: "value", splitLine: { lineStyle: { color: CHART_GRID } } },
+          yAxis: {
+            type: "category",
+            data: outboxTypes.map((o) => o.type).reverse(),
+            axisLabel: { fontSize: 9, width: 110, overflow: "truncate" },
+          },
+          series: [
+            {
+              type: "bar",
+              data: outboxTypes.map((o) => o.count).reverse(),
+              itemStyle: { color: "#f59e0b" },
+            },
+          ],
+        }
+      : null,
+    [outboxTypes],
+  );
+
   const q = data?.kpis.rankingQueue ?? {};
 
   return (
@@ -281,7 +348,7 @@ export function BiDashboard() {
               运营 BI 大屏
             </h1>
             <p className="mt-1 text-sm text-white/45">
-              聚合 KPI · 快照趋势 · 趋势标签 · 涨榜热点 · 依赖健康
+              全球爬虫 · 亿级检索 · ClickHouse 趋势 · Outbox · 依赖健康
               {data?.generatedAt ? (
                 <span className="ml-2 font-mono text-xs text-white/35">
                   数据 {new Date(data.generatedAt).toLocaleString("zh-CN")}
@@ -395,6 +462,22 @@ export function BiDashboard() {
                 sub={`queued ${q.queued ?? 0} · done ${q.completed ?? 0}`}
                 accent="amber"
               />
+              <KpiCard
+                label="调度信源"
+                value={data.kpis.scheduleEnabledSources ?? 0}
+                sub={`24h 调度 ${data.kpis.scheduleRuns24h ?? 0} 次`}
+                accent="cyan"
+              />
+              <KpiCard
+                label="主检索"
+                value={data.kpis.searchPrimary ?? "—"}
+                sub={
+                  data.searchScale?.elasticsearch?.useWriteAlias
+                    ? "ES 写别名"
+                    : "PG/ES/Qdrant"
+                }
+                accent="violet"
+              />
             </div>
 
             <div className="grid gap-4 lg:grid-cols-12">
@@ -415,6 +498,36 @@ export function BiDashboard() {
                   涨榜热点 Top10
                 </h2>
                 <div ref={barRef} className="h-[min(280px,32vh)] w-full min-h-[200px]" />
+              </section>
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-12">
+              <section className="rounded-xl border border-white/10 bg-black/35 p-3 lg:col-span-5">
+                <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-white/45">
+                  ClickHouse 话题热度
+                </h2>
+                <div ref={chRef} className="h-[min(240px,28vh)] w-full min-h-[180px]" />
+              </section>
+              <section className="rounded-xl border border-white/10 bg-black/35 p-3 lg:col-span-4">
+                <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-white/45">
+                  Outbox 待发布
+                </h2>
+                <div ref={outboxRef} className="h-[min(240px,28vh)] w-full min-h-[180px]" />
+              </section>
+              <section className="rounded-xl border border-white/10 bg-black/35 p-3 lg:col-span-3 text-sm text-white/60">
+                <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-white/45">
+                  全球爬虫
+                </h2>
+                <p>
+                  调度 {data.crawlGlobal?.scheduler.enabled ? "开启" : "关闭"}
+                </p>
+                <ul className="mt-2 space-y-1 text-xs">
+                  {(data.crawlGlobal?.sourcesByRegion ?? []).map((r) => (
+                    <li key={r.region}>
+                      {r.region}: {r.count}
+                    </li>
+                  ))}
+                </ul>
               </section>
             </div>
 

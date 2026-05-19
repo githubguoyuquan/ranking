@@ -31,3 +31,9 @@ export function runsOutboxSideEffectFlushers(): boolean {
   const r = processRole();
   return r === 'all' || r === 'worker';
 }
+
+/** 全球爬虫 cron 调度（API / platform-worker，不在 crawl-worker） */
+export function runsCrawlScheduler(): boolean {
+  const r = processRole();
+  return r === 'all' || r === 'api' || r === 'worker';
+}

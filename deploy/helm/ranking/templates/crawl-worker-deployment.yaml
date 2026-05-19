@@ -30,6 +30,10 @@ spec:
               value: {{ .Values.env.DATABASE_URL | quote }}
             - name: REDIS_URL
               value: {{ .Values.env.REDIS_URL | quote }}
+            {{- range $k, $v := .Values.crawlWorker.extraEnv }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
 {{- end }}

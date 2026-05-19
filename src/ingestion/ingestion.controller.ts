@@ -5,6 +5,7 @@ import {
   Get,
   NotFoundException,
   Param,
+  Patch,
   Post,
   Put,
   Query,
@@ -68,6 +69,85 @@ export class CreateSourceDto {
   @IsOptional()
   @IsString()
   topicId?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  scheduleEnabled?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Min(5)
+  @Max(10080)
+  scheduleIntervalMinutes?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  scheduleCron?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  region?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(-100)
+  @Max(100)
+  schedulePriority?: number;
+}
+
+export class PatchSourceDto {
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  baseUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  kind?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(5)
+  trustTier?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2048)
+  httpProxyUrl?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  scheduleEnabled?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Min(5)
+  @Max(10080)
+  scheduleIntervalMinutes?: number | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  scheduleCron?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  region?: string | null;
+
+  @IsOptional()
+  @IsInt()
+  @Min(-100)
+  @Max(100)
+  schedulePriority?: number;
 }
 
 export class CreateCrawlTaskDto {
@@ -144,6 +224,29 @@ export class IngestionController {
         trustTier: body.trustTier,
         topicId: body.topicId ? BigInt(body.topicId) : undefined,
         httpProxyUrl: body.httpProxyUrl?.trim() || null,
+        scheduleEnabled: body.scheduleEnabled,
+        scheduleIntervalMinutes: body.scheduleIntervalMinutes,
+        scheduleCron: body.scheduleCron,
+        region: body.region,
+        schedulePriority: body.schedulePriority,
+      }),
+    );
+  }
+
+  @Patch('sources/:sourceId')
+  async patchSource(@Param('sourceId') sourceId: string, @Body() body: PatchSourceDto) {
+    return toPlainJson(
+      await this.ingestion.patchSource(BigInt(sourceId), {
+        name: body.name,
+        baseUrl: body.baseUrl,
+        kind: body.kind,
+        trustTier: body.trustTier,
+        httpProxyUrl: body.httpProxyUrl,
+        scheduleEnabled: body.scheduleEnabled,
+        scheduleIntervalMinutes: body.scheduleIntervalMinutes,
+        scheduleCron: body.scheduleCron,
+        region: body.region,
+        schedulePriority: body.schedulePriority,
       }),
     );
   }

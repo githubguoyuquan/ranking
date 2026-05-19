@@ -26,6 +26,16 @@ crawlWorker:
   enabled: false
   replicaCount: 1
   processRole: crawl
+  # 区域队列 / 代理池（如 CRAWL_QUEUE_SHARD=ap-east）
+  extraEnv: {}
+
+# 多区域 crawl 副本（每项生成独立 Deployment）
+crawlWorkerRegions: []
+  # - name: eu-west
+  #   replicaCount: 2
+  #   extraEnv:
+  #     CRAWL_QUEUE_SHARD: eu-west
+  #     CRAWL_HTTP_PROXY: http://proxy-eu:3128
 
 web:
   enabled: false

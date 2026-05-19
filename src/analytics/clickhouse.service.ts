@@ -172,4 +172,58 @@ export class ClickhouseService implements OnModuleDestroy {
     }>;
     return { ok: true, snapshotId: snapshotId.toString(), rows };
   }
+
+  /** BI：按话题聚合近 N 日 popularity 均值（依赖 `metric_daily_topic` MV） */
+  async queryTopicPopularityTrend(days = 14): Promise<
+    Array<{ day: string; topic_id: number; avg_value: number; sample_count: number }>
+  > {
+    if (!this.client) return [];
+    const d = Math.min(Math.max(days, 1), 90);
+    const rs = await this.client.query({
+      query: `
+        SELECT
+          toString(day) AS day,
+          topic_id,
+          avg_value,
+          sample_count
+        FROM metric_daily_topic
+        WHERE metric_key = 'ranking.popularity_score'
+          AND day >= today() - {days:UInt32}
+        ORDER BY day ASC, topic_id ASC
+        LIMIT 5000
+      `,
+      query_params: { days: d },
+      format: 'JSONEachRow',
+    });
+    return (await rs.json()) as Array<{
+      day: string;
+      topic_id: number;
+      avg_value: number;
+      sample_count: number;
+    }>;
+  }
+
+  /** BI：实体榜位趋势（原始时序，近 N 日） */
+  async queryEntityRankSparkline(
+    entityId: bigint,
+    days = 30,
+  ): Promise<Array<{ ts: string; value: number }>> {
+    if (!this.client) return [];
+    const eid = Number(entityId);
+    const d = Math.min(Math.max(days, 1), 90);
+    const rs = await this.client.query({
+      query: `
+        SELECT toString(ts) AS ts, value
+        FROM metric_timeseries
+        WHERE entity_id = {eid:UInt64}
+          AND metric_key = 'ranking.rank'
+          AND ts >= now() - INTERVAL {days:UInt32} DAY
+        ORDER BY ts ASC
+        LIMIT 500
+      `,
+      query_params: { eid, days: d },
+      format: 'JSONEachRow',
+    });
+    return (await rs.json()) as Array<{ ts: string; value: number }>;
+  }
 }

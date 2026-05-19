@@ -1,0 +1,45 @@
+{{- range .Values.crawlWorkerRegions }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ranking.fullname" $ }}-crawl-{{ .name }}
+  labels:
+    {{- include "ranking.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: crawl-worker
+    ranking.io/crawl-region: {{ .name | quote }}
+spec:
+  replicas: {{ .replicaCount | default 1 }}
+  selector:
+    matchLabels:
+      {{- include "ranking.labels" $ | nindent 6 }}
+      app.kubernetes.io/component: crawl-worker
+      ranking.io/crawl-region: {{ .name | quote }}
+  template:
+    metadata:
+      labels:
+        {{- include "ranking.labels" $ | nindent 8 }}
+        app.kubernetes.io/component: crawl-worker
+        ranking.io/crawl-region: {{ .name | quote }}
+    spec:
+      containers:
+        - name: crawl-worker
+          image: "{{ $.Values.image.repository }}:{{ $.Values.image.tag }}"
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          command: ["node", "dist/crawl-worker.main.js"]
+          env:
+            - name: PROCESS_ROLE
+              value: {{ $.Values.crawlWorker.processRole | quote }}
+            - name: DATABASE_URL
+              value: {{ $.Values.env.DATABASE_URL | quote }}
+            - name: REDIS_URL
+              value: {{ $.Values.env.REDIS_URL | quote }}
+            - name: CRAWL_QUEUE_SHARD
+              value: {{ .name | quote }}
+            {{- range $k, $v := .extraEnv }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+          resources:
+            {{- toYaml $.Values.resources | nindent 12 }}
+{{- end }}

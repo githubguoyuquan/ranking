@@ -46,6 +46,7 @@ import {
 import { toPlainJson } from '../lib/json';
 import { elasticEntitySyncOutboxCreate } from '../search/elastic-entity-outbox';
 import { ElasticService } from '../search/elastic.service';
+import { QdrantSearchService } from '../search/qdrant-search.service';
 import { upsertEntityTopicStatsBatch } from '../domain/entity-topic-stats';
 import { parseRankingPolicyJson, type RankingPolicyJson } from '../domain/policy-json';
 import { mergePolicyWithTopicKind } from '../domain/topic-kind-policy';
@@ -115,6 +116,7 @@ export class RankingsService {
     private readonly snapshotAnalyze: SnapshotAnalyzeService,
     private readonly rankingCache: RankingCacheService,
     private readonly elastic: ElasticService,
+    private readonly qdrant: QdrantSearchService,
     private readonly realtime: RealtimePublisherService,
     @Optional() private readonly clickhouse?: ClickhouseService,
     @Optional() private readonly prismaRead?: PrismaReadService,
@@ -250,7 +252,7 @@ export class RankingsService {
     const now = new Date();
     const entities: Entity[] = [];
 
-    if (this.elastic.isEnabled()) {
+    if (this.elastic.isEnabled() || this.qdrant.isEnabled()) {
       await this.prisma.$transaction(async (tx) => {
         for (const def of entityDefs) {
           const entity = await tx.entity.create({

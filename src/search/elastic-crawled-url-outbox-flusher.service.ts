@@ -9,6 +9,7 @@ import { claimOutboxBatchByType } from '../outbox/outbox-claim';
 import { OUTBOX_TYPE_ELASTIC_CRAWLED_URL_SYNC } from '../outbox/outbox.constants';
 import { ElasticService } from './elastic.service';
 import type { ElasticCrawledUrlSyncPayload } from './elastic-crawled-url-sync-outbox-payload';
+import { QdrantSearchService } from './qdrant-search.service';
 
 const FLUSH_BATCH = 80;
 
@@ -20,6 +21,7 @@ export class ElasticCrawledUrlOutboxFlusherService implements OnModuleInit, OnMo
   constructor(
     private readonly prisma: PrismaService,
     private readonly elastic: ElasticService,
+    private readonly qdrant: QdrantSearchService,
   ) {}
 
   onModuleInit(): void {
@@ -40,7 +42,7 @@ export class ElasticCrawledUrlOutboxFlusherService implements OnModuleInit, OnMo
   }
 
   private async flush(): Promise<void> {
-    if (!this.elastic.isEnabled()) return;
+    if (!this.elastic.isEnabled() && !this.qdrant.isEnabled()) return;
 
     let claimed;
     try {
@@ -74,16 +76,32 @@ export class ElasticCrawledUrlOutboxFlusherService implements OnModuleInit, OnMo
       }
 
       try {
+        const bid = BigInt(cid);
         if (action === 'delete') {
-          await this.elastic.deleteCrawledUrlFromIndexForFlusher(BigInt(cid));
+          if (this.elastic.isEnabled()) {
+            await this.elastic.deleteCrawledUrlFromIndexForFlusher(bid);
+          }
+          if (this.qdrant.isEnabled()) {
+            await this.qdrant.deleteCrawledUrlFromIndex(bid);
+          }
         } else {
           const r = await this.prisma.crawledUrl.findUnique({
-            where: { id: BigInt(cid) },
+            where: { id: bid },
           });
           if (!r) {
-            await this.elastic.deleteCrawledUrlFromIndexForFlusher(BigInt(cid));
+            if (this.elastic.isEnabled()) {
+              await this.elastic.deleteCrawledUrlFromIndexForFlusher(bid);
+            }
+            if (this.qdrant.isEnabled()) {
+              await this.qdrant.deleteCrawledUrlFromIndex(bid);
+            }
           } else {
-            await this.elastic.upsertCrawledUrlFromRowForFlusher(r);
+            if (this.elastic.isEnabled()) {
+              await this.elastic.upsertCrawledUrlFromRowForFlusher(r);
+            }
+            if (this.qdrant.isEnabled()) {
+              await this.qdrant.upsertCrawledUrlFromRow(r);
+            }
           }
         }
 

@@ -9,6 +9,7 @@ import { claimOutboxBatchByType } from '../outbox/outbox-claim';
 import { OUTBOX_TYPE_ELASTIC_ENTITY_SYNC } from '../outbox/outbox.constants';
 import { ElasticService } from './elastic.service';
 import type { ElasticEntitySyncPayload } from './elastic-entity-sync-outbox-payload';
+import { QdrantSearchService } from './qdrant-search.service';
 
 const FLUSH_BATCH = 80;
 
@@ -20,6 +21,7 @@ export class ElasticEntityOutboxFlusherService implements OnModuleInit, OnModule
   constructor(
     private readonly prisma: PrismaService,
     private readonly elastic: ElasticService,
+    private readonly qdrant: QdrantSearchService,
   ) {}
 
   onModuleInit(): void {
@@ -40,7 +42,7 @@ export class ElasticEntityOutboxFlusherService implements OnModuleInit, OnModule
   }
 
   private async flush(): Promise<void> {
-    if (!this.elastic.isEnabled()) return;
+    if (!this.elastic.isEnabled() && !this.qdrant.isEnabled()) return;
 
     let claimed;
     try {
@@ -74,16 +76,32 @@ export class ElasticEntityOutboxFlusherService implements OnModuleInit, OnModule
       }
 
       try {
+        const bid = BigInt(eid);
         if (action === 'delete') {
-          await this.elastic.deleteEntityFromIndexForFlusher(BigInt(eid));
+          if (this.elastic.isEnabled()) {
+            await this.elastic.deleteEntityFromIndexForFlusher(bid);
+          }
+          if (this.qdrant.isEnabled()) {
+            await this.qdrant.deleteEntityFromIndex(bid);
+          }
         } else {
           const entity = await this.prisma.entity.findUnique({
-            where: { id: BigInt(eid) },
+            where: { id: bid },
           });
           if (!entity) {
-            await this.elastic.deleteEntityFromIndexForFlusher(BigInt(eid));
+            if (this.elastic.isEnabled()) {
+              await this.elastic.deleteEntityFromIndexForFlusher(bid);
+            }
+            if (this.qdrant.isEnabled()) {
+              await this.qdrant.deleteEntityFromIndex(bid);
+            }
           } else {
-            await this.elastic.upsertEntityFromRow(entity);
+            if (this.elastic.isEnabled()) {
+              await this.elastic.upsertEntityFromRow(entity);
+            }
+            if (this.qdrant.isEnabled()) {
+              await this.qdrant.upsertEntityFromRow(entity);
+            }
           }
         }
 

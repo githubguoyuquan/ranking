@@ -1,38 +1,29 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
+import { QdrantSearchService } from '../search/qdrant-search.service';
 
-/**
- * 可选 Qdrant 向量库（Phase C）；未配置 `QDRANT_URL` 时不连接。
- * 当前生产检索仍以 ES dense_vector + PG TopicEmbedding 为主。
- */
+/** 规模运维页探活；检索实现见 `QdrantSearchService` */
 @Injectable()
 export class QdrantService {
-  private readonly logger = new Logger(QdrantService.name);
-  private readonly url = process.env.QDRANT_URL?.trim() ?? '';
+  constructor(private readonly qdrant: QdrantSearchService) {}
 
   isEnabled(): boolean {
-    return this.url.length > 0;
+    return this.qdrant.isEnabled();
   }
 
   async ping(): Promise<{ ok: boolean; detail?: string }> {
-    if (!this.isEnabled()) {
-      return { ok: false, detail: 'QDRANT_URL not set' };
-    }
-    try {
-      const res = await fetch(`${this.url.replace(/\/$/, '')}/collections`);
-      return { ok: res.ok, detail: res.ok ? 'collections' : `HTTP ${res.status}` };
-    } catch (e) {
-      return {
-        ok: false,
-        detail: e instanceof Error ? e.message : String(e),
-      };
-    }
+    return this.qdrant.ping();
   }
 
   status(): Record<string, unknown> {
     return {
       enabled: this.isEnabled(),
-      url: this.isEnabled() ? this.url : null,
-      note: 'Use ES kNN or PG TopicEmbedding when Qdrant is disabled',
+      url: process.env.QDRANT_URL?.trim() || null,
+      collections: {
+        entities: process.env.QDRANT_COLLECTION_ENTITIES ?? 'ranking_entities',
+        crawledUrls:
+          process.env.QDRANT_COLLECTION_CRAWLED_URLS ?? 'ranking_crawled_urls',
+      },
+      searchPrimary: process.env.SEARCH_PRIMARY?.trim() || 'auto',
     };
   }
 }

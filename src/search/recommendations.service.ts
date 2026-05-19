@@ -10,6 +10,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { DEFAULT_EMBEDDING_MODEL, EMBEDDING_DIMS } from './embedding.constants';
 import { ElasticService, type EntitySearchHit } from './elastic.service';
 import { EmbeddingService } from './embedding.service';
+import { QdrantSearchService } from './qdrant-search.service';
+import { resolveSearchPrimary } from './search-primary';
 
 export type SimilarTopicHit = {
   topicId: string;
@@ -23,6 +25,7 @@ export class RecommendationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly elastic: ElasticService,
+    private readonly qdrant: QdrantSearchService,
     private readonly embedding: EmbeddingService,
   ) {}
 
@@ -150,9 +153,10 @@ export class RecommendationsService {
   }
 
   async similarEntities(entityId: bigint, limit: number): Promise<EntitySearchHit[]> {
-    if (!this.elastic.isEnabled()) {
+    const primary = resolveSearchPrimary(this.qdrant, this.elastic);
+    if (primary === 'postgresql') {
       throw new ServiceUnavailableException(
-        'Elasticsearch required for similar-entities (kNN)',
+        'similar-entities requires Qdrant or Elasticsearch',
       );
     }
     if (!this.embedding.isConfigured()) {
@@ -163,19 +167,26 @@ export class RecommendationsService {
     const entity = await this.prisma.entity.findUnique({ where: { id: entityId } });
     if (!entity) throw new NotFoundException('entity not found');
 
-    let vec = await this.elastic.fetchEntityEmbeddingFromIndex(entityId);
-    if (!vec) {
-      vec = await this.embedding.embedForEntity(entity.canonicalName, entity.aliases, {
-        source: AI_AUDIT_SOURCE_EMBEDDING_RECOMMEND,
-        operation: 'similar_entity_anchor',
-      });
-      await this.elastic.upsertEntityFromRow(entity);
-      vec = await this.elastic.fetchEntityEmbeddingFromIndex(entityId);
-    }
-    if (!vec) {
-      throw new ServiceUnavailableException('could not read entity vector from index');
+    const vec = await this.embedding.embedForEntity(entity.canonicalName, entity.aliases, {
+      source: AI_AUDIT_SOURCE_EMBEDDING_RECOMMEND,
+      operation: 'similar_entity_anchor',
+    });
+
+    if (primary === 'qdrant') {
+      if (!this.qdrant.isEnabled()) {
+        throw new ServiceUnavailableException('QDRANT_URL required for similar-entities');
+      }
+      await this.qdrant.upsertEntityFromRow(entity);
+      const cap = Math.min(Math.max(limit, 1), 50);
+      return this.qdrant.knnSimilarEntities(vec, entityId, cap);
     }
 
+    if (!this.elastic.isEnabled()) {
+      throw new ServiceUnavailableException(
+        'Elasticsearch required for similar-entities (kNN)',
+      );
+    }
+    await this.elastic.upsertEntityFromRow(entity);
     const cap = Math.min(Math.max(limit, 1), 50);
     return this.elastic.knnSimilarEntities(vec, entityId, cap);
   }

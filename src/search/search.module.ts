@@ -6,6 +6,7 @@ import { ElasticCrawledUrlOutboxFlusherService } from './elastic-crawled-url-out
 import { ElasticEntityOutboxFlusherService } from './elastic-entity-outbox-flusher.service';
 import { ElasticService } from './elastic.service';
 import { EmbeddingService } from './embedding.service';
+import { QdrantSearchService } from './qdrant-search.service';
 import { RecommendationsController } from './recommendations.controller';
 import { RecommendationsService } from './recommendations.service';
 import { SearchController } from './search.controller';
@@ -16,11 +17,17 @@ import { SearchController } from './search.controller';
   providers: [
     EmbeddingService,
     ElasticService,
+    QdrantSearchService,
     RecommendationsService,
     ...(runsOutboxSideEffectFlushers()
       ? [ElasticEntityOutboxFlusherService, ElasticCrawledUrlOutboxFlusherService]
       : []),
   ],
-  exports: [ElasticService, EmbeddingService, RecommendationsService],
+  exports: [
+    ElasticService,
+    QdrantSearchService,
+    EmbeddingService,
+    RecommendationsService,
+  ],
 })
 export class SearchModule {}

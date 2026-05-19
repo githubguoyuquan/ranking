@@ -38,6 +38,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { elasticEntitySyncOutboxCreate } from './elastic-entity-outbox';
 import { ElasticService } from './elastic.service';
 import { EmbeddingService } from './embedding.service';
+import { QdrantSearchService } from './qdrant-search.service';
+import { resolveSearchPrimary } from './search-primary';
 
 class SearchEntitiesQueryDto {
   @IsString()
@@ -53,13 +55,12 @@ class SearchEntitiesQueryDto {
   limit?: number;
 
   /**
-   * 默认 `es`（未配 `ELASTICSEARCH_NODE` 时 503，与历史一致）；
-   * `pg` 仅 PostgreSQL（canonicalName + aliases）；
-   * `auto` 有 ES 用 ES，否则 PG。
+   * 默认 `auto`（`SEARCH_PRIMARY`：Qdrant → ES → PG）；
+   * `qdrant` / `es` / `pg` 强制指定引擎。
    */
   @IsOptional()
-  @IsIn(['es', 'pg', 'auto'])
-  engine?: 'es' | 'pg' | 'auto';
+  @IsIn(['qdrant', 'es', 'pg', 'auto'])
+  engine?: 'qdrant' | 'es' | 'pg' | 'auto';
 
   /** `true` / `1`：对查询句做 embedding，走 ES kNN（需 OPENAI_API_KEY + ELASTICSEARCH_NODE） */
   @IsOptional()
@@ -108,10 +109,10 @@ class UnifiedSearchQueryDto {
   @Max(30)
   limit?: number;
 
-  /** 爬取结果：`auto` 在配置 ES 时走索引否则 PG；`es` / `pg` 强制 */
+  /** 爬取结果：`auto` 按 `SEARCH_PRIMARY`；`qdrant` / `es` / `pg` 强制 */
   @IsOptional()
-  @IsIn(['auto', 'es', 'pg'])
-  crawlIndex?: 'auto' | 'es' | 'pg';
+  @IsIn(['auto', 'qdrant', 'es', 'pg'])
+  crawlIndex?: 'auto' | 'qdrant' | 'es' | 'pg';
 
   /** 仅过滤爬取命中：数据源 ID */
   @IsOptional()
@@ -125,10 +126,10 @@ class UnifiedSearchQueryDto {
   @MaxLength(64)
   status?: string;
 
-  /** 实体：`auto` 有 ES 走索引否则 PG；`es` / `pg` 强制 */
+  /** 实体：`auto` 按 `SEARCH_PRIMARY`；`qdrant` / `es` / `pg` 强制 */
   @IsOptional()
-  @IsIn(['auto', 'es', 'pg'])
-  entityIndex?: 'auto' | 'es' | 'pg';
+  @IsIn(['auto', 'qdrant', 'es', 'pg'])
+  entityIndex?: 'auto' | 'qdrant' | 'es' | 'pg';
 
   /** 实体块走向量 kNN（需 OPENAI_API_KEY + ES；与 `entityIndex=pg` 互斥时以语义检索优先报错见响应 detail） */
   @IsOptional()
@@ -199,13 +200,31 @@ function parseOptionalSourceId(raw: string | undefined): bigint | undefined {
 export class SearchController {
   constructor(
     private readonly elastic: ElasticService,
+    private readonly qdrant: QdrantSearchService,
     private readonly prisma: PrismaService,
     private readonly embedding: EmbeddingService,
   ) {}
 
+  private searchIndexEnabled(): boolean {
+    return this.elastic.isEnabled() || this.qdrant.isEnabled();
+  }
+
+  private primaryEngine(): ReturnType<typeof resolveSearchPrimary> {
+    return resolveSearchPrimary(this.qdrant, this.elastic);
+  }
+
   @Get('v1/search/health')
   async searchHealth() {
-    return toPlainJson(await this.elastic.ping());
+    const [elastic, qdrant] = await Promise.all([
+      this.elastic.ping(),
+      this.qdrant.ping(),
+    ]);
+    return toPlainJson({
+      primary: this.primaryEngine(),
+      searchPrimaryEnv: process.env.SEARCH_PRIMARY?.trim() || 'auto',
+      elasticsearch: elastic,
+      qdrant,
+    });
   }
 
   /**
@@ -234,12 +253,19 @@ export class SearchController {
   async searchEntities(@Query() query: SearchEntitiesQueryDto) {
     const q = query.q.trim();
     const lim = query.limit ?? 20;
-    const engine = query.engine ?? 'es';
+    const engine =
+      query.engine === 'auto' || !query.engine
+        ? this.primaryEngine()
+        : query.engine === 'es'
+          ? 'elasticsearch'
+          : query.engine === 'qdrant'
+            ? 'qdrant'
+            : 'postgresql';
 
     if (query.semantic) {
-      if (!this.elastic.isEnabled()) {
+      if (engine === 'postgresql') {
         throw new BadRequestException(
-          'semantic search requires Elasticsearch (ELASTICSEARCH_NODE)',
+          'semantic search requires qdrant or elasticsearch (engine=pg not supported)',
         );
       }
       if (!this.embedding.isConfigured()) {
@@ -251,21 +277,37 @@ export class SearchController {
         source: AI_AUDIT_SOURCE_EMBEDDING_SEARCH,
         operation: 'v1_entity_semantic',
       });
-      const hits = await this.elastic.searchEntitiesByVector(vec, lim);
+      const hits =
+        engine === 'qdrant'
+          ? await this.qdrant.searchEntitiesByVector(vec, lim)
+          : await this.elastic.searchEntitiesByVector(vec, lim);
       return toPlainJson({
         query: q,
-        engine: 'elasticsearch',
+        engine,
         mode: 'vector',
         count: hits.length,
         hits,
       });
     }
 
-    if (engine === 'pg' || (engine === 'auto' && !this.elastic.isEnabled())) {
+    if (engine === 'postgresql') {
       const hits = await this.searchEntitiesPostgres(q, lim);
       return toPlainJson({
         query: q,
         engine: 'postgresql',
+        count: hits.length,
+        hits,
+      });
+    }
+
+    if (engine === 'qdrant') {
+      if (!this.qdrant.isEnabled()) {
+        throw new ServiceUnavailableException('Qdrant not configured (QDRANT_URL)');
+      }
+      const hits = await this.qdrant.searchEntities(q, lim);
+      return toPlainJson({
+        query: q,
+        engine: 'qdrant',
         count: hits.length,
         hits,
       });
@@ -328,13 +370,29 @@ export class SearchController {
    */
   @Get('v1/search/crawled-urls-es')
   async searchCrawledUrlsEs(@Query() query: SearchCrawledUrlsQueryDto) {
-    if (!this.elastic.isEnabled()) {
-      throw new ServiceUnavailableException('Elasticsearch not configured (ELASTICSEARCH_NODE)');
-    }
+    const primary = this.primaryEngine();
     const take = query.limit ?? 20;
     const sourceId = parseOptionalSourceId(query.sourceId);
     const status = query.status?.trim();
     const needle = query.q.trim();
+    if (primary === 'qdrant') {
+      if (!this.qdrant.isEnabled()) {
+        throw new ServiceUnavailableException('Qdrant not configured (QDRANT_URL)');
+      }
+      const hits = await this.qdrant.searchCrawledUrlDocs(needle, take, {
+        sourceId,
+        status: status || undefined,
+      });
+      return toPlainJson({
+        query: needle,
+        engine: 'qdrant',
+        count: hits.length,
+        hits,
+      });
+    }
+    if (!this.elastic.isEnabled()) {
+      throw new ServiceUnavailableException('Elasticsearch not configured (ELASTICSEARCH_NODE)');
+    }
     const hits = await this.elastic.searchCrawledUrlDocs(needle, take, {
       sourceId,
       status: status || undefined,
@@ -388,7 +446,7 @@ export class SearchController {
       data.aliases = body.aliases;
     }
 
-    if (this.elastic.isEnabled()) {
+    if (this.searchIndexEnabled()) {
       const e = await this.prisma.$transaction(async (tx) => {
         const created = await tx.entity.create({ data });
         await tx.outboxEvent.create({
@@ -420,7 +478,7 @@ export class SearchController {
       return toPlainJson(existing);
     }
 
-    if (this.elastic.isEnabled()) {
+    if (this.searchIndexEnabled()) {
       const e = await this.prisma.$transaction(async (tx) => {
         const updated = await tx.entity.update({ where: { id: bid }, data });
         await tx.outboxEvent.create({
@@ -439,7 +497,7 @@ export class SearchController {
   @RequireScopes('admin')
   async deleteEntity(@Param('id') id: string) {
     const bid = parseEntityIdParam(id);
-    if (this.elastic.isEnabled()) {
+    if (this.searchIndexEnabled()) {
       await this.prisma.$transaction(async (tx) => {
         await tx.outboxEvent.create({
           data: elasticEntitySyncOutboxCreate(bid, 'delete'),
@@ -452,18 +510,28 @@ export class SearchController {
     return toPlainJson({ ok: true });
   }
 
-  /** 从数据库全量灌实体索引（需 ES 已启动且配置 NODE） */
+  /** 全量灌实体检索索引（主引擎 Qdrant 或 ES，由配置决定） */
   @Post('admin/reindex-entities')
   async reindexEntities() {
+    const primary = this.primaryEngine();
+    if (primary === 'qdrant') {
+      const indexed = await this.qdrant.reindexAllEntitiesFromDb();
+      return toPlainJson({ ok: true, engine: 'qdrant', indexed });
+    }
     const indexed = await this.elastic.reindexAllEntitiesFromDb();
-    return toPlainJson({ ok: true, indexed });
+    return toPlainJson({ ok: true, engine: 'elasticsearch', indexed });
   }
 
-  /** 将 `status=fetched` 的 CrawledUrl 全量写入 `ranking_crawled_urls`（旁路或未走 Outbox 时修复） */
+  /** 全量灌爬取 URL 检索索引 */
   @Post('admin/reindex-crawl-docs')
   async reindexCrawlDocs() {
+    const primary = this.primaryEngine();
+    if (primary === 'qdrant') {
+      const indexed = await this.qdrant.reindexFetchedCrawlDocsFromDb();
+      return toPlainJson({ ok: true, engine: 'qdrant', indexed });
+    }
     const indexed = await this.elastic.reindexFetchedCrawlDocsFromDb();
-    return toPlainJson({ ok: true, indexed });
+    return toPlainJson({ ok: true, engine: 'elasticsearch', indexed });
   }
 
   private async searchEntitiesPostgres(
@@ -501,13 +569,22 @@ export class SearchController {
     }));
   }
 
+  private resolveIndexPref(
+    pref: 'auto' | 'qdrant' | 'es' | 'pg',
+  ): 'qdrant' | 'elasticsearch' | 'postgresql' {
+    if (pref === 'qdrant') return 'qdrant';
+    if (pref === 'es') return 'elasticsearch';
+    if (pref === 'pg') return 'postgresql';
+    return this.primaryEngine();
+  }
+
   private async unifiedEntitiesPart(
     q: string,
     lim: number,
-    entityPref: 'auto' | 'es' | 'pg',
+    entityPref: 'auto' | 'qdrant' | 'es' | 'pg',
     entitySemantic: boolean,
   ): Promise<{
-    source: 'elasticsearch' | 'postgresql' | 'off';
+    source: 'qdrant' | 'elasticsearch' | 'postgresql' | 'off';
     hits: Array<{
       entityId: string;
       score: number;
@@ -529,11 +606,12 @@ export class SearchController {
           vectorSearch: true,
         };
       }
-      if (!this.elastic.isEnabled()) {
+      const idx = this.resolveIndexPref(entityPref);
+      if (idx === 'postgresql') {
         return {
           source: 'off',
           hits: [],
-          detail: 'entitySemantic requires ELASTICSEARCH_NODE',
+          detail: 'entitySemantic requires qdrant or elasticsearch',
           vectorSearch: true,
         };
       }
@@ -542,23 +620,37 @@ export class SearchController {
           source: AI_AUDIT_SOURCE_EMBEDDING_SEARCH,
           operation: 'aggregate_entity_semantic',
         });
-        const hits = await this.elastic.searchEntitiesByVector(vec, lim);
-        return { source: 'elasticsearch', hits, vectorSearch: true };
+        const hits =
+          idx === 'qdrant'
+            ? await this.qdrant.searchEntitiesByVector(vec, lim)
+            : await this.elastic.searchEntitiesByVector(vec, lim);
+        return { source: idx, hits, vectorSearch: true };
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        return {
-          source: 'elasticsearch',
-          hits: [],
-          error: msg,
-          vectorSearch: true,
-        };
+        return { source: idx, hits: [], error: msg, vectorSearch: true };
       }
     }
 
-    const useEs =
-      entityPref === 'es' || (entityPref === 'auto' && this.elastic.isEnabled());
+    const idx = this.resolveIndexPref(entityPref);
 
-    if (useEs) {
+    if (idx === 'qdrant') {
+      if (!this.qdrant.isEnabled()) {
+        return {
+          source: 'off',
+          hits: [],
+          detail: 'QDRANT_URL not set (entityIndex=qdrant)',
+        };
+      }
+      try {
+        const hits = await this.qdrant.searchEntities(q, lim);
+        return { source: 'qdrant', hits };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return { source: 'qdrant', hits: [], error: msg };
+      }
+    }
+
+    if (idx === 'elasticsearch') {
       if (!this.elastic.isEnabled()) {
         return {
           source: 'off',
@@ -587,11 +679,11 @@ export class SearchController {
   private async unifiedCrawledPart(
     q: string,
     lim: number,
-    crawlPref: 'auto' | 'es' | 'pg',
+    crawlPref: 'auto' | 'qdrant' | 'es' | 'pg',
     sourceId?: bigint,
     status?: string,
   ): Promise<{
-    source: 'elasticsearch' | 'postgresql' | 'skipped' | 'off';
+    source: 'qdrant' | 'elasticsearch' | 'postgresql' | 'skipped' | 'off';
     hits: unknown[];
     note?: string;
     detail?: string;
@@ -605,9 +697,28 @@ export class SearchController {
       };
     }
 
-    const useEs =
-      crawlPref === 'es' || (crawlPref === 'auto' && this.elastic.isEnabled());
-    if (useEs) {
+    const idx = this.resolveIndexPref(crawlPref);
+    if (idx === 'qdrant') {
+      if (!this.qdrant.isEnabled()) {
+        return {
+          source: 'off',
+          hits: [],
+          detail: 'QDRANT_URL not set (crawlIndex=qdrant)',
+        };
+      }
+      try {
+        const hits = await this.qdrant.searchCrawledUrlDocs(q, lim, {
+          sourceId,
+          status: status || undefined,
+        });
+        return { source: 'qdrant', hits };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return { source: 'qdrant', hits: [], error: msg };
+      }
+    }
+
+    if (idx === 'elasticsearch') {
       if (!this.elastic.isEnabled()) {
         return {
           source: 'off',

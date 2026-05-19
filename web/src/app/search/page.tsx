@@ -344,7 +344,7 @@ function SearchPageInner() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
+    <div className="w-full max-w-none space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">搜索</h1>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -876,7 +876,7 @@ export default function SearchPage() {
   return (
     <Suspense
       fallback={
-        <div className="mx-auto max-w-3xl p-6 text-sm text-muted-foreground">
+        <div className="w-full max-w-none p-6 text-sm text-muted-foreground">
           加载搜索表单…
         </div>
       }

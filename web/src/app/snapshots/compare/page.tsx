@@ -208,7 +208,7 @@ function CompareSnapshotsInner() {
   const snapshots = data?.snapshots ?? [];
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
+    <div className="w-full max-w-none space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">快照对比</h1>
         <p className="mt-1 text-sm text-muted-foreground">

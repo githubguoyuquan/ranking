@@ -121,11 +121,19 @@
   * {
     @apply border-border outline-ring/50;
   }
-  body {
-    @apply bg-background text-foreground;
-  }
   html {
     @apply font-sans;
+    font-size: 17px;
+  }
+  body {
+    @apply bg-background text-base leading-relaxed text-foreground;
+  }
+}
+
+/* 管理台正文：占满主栏宽度，避免各页 max-w-* 留白 */
+@layer components {
+  #admin-main {
+    @apply w-full max-w-none;
   }
 }
 

@@ -672,4 +672,80 @@ export class ElasticService implements OnModuleDestroy {
     }
     return out;
   }
+
+  /** 索引统计（运维 / 滚动决策） */
+  async getIndexStats(): Promise<unknown> {
+    if (!this.client) return { ok: false, detail: 'ELASTICSEARCH_NODE not set' };
+    const indices = [ELASTIC_INDEX_ENTITIES, ELASTIC_INDEX_CRAWLED_URLS];
+    const stats = await this.client.indices.stats({ index: indices.join(',') });
+    return { ok: true, indices: stats.indices ?? {} };
+  }
+
+  private writeAliasName(baseIndex: string): string {
+    return `${baseIndex}-write`;
+  }
+
+  /**
+   * 对 `{index}-write` 别名执行 rollover（需先 `bootstrapWriteAliases`）。
+   * 未启用别名模式时返回说明性错误。
+   */
+  async rolloverWriteAlias(
+    baseIndex: string,
+    conditions?: { maxDocs?: number; maxAge?: string },
+  ): Promise<{ alias: string; ok: boolean; newIndex?: string; detail?: string }> {
+    if (!this.client) {
+      return { alias: baseIndex, ok: false, detail: 'ELASTICSEARCH_NODE not set' };
+    }
+    if (process.env.ELASTICSEARCH_USE_WRITE_ALIAS !== 'true') {
+      return {
+        alias: baseIndex,
+        ok: false,
+        detail: 'Set ELASTICSEARCH_USE_WRITE_ALIAS=true and POST /admin/scale/elasticsearch/bootstrap-aliases',
+      };
+    }
+    const alias = this.writeAliasName(baseIndex);
+    try {
+      const exists = await this.client.indices.existsAlias({ name: alias });
+      if (!exists) {
+        return { alias, ok: false, detail: `write alias ${alias} missing; bootstrap first` };
+      }
+      const res = await this.client.indices.rollover({
+        alias,
+        conditions: {
+          ...(conditions?.maxDocs ? { max_docs: conditions.maxDocs } : {}),
+          ...(conditions?.maxAge ? { max_age: conditions.maxAge } : {}),
+        },
+      });
+      return {
+        alias,
+        ok: Boolean(res.rolled_over),
+        newIndex: res.new_index,
+        detail: res.rolled_over ? 'rolled_over' : 'conditions not met',
+      };
+    } catch (e) {
+      return {
+        alias,
+        ok: false,
+        detail: e instanceof Error ? e.message : String(e),
+      };
+    }
+  }
+
+  /** 将现有物理索引挂为 `-write` 别名（`is_write_index`），供 rollover 使用 */
+  async bootstrapWriteAliases(): Promise<unknown> {
+    if (!this.client) return { ok: false, detail: 'ELASTICSEARCH_NODE not set' };
+    const results: Record<string, unknown> = {};
+    for (const base of [ELASTIC_INDEX_ENTITIES, ELASTIC_INDEX_CRAWLED_URLS]) {
+      if (base === ELASTIC_INDEX_ENTITIES) await this.ensureEntityIndex();
+      else await this.ensureCrawledUrlIndex();
+      const alias = this.writeAliasName(base);
+      await this.client.indices.putAlias({
+        index: base,
+        name: alias,
+        is_write_index: true,
+      });
+      results[base] = { alias, physical: base, bootstrapped: true };
+    }
+    return { ok: true, results };
+  }
 }

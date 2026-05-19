@@ -28,6 +28,24 @@
    - ✅ **Playwright 爬取**：`CRAWL_USE_PLAYWRIGHT` 或 `Source.kind=http-playwright`；依赖 `playwright` + `npx playwright install chromium`  
    - ✅ **Elasticsearch 高亮**：实体与 `ranking_crawled_urls` 检索返回 `<em>` 高亮片段（管理台搜索页展示）
 
+## Phase C / D — 规模与合规（已实现骨架）
+
+**规模（Phase C）**
+
+- `DATABASE_READ_URL`：只读副本；`rank-history` / `trends/hot` 走 `PrismaReadService`
+- `GET /admin/scale/status`；`POST /admin/scale/postgres/ensure-partitions`；`POST /admin/scale/elasticsearch/bootstrap-aliases` / `rollover-*`
+- `CRAWL_PROXY_POOL`、`CRAWL_QUEUE_SHARD`、`CRAWL_SEMANTIC_DEDUP_CROSS_SOURCE`
+- 管理台 **`/scale`**
+
+**合规（Phase D）**
+
+- `Tenant` / `ApiKey`（`X-API-Key` 或 `Authorization: Bearer`）；`API_AUTH_REQUIRED` / `API_ADMIN_OPEN`
+- `Entity.piiLevel`（`NONE` | `LOW` | `HIGH`）；导出时对 HIGH 脱敏（非 admin scope）
+- `GET /admin/compliance/snapshots/:id/export?format=json|csv`；`ComplianceAuditEvent`
+- 管理台 **`/compliance`**
+
+迁移：`npx prisma migrate deploy`（含 `20260519120000_phase_cd_scale_compliance`）。
+
 ## Priority （后续投入）
 
 | 优先级 | 方向 | 说明 |

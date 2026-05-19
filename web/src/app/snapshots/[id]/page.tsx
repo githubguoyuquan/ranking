@@ -108,7 +108,7 @@ export default async function SnapshotPage({
   const id = rawId?.trim() ?? "";
   if (!isDecimalBigIntIdString(id)) {
     return (
-      <div className="mx-auto max-w-3xl space-y-4">
+      <div className="w-full max-w-none space-y-4">
         <p className="text-destructive">
           snapshot id 须为十进制数字（至多 {DECIMAL_BIGINT_ID_MAX_DIGITS}{" "}
           位），与后端 <code className="rounded bg-muted px-1 text-xs">BigInt</code>{" "}
@@ -160,7 +160,7 @@ export default async function SnapshotPage({
   if (res.status === 404) notFound();
   if (!res.ok) {
     return (
-      <div className="mx-auto max-w-3xl">
+      <div className="w-full max-w-none">
         <p className="text-destructive">
           加载失败 HTTP {res.status}，请确认 API 与 snapshot id。
         </p>
@@ -225,7 +225,7 @@ export default async function SnapshotPage({
       : null;
 
   return (
-    <div className="mx-auto max-w-4xl space-y-8">
+    <div className="w-full max-w-none space-y-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>

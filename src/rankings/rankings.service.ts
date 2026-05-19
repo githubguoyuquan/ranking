@@ -11,6 +11,7 @@ import {
   TrendType,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { PrismaReadService } from '../scale/prisma-read.service';
 import { RealtimePublisherService } from '../realtime/realtime-publisher.service';
 import {
   aiConfidence,
@@ -109,7 +110,13 @@ export class RankingsService {
     private readonly elastic: ElasticService,
     private readonly realtime: RealtimePublisherService,
     @Optional() private readonly clickhouse?: ClickhouseService,
+    @Optional() private readonly prismaRead?: PrismaReadService,
   ) {}
+
+  /** 读多路径优先只读副本（`DATABASE_READ_URL`） */
+  private get readPrisma(): PrismaService | PrismaReadService {
+    return this.prismaRead ?? this.prisma;
+  }
 
   private async emitSnapshotReadyEvent(
     snapshot: TopicRankSnapshot,
@@ -167,6 +174,12 @@ export class RankingsService {
   }
 
   async seedDemo(slug = 'global-female-singers') {
+    const defaultTenant = await this.prisma.tenant.upsert({
+      where: { slug: 'default' },
+      create: { slug: 'default', name: 'Default tenant' },
+      update: {},
+    });
+
     const topic = await this.prisma.topic.upsert({
       where: { slug },
       update: { title: 'Global female singers (demo)' },
@@ -175,6 +188,7 @@ export class RankingsService {
         title: 'Global female singers (demo)',
         kind: 'SEMI_OBJECTIVE',
         locale: 'en',
+        tenantId: defaultTenant.id,
       },
     });
 
@@ -236,6 +250,7 @@ export class RankingsService {
             data: {
               type: 'PERSON',
               canonicalName: def.name,
+              tenantId: defaultTenant.id,
             },
           });
           entities.push(entity);
@@ -262,6 +277,7 @@ export class RankingsService {
           data: {
             type: 'PERSON',
             canonicalName: def.name,
+            tenantId: defaultTenant.id,
           },
         });
         entities.push(entity);
@@ -1784,7 +1800,7 @@ export class RankingsService {
   async listHotTrends(timeWindow?: TimeWindow, limit = 15) {
     const take = Math.min(Math.max(limit, 1), 50);
     const scan = 120;
-    const rows = await this.prisma.trendAnalysis.findMany({
+    const rows = await this.readPrisma.trendAnalysis.findMany({
       where: {
         entityId: null,
         ...(timeWindow ? { window: timeWindow } : {}),
@@ -1804,7 +1820,7 @@ export class RankingsService {
     const topics =
       topicIds.length === 0
         ? []
-        : await this.prisma.topic.findMany({
+        : await this.readPrisma.topic.findMany({
             where: { id: { in: topicIds } },
             select: { id: true, slug: true, title: true },
           });
@@ -1893,7 +1909,7 @@ export class RankingsService {
     if (!entity) throw new NotFoundException('entity not found');
 
     const take = Math.min(Math.max(limit, 1), 500);
-    const rowsDesc = await this.prisma.rankingItemHistory.findMany({
+    const rowsDesc = await this.readPrisma.rankingItemHistory.findMany({
       where: {
         entityId,
         topicId: topic.id,

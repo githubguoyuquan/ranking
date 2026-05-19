@@ -1,6 +1,7 @@
 import { createHash } from 'crypto';
+import { resolveCrawlQueueName } from './crawl-queue-name';
 
-export const CRAWL_QUEUE = 'crawl';
+export const CRAWL_QUEUE = resolveCrawlQueueName();
 export const CRAWL_JOB_NAME = 'execute';
 
 export type CrawlJobPayload = {

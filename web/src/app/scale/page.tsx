@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 
 import { AdminFooterNav } from "@/components/admin-footer-nav";
+import { AdminPage } from "@/components/admin-page";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { apiUrl } from "@/lib/api";
@@ -48,12 +49,10 @@ export default function ScalePage() {
   }, []);
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6 p-6">
-      <h1 className="text-2xl font-semibold">规模与运维</h1>
-      <p className="text-sm text-muted-foreground">
-        Phase C：只读副本、PG 月分区、ES 写别名与 rollover、爬虫代理池与队列分片。
-      </p>
-
+    <AdminPage
+      title="规模与运维"
+      description="只读副本、PG 月分区、Elasticsearch 写别名与 rollover、爬虫代理池与队列分片。"
+    >
       <Card>
         <CardHeader>
           <CardTitle className="text-base">操作</CardTitle>
@@ -78,7 +77,7 @@ export default function ScalePage() {
         </pre>
       ) : null}
 
-      <AdminFooterNav />
-    </div>
+      <AdminFooterNav className="border-t border-border pt-6" />
+    </AdminPage>
   );
 }

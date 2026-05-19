@@ -63,6 +63,12 @@ export function AdminFooterNav({
       <Link href={ADMIN_HREF.seed} className={linkCls}>
         演示数据
       </Link>
+      <Link href={ADMIN_HREF.compliance} className={linkCls}>
+        合规
+      </Link>
+      <Link href={ADMIN_HREF.scale} className={linkCls}>
+        规模
+      </Link>
       <CopyAdminPageUrlButton
         path={ADMIN_HREF.home}
         idleLabel="复制概览"

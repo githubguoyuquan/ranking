@@ -320,14 +320,14 @@ sequenceDiagram
 
 ### Phase C — 规模
 
-1. PG 分区、只读副本、ES 索引滚动。  
-2. 向量库 + 语义去重 + 相似话题。  
-3. 爬虫分布式与代理池。  
+1. PG 分区、只读副本、ES 索引滚动（✅ 骨架：`DATABASE_READ_URL` + `PrismaReadService`；`POST /admin/scale/postgres/ensure-partitions`；`ELASTICSEARCH_USE_WRITE_ALIAS` + rollover/bootstrap API）。  
+2. 向量库 + 语义去重 + 相似话题（✅ ES/PG 向量与 `TopicEmbedding`；✅ **`CRAWL_SEMANTIC_DEDUP_CROSS_SOURCE`** 跨信源 PG 比对）。  
+3. 爬虫分布式与代理池（✅ **`CRAWL_PROXY_POOL`** 轮询；✅ **`CRAWL_QUEUE_SHARD`** 队列分片；多 `crawl-worker` 进程）。  
 
 ### Phase D — 商业化可靠性与合规
 
-1. 鉴权、多租户、PII 分类。  
-2. 法务可解释性：**`RankingItem.scoreBreakdown`（JSON）+ 物化写入的 `ScoreModel` / `ScoreBreakdown` 行**；导出与审计日志（进行中）。  
+1. 鉴权、多租户、PII 分类（✅ `Tenant` / `ApiKey` / 全局 `ApiKeyGuard`；`Entity.piiLevel`；`API_AUTH_REQUIRED`）。  
+2. 法务可解释性（✅ **`GET /admin/compliance/snapshots/:id/export`** JSON/CSV；`ComplianceAuditEvent`；既有 `score-breakdowns` + 物化 `ScoreModel` / `ScoreBreakdown`）。  
 
 ---
 

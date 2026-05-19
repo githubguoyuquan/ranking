@@ -9,13 +9,16 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import { Prisma } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
+  IsEnum,
   IsIn,
   IsInt,
   IsOptional,
@@ -25,6 +28,9 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
+import { PiiLevel } from '@prisma/client';
+import { RequireScopes } from '../compliance/api-key.guard';
+import { getAuthFromRequest } from '../compliance/request-auth';
 import { AI_AUDIT_SOURCE_EMBEDDING_SEARCH } from '../ai-audit/ai-audit.constants';
 import { toPlainJson } from '../lib/json';
 import { PrismaService } from '../prisma/prisma.service';
@@ -147,6 +153,10 @@ export class CreateEntityAdminDto {
   @IsArray()
   @IsString({ each: true })
   aliases?: string[];
+
+  @IsOptional()
+  @IsEnum(PiiLevel)
+  piiLevel?: PiiLevel;
 }
 
 export class PatchEntityAdminDto {
@@ -161,6 +171,10 @@ export class PatchEntityAdminDto {
   @IsArray()
   @IsString({ each: true })
   aliases?: string[];
+
+  @IsOptional()
+  @IsEnum(PiiLevel)
+  piiLevel?: PiiLevel;
 }
 
 function parseEntityIdParam(id: string): bigint {
@@ -338,6 +352,7 @@ export class SearchController {
    * **OpenAPI 3** 手写片段：`docs/openapi/admin-entities.yaml`
    */
   @Get('admin/entities')
+  @RequireScopes('admin')
   async listEntities(@Query('q') q?: string, @Query('limit') limitRaw?: string) {
     const take = Math.min(Math.max(Number(limitRaw) || 40, 1), 100);
     const needle = q?.trim();
@@ -353,10 +368,14 @@ export class SearchController {
 
   /** 创建实体；启用 ES 时与 Outbox 同事务，提交后由 Flusher 异步写索引 */
   @Post('admin/entities')
-  async createEntity(@Body() body: CreateEntityAdminDto) {
+  @RequireScopes('admin')
+  async createEntity(@Body() body: CreateEntityAdminDto, @Req() req: Request) {
+    const auth = getAuthFromRequest(req);
     const data: Prisma.EntityCreateInput = {
       type: body.type?.trim() || 'PERSON',
       canonicalName: body.canonicalName.trim(),
+      ...(body.piiLevel ? { piiLevel: body.piiLevel } : {}),
+      ...(auth?.tenantId ? { tenant: { connect: { id: auth.tenantId } } } : {}),
     };
     if (body.aliases !== undefined && body.aliases.length > 0) {
       data.aliases = body.aliases;
@@ -378,6 +397,7 @@ export class SearchController {
   }
 
   @Patch('admin/entities/:id')
+  @RequireScopes('admin')
   async patchEntity(@Param('id') id: string, @Body() body: PatchEntityAdminDto) {
     const bid = parseEntityIdParam(id);
     const existing = await this.prisma.entity.findUnique({ where: { id: bid } });
@@ -388,6 +408,7 @@ export class SearchController {
     if (body.aliases !== undefined) {
       data.aliases = body.aliases.length === 0 ? Prisma.JsonNull : body.aliases;
     }
+    if (body.piiLevel !== undefined) data.piiLevel = body.piiLevel;
     if (Object.keys(data).length === 0) {
       return toPlainJson(existing);
     }
@@ -408,6 +429,7 @@ export class SearchController {
   }
 
   @Delete('admin/entities/:id')
+  @RequireScopes('admin')
   async deleteEntity(@Param('id') id: string) {
     const bid = parseEntityIdParam(id);
     if (this.elastic.isEnabled()) {

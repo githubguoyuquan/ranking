@@ -7,6 +7,7 @@ import {
   resolveKafkaTopicForOutboxType,
 } from '../kafka/event-registry';
 import { claimOutboxBatchByType } from './outbox-claim';
+import { normalizeRankingSnapshotCompletedOutboxPayload } from '../rankings/ranking-snapshot-completed-outbox-payload';
 import { OUTBOX_TYPE_RANKING_SNAPSHOT_COMPLETED } from './outbox.constants';
 
 const FLUSH_BATCH = 80;
@@ -67,9 +68,10 @@ export class OutboxPublisherService implements OnModuleInit, OnModuleDestroy {
     }
 
     for (const row of claimed) {
+      const payload = await this.payloadForKafkaPublish(row.type, row.payload);
       const v = this.kafkaEventSchema.validateBeforePublish({
         type: row.type,
-        payload: row.payload,
+        payload,
         id: row.id,
         createdAt: row.createdAt,
       });
@@ -88,7 +90,7 @@ export class OutboxPublisherService implements OnModuleInit, OnModuleDestroy {
 
       const envelope = buildKafkaEnvelopeV1({
         type: row.type,
-        payload: row.payload,
+        payload,
         outboxId: row.id,
         createdAt: row.createdAt,
       });
@@ -109,10 +111,10 @@ export class OutboxPublisherService implements OnModuleInit, OnModuleDestroy {
 
       const key =
         row.type === OUTBOX_TYPE_RANKING_SNAPSHOT_COMPLETED &&
-        typeof row.payload === 'object' &&
-        row.payload !== null &&
-        'snapshotId' in row.payload
-          ? String((row.payload as { snapshotId?: string }).snapshotId ?? row.id)
+        typeof payload === 'object' &&
+        payload !== null &&
+        'snapshotId' in payload
+          ? String((payload as { snapshotId?: string }).snapshotId ?? row.id)
           : row.id.toString();
 
       try {
@@ -157,5 +159,40 @@ export class OutboxPublisherService implements OnModuleInit, OnModuleDestroy {
         break;
       }
     }
+  }
+
+  /** 发布前补齐契约字段（旧 Outbox 行 + 可选从快照表读 scoreModelId） */
+  private async payloadForKafkaPublish(type: string, raw: unknown): Promise<unknown> {
+    if (type !== OUTBOX_TYPE_RANKING_SNAPSHOT_COMPLETED) {
+      return raw;
+    }
+
+    let normalized = normalizeRankingSnapshotCompletedOutboxPayload(raw);
+    const rawObj =
+      typeof raw === 'object' && raw !== null
+        ? (raw as Record<string, unknown>)
+        : null;
+    const needsHydration =
+      rawObj != null &&
+      (typeof rawObj.hasScoreModel !== 'boolean' || !('scoreModelId' in rawObj));
+
+    if (needsHydration && normalized?.snapshotId) {
+      try {
+        const snap = await this.prisma.topicRankSnapshot.findUnique({
+          where: { id: BigInt(normalized.snapshotId) },
+          select: { scoreModelId: true },
+        });
+        if (snap) {
+          normalized = normalizeRankingSnapshotCompletedOutboxPayload({
+            ...rawObj,
+            scoreModelId: snap.scoreModelId,
+          });
+        }
+      } catch {
+        /* BigInt(parse) or DB — keep normalized without hydrate */
+      }
+    }
+
+    return normalized ?? raw;
   }
 }

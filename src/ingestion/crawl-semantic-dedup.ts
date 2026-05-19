@@ -32,6 +32,16 @@ export function crawlSemanticDedupCandidateLimit(): number {
   return Number.isFinite(n) && n >= 30 && n <= 2000 ? Math.floor(n) : 300;
 }
 
+/** 跨信源：在 PG 全库 canonical 行 embedding 比对（大规模场景应迁 ES/pgvector ANN） */
+export function crawlSemanticDedupCrossSourceEnabled(): boolean {
+  return process.env.CRAWL_SEMANTIC_DEDUP_CROSS_SOURCE === 'true';
+}
+
+export function crawlSemanticDedupCrossSourceCandidateLimit(): number {
+  const n = Number(process.env.CRAWL_SEMANTIC_DEDUP_CROSS_SOURCE_CANDIDATES);
+  return Number.isFinite(n) && n >= 50 && n <= 5000 ? Math.floor(n) : 500;
+}
+
 export function parsePreviewEmbeddingJson(j: unknown): number[] | null {
   if (!Array.isArray(j)) return null;
   const nums = j.filter((x): x is number => typeof x === 'number');

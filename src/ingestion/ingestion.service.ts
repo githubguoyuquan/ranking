@@ -19,12 +19,15 @@ import { clampCrawlTasksListTake } from './crawl-list-limits';
 import { CrawlHostThrottleService } from './crawl-host-throttle.service';
 import {
   crawlSemanticDedupCandidateLimit,
+  crawlSemanticDedupCrossSourceCandidateLimit,
+  crawlSemanticDedupCrossSourceEnabled,
   crawlSemanticDedupEnabled,
   crawlSemanticDedupMinChars,
   crawlSemanticDedupText,
   crawlSemanticDedupThreshold,
   findNearestByCosine,
 } from './crawl-semantic-dedup';
+import { pickCrawlProxyFromPool } from './crawl-proxy-pool';
 import { crawlUrlViolation, fetchUrlForCrawl, normalizeCrawlProxyUrl } from './http-fetch';
 import { fetchUrlForCrawlPlaywright } from './http-fetch-playwright';
 
@@ -236,6 +239,7 @@ export class IngestionService {
       }
       const proxyUrl =
         normalizeCrawlProxyUrl(source.httpProxyUrl) ??
+        pickCrawlProxyFromPool() ??
         normalizeCrawlProxyUrl(process.env.CRAWL_HTTP_PROXY);
 
       const useHttp = await this.useHttpFetch(sourceId);
@@ -498,7 +502,7 @@ export class IngestionService {
     } catch {
       return { vec: null, canonicalId: null };
     }
-    const rows = await this.prisma.crawledUrl.findMany({
+    const sameSourceRows = await this.prisma.crawledUrl.findMany({
       where: {
         sourceId,
         status: 'fetched',
@@ -510,7 +514,23 @@ export class IngestionService {
       take: crawlSemanticDedupCandidateLimit(),
       select: { id: true, previewEmbedding: true },
     });
-    const canonicalId = findNearestByCosine(vec, rows, crawlSemanticDedupThreshold());
+    let canonicalId = findNearestByCosine(vec, sameSourceRows, crawlSemanticDedupThreshold());
+
+    if (canonicalId === null && crawlSemanticDedupCrossSourceEnabled()) {
+      const crossRows = await this.prisma.crawledUrl.findMany({
+        where: {
+          status: 'fetched',
+          duplicateOfId: null,
+          urlFingerprint: { not: excludeUrlFingerprint },
+          previewEmbedding: { not: Prisma.DbNull },
+          sourceId: { not: sourceId },
+        },
+        orderBy: { id: 'desc' },
+        take: crawlSemanticDedupCrossSourceCandidateLimit(),
+        select: { id: true, previewEmbedding: true },
+      });
+      canonicalId = findNearestByCosine(vec, crossRows, crawlSemanticDedupThreshold());
+    }
     return { vec, canonicalId };
   }
 

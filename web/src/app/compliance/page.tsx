@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 
 import { AdminFooterNav } from "@/components/admin-footer-nav";
+import { AdminPage } from "@/components/admin-page";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -73,13 +74,17 @@ export default function CompliancePage() {
   }, [snapshotId]);
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6 p-6">
-      <h1 className="text-2xl font-semibold">合规与导出</h1>
-      <p className="text-sm text-muted-foreground">
-        Phase D：多租户 API 密钥、快照法务包导出。生产请设 API_AUTH_REQUIRED，并在
-        web/.env.local 配置 NEXT_PUBLIC_API_KEY。
-      </p>
-
+    <AdminPage
+      title="合规与导出"
+      description={
+        <>
+          多租户 API 密钥、快照法务包（ScoreModel + ScoreBreakdown）。生产环境请设置{" "}
+          <code className="rounded bg-muted px-1 text-xs">API_AUTH_REQUIRED</code>
+          ，并在 <code className="rounded bg-muted px-1 text-xs">web/.env.local</code>{" "}
+          配置 <code className="rounded bg-muted px-1 text-xs">NEXT_PUBLIC_API_KEY</code>。
+        </>
+      }
+    >
       <Card>
         <CardHeader>
           <CardTitle className="text-base">租户与密钥</CardTitle>
@@ -141,7 +146,7 @@ export default function CompliancePage() {
         <pre className="whitespace-pre-wrap rounded-md border bg-muted/40 p-3 text-xs">{status}</pre>
       ) : null}
 
-      <AdminFooterNav />
-    </div>
+      <AdminFooterNav className="border-t border-border pt-6" />
+    </AdminPage>
   );
 }

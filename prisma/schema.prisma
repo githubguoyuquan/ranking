@@ -42,6 +42,20 @@ enum TrendType {
   DECLINE
 }
 
+/// 实体 PII 分级（合规导出 / 检索脱敏）
+enum PiiLevel {
+  NONE
+  LOW
+  HIGH
+}
+
+enum ComplianceAuditAction {
+  API_KEY_AUTH
+  SNAPSHOT_COMPLIANCE_EXPORT
+  SCORE_BREAKDOWN_EXPORT
+  ENTITY_PII_ACCESS
+}
+
 /// 与下游消费者约定的事件类型（字符串，便于跨语言）
 model OutboxEvent {
   id          BigInt    @id @default(autoincrement())
@@ -59,8 +73,56 @@ model OutboxEvent {
   @@index([type])
 }
 
+model Tenant {
+  id        BigInt   @id @default(autoincrement())
+  slug      String   @unique
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  apiKeys   ApiKey[]
+  topics    Topic[]
+  entities  Entity[]
+  sources   Source[]
+  audits    ComplianceAuditEvent[]
+}
+
+/// API 密钥（仅存 SHA-256 摘要；请求头 `X-API-Key` 或 `Authorization: Bearer`）
+model ApiKey {
+  id         BigInt    @id @default(autoincrement())
+  tenantId   BigInt
+  label      String    @default("")
+  keyPrefix  String    @db.VarChar(16)
+  keyHash    String    @unique @db.VarChar(64)
+  scopes     Json      @default("[\"read\",\"write\",\"admin\"]")
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([keyPrefix])
+}
+
+model ComplianceAuditEvent {
+  id        BigInt   @id @default(autoincrement())
+  tenantId  BigInt?
+  action    ComplianceAuditAction
+  actor     String   @db.VarChar(128)
+  resource  String?  @db.VarChar(256)
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
+  @@index([action, createdAt])
+}
+
 model Topic {
   id        BigInt   @id @default(autoincrement())
+  tenantId  BigInt?
   slug      String   @unique
   title     String
   kind      TopicKind
@@ -68,9 +130,12 @@ model Topic {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  tenant    Tenant?        @relation(fields: [tenantId], references: [id], onDelete: SetNull)
   versions  TopicVersion[]
   sources   Source[]
   embedding TopicEmbedding?
+
+  @@index([tenantId])
 }
 
 /// 话题语义向量（OpenAI embedding；用于相似话题推荐）
@@ -190,17 +255,23 @@ model RankingItemHistory {
 }
 
 model Entity {
-  id            BigInt @id @default(autoincrement())
+  id            BigInt   @id @default(autoincrement())
+  tenantId      BigInt?
   type          String
   canonicalName String
   aliases       Json?
+  piiLevel      PiiLevel @default(NONE)
   createdAt     DateTime @default(now())
 
+  tenant        Tenant?  @relation(fields: [tenantId], references: [id], onDelete: SetNull)
   metrics       EntityMetric[]
   relationsFrom EntityRelation[] @relation("EntityFrom")
   relationsTo   EntityRelation[] @relation("EntityTo")
   rankingItems  RankingItem[]
   histories     RankingItemHistory[]
+
+  @@index([tenantId])
+  @@index([piiLevel])
 }
 
 model EntityMetric {
@@ -266,6 +337,7 @@ model ScoreBreakdown {
 
 model Source {
   id        BigInt  @id @default(autoincrement())
+  tenantId  BigInt?
   topicId   BigInt?
   name      String
   baseUrl   String
@@ -275,9 +347,12 @@ model Source {
   /// 可选 HTTP(S) 代理（覆盖全局 CRAWL_HTTP_PROXY）；如 http://host:3128
   httpProxyUrl String? @db.VarChar(2048)
 
+  tenant     Tenant?      @relation(fields: [tenantId], references: [id], onDelete: SetNull)
   topic      Topic?       @relation(fields: [topicId], references: [id])
   urls       CrawledUrl[]
   crawlTasks CrawlTask[]
+
+  @@index([tenantId])
 }
 
 model CrawlTask {

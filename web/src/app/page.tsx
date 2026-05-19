@@ -1,4 +1,5 @@
 import { AdminFooterNav } from "@/components/admin-footer-nav";
+import { AdminPage } from "@/components/admin-page";
 import { AdminQuickEntryRow } from "@/components/admin-quick-entry-row";
 import { CopyAdminPageUrlButton } from "@/components/copy-admin-page-url-button";
 import { CopyTextButton } from "@/components/copy-snapshot-id-button";
@@ -166,35 +167,38 @@ export default async function HomePage() {
   ];
 
   return (
-    <div className="mx-auto max-w-6xl space-y-8">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">概览</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          对接本地 Nest API（默认端口{" "}
-          <code className="rounded bg-muted px-1">3000</code>、本站{" "}
-          <code className="rounded bg-muted px-1">3001</code>
-          ）。PostgreSQL 为必需；Redis 未启动时异步队列与读缓存不可用；Kafka
-          / ES / ClickHouse 均为可选。
-        </p>
-        <p
-          className={
-            coreReady
-              ? "mt-2 text-sm text-green-700 dark:text-green-400"
-              : "mt-2 text-sm text-amber-700 dark:text-amber-400"
-          }
-        >
-          {coreReady
-            ? `核心依赖已满足，与 GET ${BACKEND_HEALTH.ready}（HTTP 200）一致。`
-            : `核心依赖未全部满足时 GET ${BACKEND_HEALTH.ready} 返回 HTTP 503，直至 PostgreSQL 与 Redis 均可连。`}
-        </p>
-        <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-          <CopyAdminPageUrlButton
-            path={ADMIN_HREF.home}
-            idleLabel="复制概览页链接"
-            className="h-6"
-          />
-        </p>
-      </div>
+    <AdminPage
+      title="系统概览"
+      headerExtra={
+        <CopyAdminPageUrlButton
+          path={ADMIN_HREF.home}
+          idleLabel="复制概览页链接"
+          className="h-8"
+        />
+      }
+      description={
+        <>
+          <p>
+            对接本地 Nest API（默认端口{" "}
+            <code className="rounded bg-muted px-1 text-xs">3000</code>、本站{" "}
+            <code className="rounded bg-muted px-1 text-xs">3001</code>
+            ）。PostgreSQL 为必需；Redis 未启动时异步队列与读缓存不可用；Kafka / ES /
+            ClickHouse 均为可选。
+          </p>
+          <p
+            className={
+              coreReady
+                ? "text-green-700 dark:text-green-400"
+                : "text-amber-700 dark:text-amber-400"
+            }
+          >
+            {coreReady
+              ? `核心依赖已满足，与 GET ${BACKEND_HEALTH.ready}（HTTP 200）一致。`
+              : `核心依赖未全部满足时 GET ${BACKEND_HEALTH.ready} 返回 HTTP 503，直至 PostgreSQL 与 Redis 均可连。`}
+          </p>
+        </>
+      }
+    >
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Card>
@@ -530,8 +534,8 @@ export default async function HomePage() {
 
       <AdminFooterNav
         showBackToHome={false}
-        className="mt-8 border-t border-border pt-6"
+        className="border-t border-border pt-6"
       />
-    </div>
+    </AdminPage>
   );
 }

@@ -76,7 +76,7 @@ export default function ReindexPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <div className="w-full max-w-none space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">索引维护</h1>
         <p className="mt-1 text-sm text-muted-foreground">

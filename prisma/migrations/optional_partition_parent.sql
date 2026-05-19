@@ -1,0 +1,11 @@
+-- 可选运维脚本（非 Prisma 自动迁移）：将历史大表改为按月 RANGE 分区父表。
+-- 仅在维护窗口、已备份、可接受短暂锁表时执行；现有单行表需手工数据搬迁。
+-- 开发环境可跳过；调用 POST /admin/scale/postgres/ensure-partitions 前需先完成本脚本对应表。
+
+-- 示例：RankingItemHistory（按 asOf 月分区）
+-- ALTER TABLE "RankingItemHistory" RENAME TO "RankingItemHistory_legacy";
+-- CREATE TABLE "RankingItemHistory" (
+--   LIKE "RankingItemHistory_legacy" INCLUDING ALL
+-- ) PARTITION BY RANGE ("asOf");
+-- INSERT INTO "RankingItemHistory" SELECT * FROM "RankingItemHistory_legacy";
+-- DROP TABLE "RankingItemHistory_legacy";

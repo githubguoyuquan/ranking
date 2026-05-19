@@ -2,6 +2,8 @@ import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { bullMqConnectionFromEnv } from './config/redis';
 import { AiAuditModule } from './ai-audit/ai-audit.module';
+import { ComplianceModule } from './compliance/compliance.module';
+import { ScaleModule } from './scale/scale.module';
 import { AgentModule } from './agent/agent.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { CacheModule } from './cache/cache.module';
@@ -28,6 +30,8 @@ import { SearchModule } from './search/search.module';
     IngestionModule,
     RankingsModule,
     SearchModule,
+    ScaleModule,
+    ComplianceModule,
   ],
   controllers: [HealthController],
 })

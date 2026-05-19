@@ -1,0 +1,21 @@
+{
+  "description": "Example ILM body for ranking_entities (managed by API ensure-ilm)",
+  "policy": {
+    "phases": {
+      "hot": {
+        "min_age": "0ms",
+        "actions": {
+          "rollover": {
+            "max_docs": 50000000,
+            "max_age": "30d"
+          },
+          "set_priority": { "priority": 100 }
+        }
+      },
+      "delete": {
+        "min_age": "365d",
+        "actions": { "delete": {} }
+      }
+    }
+  }
+}

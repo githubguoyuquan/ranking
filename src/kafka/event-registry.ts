@@ -11,6 +11,11 @@ import {
 /** 当前唯一的 Kafka 外发封套版本（与 JSON Schema `event-envelope-v1` 对齐） */
 export const KAFKA_ENVELOPE_VERSION = 1 as const;
 
+export type KafkaSideEffectConsumer =
+  | 'external_kafka_only'
+  | 'in_process_flusher'
+  | 'dual_kafka_and_flusher';
+
 export type KafkaRoutedEventDefinition = {
   /** 与 OutboxEvent.type 一致 */
   outboxType: string;
@@ -24,6 +29,13 @@ export type KafkaRoutedEventDefinition = {
   schemaRegistrySubject: string;
   /** 事件说明（给运维 / 消费方目录用） */
   description: string;
+  /**
+   * 是否由 `OutboxPublisherService` 写入 Kafka（`kafkaPublishedAt`）。
+   * `false` 时仅登记契约/Schema，供目录与将来外发；本仓库**无** Kafka 消费方。
+   */
+  publishToKafka: boolean;
+  /** 本进程内副作用消费方式（非 Kafka Consumer） */
+  sideEffect: KafkaSideEffectConsumer;
 };
 
 const ROUTED: KafkaRoutedEventDefinition[] = [
@@ -35,6 +47,8 @@ const ROUTED: KafkaRoutedEventDefinition[] = [
     schemaRegistrySubject: 'ranking.snapshot.completed-value',
     description:
       'TopicRankSnapshot 物化成功；下游可据此刷新搜索、通知、指标等。',
+    publishToKafka: true,
+    sideEffect: 'external_kafka_only',
   },
   {
     outboxType: OUTBOX_TYPE_RANKING_FOLLOWUP_REQUESTED,
@@ -42,7 +56,10 @@ const ROUTED: KafkaRoutedEventDefinition[] = [
     defaultTopic: 'ranking.followup.requested',
     payloadSchemaFile: 'ranking-followup-requested-payload-v1.schema.json',
     schemaRegistrySubject: 'ranking.followup.requested-value',
-    description: '排行物化后跟进链（AI Agent / 多步分析）已请求。',
+    description:
+      '排行物化后跟进链已请求；由 BullMQ ranking-followup 消费，Outbox 行仅可观测占位，默认不发 Kafka。',
+    publishToKafka: false,
+    sideEffect: 'in_process_flusher',
   },
   {
     outboxType: OUTBOX_TYPE_CRAWL_URL_FETCHED,
@@ -50,7 +67,9 @@ const ROUTED: KafkaRoutedEventDefinition[] = [
     defaultTopic: 'crawl.url.fetched',
     payloadSchemaFile: 'crawl-url-fetched-payload-v1.schema.json',
     schemaRegistrySubject: 'crawl.url.fetched-value',
-    description: 'CrawledUrl 已写入 PG；可与 ES 索引消费者并行订阅。',
+    description: 'CrawledUrl 已写入 PG；供外部队列/索引管道订阅。',
+    publishToKafka: true,
+    sideEffect: 'external_kafka_only',
   },
   {
     outboxType: OUTBOX_TYPE_CLICKHOUSE_RANKING_SNAPSHOT,
@@ -59,7 +78,9 @@ const ROUTED: KafkaRoutedEventDefinition[] = [
     payloadSchemaFile: 'clickhouse-ranking-snapshot-ingest-payload-v1.schema.json',
     schemaRegistrySubject: 'clickhouse.ranking.snapshot.ingest-value',
     description:
-      '快照指标写入 ClickHouse（与进程内 Flusher 双轨；Kafka 供分析管道订阅）。',
+      '快照指标写入 ClickHouse；权威路径为进程内 Flusher，Kafka 为外部分析镜像（双轨）。',
+    publishToKafka: true,
+    sideEffect: 'dual_kafka_and_flusher',
   },
   {
     outboxType: OUTBOX_TYPE_ELASTIC_ENTITY_SYNC,
@@ -67,7 +88,10 @@ const ROUTED: KafkaRoutedEventDefinition[] = [
     defaultTopic: 'elasticsearch.entity.sync',
     payloadSchemaFile: 'elasticsearch-entity-sync-payload-v1.schema.json',
     schemaRegistrySubject: 'elasticsearch.entity.sync-value',
-    description: '实体索引 upsert/delete（与 ES Flusher 双轨）。',
+    description:
+      '实体索引 upsert/delete；权威路径为 ES Flusher，Kafka 为外部 CDC 镜像（双轨）。',
+    publishToKafka: true,
+    sideEffect: 'dual_kafka_and_flusher',
   },
   {
     outboxType: OUTBOX_TYPE_ELASTIC_CRAWLED_URL_SYNC,
@@ -75,7 +99,10 @@ const ROUTED: KafkaRoutedEventDefinition[] = [
     defaultTopic: 'elasticsearch.crawled_url.sync',
     payloadSchemaFile: 'elasticsearch-crawled-url-sync-payload-v1.schema.json',
     schemaRegistrySubject: 'elasticsearch.crawled_url.sync-value',
-    description: '爬取 URL 全文索引 upsert/delete（与 ES Flusher 双轨）。',
+    description:
+      '爬取 URL 全文索引；权威路径为 ES Flusher，Kafka 为外部 CDC 镜像（双轨）。',
+    publishToKafka: true,
+    sideEffect: 'dual_kafka_and_flusher',
   },
   {
     outboxType: OUTBOX_TYPE_AI_AGENT_RUN_COMPLETED,
@@ -84,6 +111,8 @@ const ROUTED: KafkaRoutedEventDefinition[] = [
     payloadSchemaFile: 'ai-agent-run-completed-payload-v1.schema.json',
     schemaRegistrySubject: 'ai.agent.run.completed-value',
     description: '多 Agent 编排单次运行结束（completed / failed）。',
+    publishToKafka: true,
+    sideEffect: 'external_kafka_only',
   },
 ];
 
@@ -93,8 +122,18 @@ export function listKafkaRoutedEvents(): readonly KafkaRoutedEventDefinition[] {
   return ROUTED;
 }
 
+/** 事件网目录中的全部 Outbox type（含仅登记、不发 Kafka 的 type） */
 export function listKafkaRoutedOutboxTypes(): string[] {
   return ROUTED.map((r) => r.outboxType);
+}
+
+/** `OutboxPublisherService` 实际外发的 type（`kafkaPublishedAt`） */
+export function listKafkaPublishOutboxTypes(): string[] {
+  return ROUTED.filter((r) => r.publishToKafka).map((r) => r.outboxType);
+}
+
+export function isKafkaPublishOutboxType(type: string): boolean {
+  return ROUTED.some((r) => r.outboxType === type && r.publishToKafka);
 }
 
 export function getKafkaRouteForOutboxType(

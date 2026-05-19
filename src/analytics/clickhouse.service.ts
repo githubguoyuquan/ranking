@@ -203,6 +203,86 @@ export class ClickhouseService implements OnModuleDestroy {
     }>;
   }
 
+  /** 规模验证：MV 与 rollup 表行数 */
+  async queryMvHealth(): Promise<{
+    ok: boolean;
+    tables: Array<{ name: string; rows: number }>;
+    mvExists: boolean;
+    detail?: string;
+  }> {
+    if (!this.client) {
+      return { ok: false, tables: [], mvExists: false, detail: 'CLICKHOUSE_URL not set' };
+    }
+    try {
+      const rs = await this.client.query({
+        query: `
+          SELECT name, total_rows
+          FROM system.tables
+          WHERE database = currentDatabase()
+            AND name IN ('metric_timeseries', 'metric_daily_topic', 'mv_metric_daily_topic')
+          ORDER BY name
+        `,
+        format: 'JSONEachRow',
+      });
+      const rows = (await rs.json()) as Array<{ name: string; total_rows: string | number }>;
+      const tables = rows.map((r) => ({
+        name: r.name,
+        rows: Number(r.total_rows) || 0,
+      }));
+      const mvExists = tables.some((t) => t.name === 'mv_metric_daily_topic');
+      return { ok: true, tables, mvExists };
+    } catch (e) {
+      return {
+        ok: false,
+        tables: [],
+        mvExists: false,
+        detail: e instanceof Error ? e.message : String(e),
+      };
+    }
+  }
+
+  /** BI 钻取：单话题 MV 日聚合（`metric_daily_topic`） */
+  async queryTopicDrilldown(
+    topicId: bigint,
+    days = 14,
+  ): Promise<
+    Array<{
+      day: string;
+      metric_key: string;
+      avg_value: number;
+      max_value: number;
+      sample_count: number;
+    }>
+  > {
+    if (!this.client) return [];
+    const tid = Number(topicId);
+    const d = Math.min(Math.max(days, 1), 90);
+    const rs = await this.client.query({
+      query: `
+        SELECT
+          toString(day) AS day,
+          metric_key,
+          avg_value,
+          max_value,
+          sample_count
+        FROM metric_daily_topic
+        WHERE topic_id = {tid:UInt64}
+          AND day >= today() - {days:UInt32}
+        ORDER BY day ASC, metric_key ASC
+        LIMIT 2000
+      `,
+      query_params: { tid, days: d },
+      format: 'JSONEachRow',
+    });
+    return (await rs.json()) as Array<{
+      day: string;
+      metric_key: string;
+      avg_value: number;
+      max_value: number;
+      sample_count: number;
+    }>;
+  }
+
   /** BI：实体榜位趋势（原始时序，近 N 日） */
   async queryEntityRankSparkline(
     entityId: bigint,

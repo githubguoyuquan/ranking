@@ -17,6 +17,8 @@ export class KafkaAdminController {
   events() {
     return toPlainJson({
       envelopeVersion: 1,
+      consumerBoundary:
+        'This repository publishes to Kafka only; it does not run Kafka consumer groups. See docs/kafka/CONSUMER_BOUNDARY.md.',
       routes: listKafkaRoutedEvents().map((r) => ({
         outboxType: r.outboxType,
         defaultTopic: r.defaultTopic,
@@ -24,6 +26,8 @@ export class KafkaAdminController {
         payloadSchemaFile: r.payloadSchemaFile,
         schemaRegistrySubject: r.schemaRegistrySubject,
         description: r.description,
+        publishToKafka: r.publishToKafka,
+        sideEffect: r.sideEffect,
       })),
       loadedPayloadSchemas: this.schemas.describeLoaded(),
       schemaRegistrySubjects: this.registry.describeSubjects(),

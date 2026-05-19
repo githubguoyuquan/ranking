@@ -8,12 +8,17 @@
 - **MSK / Confluent / 自建 Redpanda** 三副本跨 AZ；`KAFKA_BROKERS`
 - **Schema Registry** 托管或 Redpanda SR；`KAFKA_SCHEMA_REGISTRY_URL`（如 `https://sr.example.com`）
 
+## 数据库迁移
+
+发布前在目标库执行 **`npm run prisma:deploy`**（或 Helm `migrateJob.enabled=true`）。详见 [DATABASE_MIGRATIONS.md](./DATABASE_MIGRATIONS.md)。
+
 ## Helm 部署
 
 ```bash
 docker build -t ranking-platform:0.1.0 .
 helm upgrade --install ranking deploy/helm/ranking \
   -f deploy/helm/ranking/values-production.yaml \
+  --set migrateJob.enabled=true \
   --set env.DATABASE_URL='...' \
   --set env.REDIS_URL='...' \
   --set env.KAFKA_BROKERS='broker1:9092,broker2:9092'
@@ -40,7 +45,7 @@ SET "kafkaPublishedAt" = NULL, "leasedUntil" = NULL, "lastError" = NULL
 WHERE type = 'ranking.snapshot.completed' AND id BETWEEN 1 AND 1000;
 ```
 
-管理台：`GET /admin/outbox?pendingOnly=true`；Kafka 目录：`GET /admin/kafka/events`。
+管理台：`GET /admin/outbox?pendingOnly=true`；Kafka 目录：`GET /admin/kafka/events`（含 `publishToKafka`）。**本服务不消费 Kafka** — 见 `docs/kafka/CONSUMER_BOUNDARY.md`。
 
 ## 探活
 

@@ -1,0 +1,139 @@
+openapi: 3.0.3
+info:
+  title: Ranking platform — Admin BI (fragment)
+  description: |
+    BI 大屏 API。实现：`src/bi/bi-admin.controller.ts`。
+    `overview` 内嵌 `observability`（Outbox lag + 爬虫 + 告警）。
+  version: 0.1.0
+
+servers:
+  - url: http://localhost:3000
+
+tags:
+  - name: BI
+  - name: Admin
+
+paths:
+  /admin/bi/overview:
+    get:
+      tags: [BI, Admin]
+      summary: BI 大屏聚合数据
+      operationId: adminBiOverview
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: days
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 90
+            default: 14
+      responses:
+        "200":
+          description: KPI、图表、observability.alerts、健康检查
+
+  /admin/bi/timeseries/topics:
+    get:
+      tags: [BI, Admin]
+      summary: ClickHouse 话题热度时序
+      operationId: adminBiTopicTimeseries
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: days
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 90
+            default: 14
+      responses:
+        "200":
+          description: 成功
+
+  /admin/bi/drill/entity/{entityId}:
+    get:
+      tags: [BI, Admin]
+      summary: BI 钻取 — 实体榜位火花线
+      operationId: adminBiDrillEntity
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: entityId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: days
+          in: query
+          schema:
+            type: integer
+            default: 30
+      responses:
+        "200":
+          description: entity + sparkline + clickhouseMv
+
+  /admin/bi/drill/topic/{topicId}:
+    get:
+      tags: [BI, Admin]
+      summary: BI 钻取 — 话题 MV 日聚合
+      operationId: adminBiDrillTopic
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: topicId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: days
+          in: query
+          schema:
+            type: integer
+            default: 14
+      responses:
+        "200":
+          description: topic + metric_daily_topic rows
+
+  /admin/bi/clickhouse/mv-health:
+    get:
+      tags: [BI, Admin]
+      summary: ClickHouse MV / rollup 表行数
+      operationId: adminBiClickhouseMvHealth
+      security:
+        - ApiKeyAuth: []
+      responses:
+        "200":
+          description: mvExists + tables[]
+
+  /admin/bi/entities/{entityId}/rank-sparkline:
+    get:
+      tags: [BI, Admin]
+      summary: 实体榜位 CH 火花线
+      operationId: adminBiEntityRankSparkline
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: entityId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: days
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 90
+            default: 30
+      responses:
+        "200":
+          description: 成功
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key

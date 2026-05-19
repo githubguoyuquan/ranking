@@ -17,7 +17,7 @@
 | 进程 | 入口 | `PROCESS_ROLE` | 职责 |
 |------|------|----------------|------|
 | API | `dist/main.js` | `api` | HTTP、`/v1/*`、管理台 BFF |
-| Platform Worker | `dist/platform-worker.main.js` | `worker` | BullMQ 排行/follow-up/ai-agent、Outbox→Kafka、CH/ES Flusher |
+| Platform Worker | `dist/platform-worker.main.js` | `worker` | BullMQ 排行/follow-up/ai-agent、**Outbox→Kafka（仅 Producer）**、CH/ES **Flusher（非 Kafka Consumer）** |
 | Crawl Worker | `dist/crawl-worker.main.js` | `crawl` | BullMQ `crawl` 队列 |
 
 本地开发默认 `PROCESS_ROLE=all`（未设置时），单进程跑全部 Worker。
@@ -32,4 +32,8 @@ Helm：`deploy/helm/ranking/` 下 `api` / `platformWorker` / `crawlWorker` 三�
 
 ## 事件契约
 
-跨进程/跨服务仅通过 **Outbox + Kafka** 或 **REST**；见 `docs/kafka/EVENT_CATALOG.md`。
+- **跨服务**：Outbox → **Kafka**（本仓库只发布；消费方在外部部署）→ 见 `docs/kafka/CONSUMER_BOUNDARY.md`  
+- **同进程异步**：BullMQ（`ranking`、`crawl`、`ai-agent`）或 Outbox **Flusher**（ES/CH）  
+- **同步读**：REST `/v1/*`  
+
+详见 `docs/kafka/EVENT_CATALOG.md`。

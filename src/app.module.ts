@@ -8,6 +8,7 @@ import { ScaleModule } from './scale/scale.module';
 import { AgentModule } from './agent/agent.module';
 import { AgentOrchestrationModule } from './agent-orchestration/agent-orchestration.module';
 import { BiModule } from './bi/bi.module';
+import { ObservabilityModule } from './observability/observability.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { CacheModule } from './cache/cache.module';
 import { HealthController } from './health.controller';
@@ -38,6 +39,7 @@ import { SearchModule } from './search/search.module';
     ScaleModule,
     ComplianceModule,
     BiModule,
+    ObservabilityModule,
   ],
   controllers: [HealthController],
 })

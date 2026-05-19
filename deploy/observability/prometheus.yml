@@ -1,0 +1,12 @@
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+
+scrape_configs:
+  - job_name: ranking-api
+    metrics_path: /admin/observability/prometheus
+    scheme: http
+    static_configs:
+      - targets: ['host.docker.internal:3000']
+    # 本地 compose：在 ranking API 容器/宿主机暴露 3000 后抓取
+    # 生产：改为 K8s Service DNS，并配置 bearer_token 或 X-API-Key（需 prometheus oauth2 或 bearer）

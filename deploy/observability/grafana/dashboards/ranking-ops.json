@@ -1,0 +1,88 @@
+{
+  "title": "Ranking Ops",
+  "uid": "ranking-ops",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Outbox Flusher Pending",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "ranking_outbox_flusher_pending_total",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Outbox Flusher Oldest Age (s)",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "targets": [
+        {
+          "expr": "ranking_outbox_flusher_oldest_pending_age_seconds",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Kafka Pending",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "ranking_outbox_kafka_pending_total",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Crawl Failed 1h",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "targets": [
+        {
+          "expr": "ranking_crawl_schedule_failed_1h",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Outbox Pending by Type",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [
+        {
+          "expr": "sum by (type) (ranking_outbox_flusher_pending_by_type)",
+          "legendFormat": "{{type}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Crawl Tasks",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "targets": [
+        {
+          "expr": "ranking_crawl_tasks_queued",
+          "legendFormat": "queued",
+          "refId": "A"
+        },
+        {
+          "expr": "ranking_crawl_tasks_running",
+          "legendFormat": "running",
+          "refId": "B"
+        },
+        {
+          "expr": "ranking_crawl_tasks_failed_24h",
+          "legendFormat": "failed_24h",
+          "refId": "C"
+        }
+      ]
+    }
+  ]
+}

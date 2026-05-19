@@ -2,6 +2,8 @@ import { apiUrl } from "@/lib/api";
 import {
   BACKEND_ADMIN,
   BACKEND_HEALTH,
+  backendAdminBiDrillEntityPath,
+  backendAdminBiDrillTopicPath,
   backendAdminEntitiesPath,
   backendAdminEntityByIdPath,
   backendAdminOutboxPath,
@@ -62,4 +64,12 @@ export function adminEntitiesUrl(params?: URLSearchParams): string {
 
 export function adminEntityByIdUrl(entityId: string): string {
   return backendAbs(backendAdminEntityByIdPath(entityId));
+}
+
+export function adminBiDrillEntityUrl(entityId: string, days = 30): string {
+  return backendAbs(backendAdminBiDrillEntityPath(entityId, days));
+}
+
+export function adminBiDrillTopicUrl(topicId: string, days = 14): string {
+  return backendAbs(backendAdminBiDrillTopicPath(topicId, days));
 }

@@ -31,6 +31,10 @@ crawlWorker:
 
 # 多区域 crawl 副本（每项生成独立 Deployment）
 crawlWorkerRegions: []
+
+migrateJob:
+  enabled: false
+  backoffLimit: 2
   # - name: eu-west
   #   replicaCount: 2
   #   extraEnv:

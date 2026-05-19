@@ -1,6 +1,6 @@
 import type { TimeWindow } from '@prisma/client';
 
-/** `OUTBOX_TYPE_RANKING_FOLLOWUP_REQUESTED` 行 `payload`（不经 Kafka publisher） */
+/** `OUTBOX_TYPE_RANKING_FOLLOWUP_REQUESTED` 行 `payload`（`publishToKafka: false`；由 BullMQ 消费） */
 export type RankingFollowupRequestedOutboxPayload = {
   schemaVersion: 1;
   snapshotId: string;

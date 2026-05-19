@@ -17,6 +17,10 @@ export const BACKEND_ADMIN = {
   outbox: "/admin/outbox",
   entities: "/admin/entities",
   biOverview: "/admin/bi/overview",
+  biDrillEntity: "/admin/bi/drill/entity",
+  biDrillTopic: "/admin/bi/drill/topic",
+  biClickhouseMvHealth: "/admin/bi/clickhouse/mv-health",
+  scaleValidate: "/admin/scale/validate",
   agentsOverview: "/admin/agents/overview",
   agentsRuns: "/admin/agents/runs",
   agentsProposals: "/admin/agents/proposals",
@@ -42,6 +46,14 @@ export function backendAdminEntitiesPath(params?: URLSearchParams): string {
 
 export function backendAdminEntityByIdPath(entityId: string): string {
   return `${BACKEND_ADMIN.entities}/${encodeURIComponent(entityId)}`;
+}
+
+export function backendAdminBiDrillEntityPath(entityId: string, days = 30): string {
+  return `${BACKEND_ADMIN.biDrillEntity}/${encodeURIComponent(entityId)}?days=${days}`;
+}
+
+export function backendAdminBiDrillTopicPath(topicId: string, days = 14): string {
+  return `${BACKEND_ADMIN.biDrillTopic}/${encodeURIComponent(topicId)}?days=${days}`;
 }
 
 /** 文档 / 界面展示用（含 `:id` 占位），勿用于实际请求 path。 */

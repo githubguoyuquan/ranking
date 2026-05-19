@@ -36,4 +36,21 @@ export class BiAdminController {
   ) {
     return this.bi.getEntityRankSparkline(BigInt(entityId), q.days ?? 30);
   }
+
+  /** BI 钻取：实体榜位 CH 火花线 + PG 元数据 */
+  @Get('drill/entity/:entityId')
+  entityDrill(@Param('entityId') entityId: string, @Query() q: BiDaysQuery) {
+    return this.bi.getEntityDrill(BigInt(entityId), q.days ?? 30);
+  }
+
+  /** BI 钻取：话题 MV 日聚合 */
+  @Get('drill/topic/:topicId')
+  topicDrill(@Param('topicId') topicId: string, @Query() q: BiDaysQuery) {
+    return this.bi.getTopicDrilldown(BigInt(topicId), q.days ?? 14);
+  }
+
+  @Get('clickhouse/mv-health')
+  clickhouseMvHealth() {
+    return this.bi.getClickhouseMvHealth();
+  }
 }

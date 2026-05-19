@@ -2,6 +2,7 @@ import { apiUrl } from "@/lib/api";
 import {
   NEST_V1,
   nestV1CrawlCheckpointPath,
+  nestV1CrawlSourcePath,
   nestV1CrawlSourceUrlsPath,
   nestV1CrawlSourcesListPath,
   nestV1CrawlTasksListPath,
@@ -133,6 +134,10 @@ export function nestCrawlSourcesListUrl(limit: number): string {
 
 export function nestCrawlSourcesUrl(): string {
   return nestAbs(NEST_V1.crawlSources);
+}
+
+export function nestCrawlSourcePatchUrl(sourceId: string): string {
+  return nestAbs(nestV1CrawlSourcePath(sourceId));
 }
 
 export function nestCrawlSourceUrlsUrl(sourceId: string, limit: number): string {

@@ -1,0 +1,63 @@
+openapi: 3.0.3
+info:
+  title: Ranking platform — Admin scale validation (fragment)
+  version: 0.1.0
+
+servers:
+  - url: http://localhost:3000
+
+paths:
+  /admin/scale/validate:
+    post:
+      summary: 规模验证套件（ES ILM + benchmark、Qdrant、CH MV）
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                esQuery: { type: string }
+                esIterations: { type: integer }
+                qdrantIterations: { type: integer }
+      responses:
+        "200":
+          description: 聚合报告
+
+  /admin/scale/elasticsearch/ensure-ilm:
+    post:
+      summary: 安装 ILM 策略
+      security:
+        - ApiKeyAuth: []
+
+  /admin/scale/elasticsearch/bootstrap-ilm-indices:
+    post:
+      summary: 创建 {index}-000001 并挂 write 别名
+      security:
+        - ApiKeyAuth: []
+
+  /admin/scale/elasticsearch/ilm-status:
+    get:
+      summary: ILM explain + 别名
+      security:
+        - ApiKeyAuth: []
+
+  /admin/scale/elasticsearch/benchmark:
+    post:
+      summary: ES 实体检索压测
+      security:
+        - ApiKeyAuth: []
+
+  /admin/scale/qdrant/benchmark:
+    post:
+      summary: Qdrant 全文 + 向量压测
+      security:
+        - ApiKeyAuth: []
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key

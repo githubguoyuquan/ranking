@@ -36,4 +36,20 @@ export class ElasticRolloverService {
   async bootstrapWriteAliases(): Promise<unknown> {
     return this.elastic.bootstrapWriteAliases();
   }
+
+  async ensureIlmPolicies(): Promise<unknown> {
+    return this.elastic.ensureIlmPolicies();
+  }
+
+  async getIlmStatus(): Promise<unknown> {
+    return this.elastic.getIlmStatus();
+  }
+
+  async bootstrapIlmIndices(): Promise<unknown> {
+    return this.elastic.bootstrapIlmIndices();
+  }
+
+  async benchmarkEntitySearch(query?: string, iterations?: number): Promise<unknown> {
+    return this.elastic.benchmarkEntitySearch(query, iterations);
+  }
 }

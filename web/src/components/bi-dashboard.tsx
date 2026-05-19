@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import * as echarts from "echarts";
 import { Maximize2, Minimize2, RefreshCw } from "lucide-react";
 import Link from "next/link";
+import { BiDrillPanel, type BiDrillTarget } from "@/components/bi-drill-panel";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 const REFRESH_MS = 30_000;
@@ -105,6 +106,7 @@ export function BiDashboard() {
   const [loading, setLoading] = useState(true);
   const [lastFetch, setLastFetch] = useState<Date | null>(null);
   const [clock, setClock] = useState(() => new Date());
+  const [drill, setDrill] = useState<BiDrillTarget>(null);
 
   const lineRef = useRef<HTMLDivElement>(null);
   const pieRef = useRef<HTMLDivElement>(null);
@@ -168,6 +170,19 @@ export function BiDashboard() {
       m.set(r.day, (m.get(r.day) ?? 0) + r.avg_value);
     }
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  })();
+
+  const chTopicsForDrill = (() => {
+    const m = new Map<number, { title: string; slug: string | null }>();
+    for (const r of chTopic) {
+      if (!m.has(r.topic_id)) {
+        m.set(r.topic_id, {
+          title: r.topicTitle ?? `topic ${r.topic_id}`,
+          slug: r.topicSlug ?? null,
+        });
+      }
+    }
+    return [...m.entries()].slice(0, 8);
   })();
 
   useEcharts(
@@ -409,6 +424,23 @@ export function BiDashboard() {
           </p>
         ) : null}
 
+        {data?.observability?.alerts?.filter((a) => a.severity !== "ok").length ? (
+          <div className="space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2">
+            <p className="text-xs font-semibold uppercase tracking-wider text-amber-200/90">
+              运维告警 · {data.observability.status}
+            </p>
+            <ul className="space-y-1 text-sm text-amber-50/90">
+              {data.observability.alerts
+                .filter((a) => a.severity !== "ok")
+                .map((a) => (
+                  <li key={a.code} className="font-mono text-xs">
+                    [{a.severity}] {a.message}
+                  </li>
+                ))}
+            </ul>
+          </div>
+        ) : null}
+
         {data ? (
           <>
             <div className="flex flex-wrap gap-2">
@@ -498,6 +530,25 @@ export function BiDashboard() {
                   涨榜热点 Top10
                 </h2>
                 <div ref={barRef} className="h-[min(280px,32vh)] w-full min-h-[200px]" />
+                <ul className="mt-2 max-h-24 space-y-0.5 overflow-y-auto text-[10px]">
+                  {hot.map((h) => (
+                    <li key={h.entityId}>
+                      <button
+                        type="button"
+                        className="text-cyan-200/90 hover:underline"
+                        onClick={() =>
+                          setDrill({
+                            kind: "entity",
+                            id: h.entityId,
+                            label: h.canonicalName,
+                          })
+                        }
+                      >
+                        {h.canonicalName} (+{h.totalRankGain})
+                      </button>
+                    </li>
+                  ))}
+                </ul>
               </section>
             </div>
 
@@ -505,8 +556,33 @@ export function BiDashboard() {
               <section className="rounded-xl border border-white/10 bg-black/35 p-3 lg:col-span-5">
                 <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-white/45">
                   ClickHouse 话题热度
+                  {data.charts.clickhouseMv ? (
+                    <span className="ml-2 font-normal normal-case text-white/35">
+                      MV {data.charts.clickhouseMv.mvExists ? "OK" : "缺失"}
+                    </span>
+                  ) : null}
                 </h2>
                 <div ref={chRef} className="h-[min(240px,28vh)] w-full min-h-[180px]" />
+                {chTopicsForDrill.length > 0 ? (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {chTopicsForDrill.map(([tid, meta]) => (
+                      <button
+                        key={tid}
+                        type="button"
+                        className="rounded border border-cyan-500/30 px-2 py-0.5 text-[10px] text-cyan-200/90 hover:bg-cyan-500/10"
+                        onClick={() =>
+                          setDrill({
+                            kind: "topic",
+                            id: String(tid),
+                            label: meta.title,
+                          })
+                        }
+                      >
+                        {meta.slug ?? tid}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
               </section>
               <section className="rounded-xl border border-white/10 bg-black/35 p-3 lg:col-span-4">
                 <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-white/45">
@@ -602,6 +678,7 @@ export function BiDashboard() {
           <p className="text-center text-white/50">加载 BI 数据…</p>
         ) : null}
       </div>
+      <BiDrillPanel target={drill} onClose={() => setDrill(null)} />
     </div>
   );
 }

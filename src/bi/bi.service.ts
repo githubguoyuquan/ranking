@@ -10,6 +10,7 @@ import { RedisHealthService } from '../cache/redis-health.service';
 import { ElasticService } from '../search/elastic.service';
 import { QdrantSearchService } from '../search/qdrant-search.service';
 import { resolveSearchPrimary } from '../search/search-primary';
+import { ObservabilityService } from '../observability/observability.service';
 
 @Injectable()
 export class BiService {
@@ -22,6 +23,7 @@ export class BiService {
     private readonly redisHealth: RedisHealthService,
     private readonly elastic: ElasticService,
     private readonly qdrant: QdrantSearchService,
+    private readonly observability: ObservabilityService,
   ) {}
 
   async getTopicTimeseries(days: number) {
@@ -32,6 +34,52 @@ export class BiService {
   async getEntityRankSparkline(entityId: bigint, days: number) {
     const rows = await this.clickhouse.queryEntityRankSparkline(entityId, days);
     return { ok: this.clickhouse.isEnabled(), entityId: entityId.toString(), days, rows };
+  }
+
+  async getTopicDrilldown(topicId: bigint, days: number) {
+    const [rows, topic] = await Promise.all([
+      this.clickhouse.queryTopicDrilldown(topicId, days),
+      this.prisma.topic.findUnique({
+        where: { id: topicId },
+        select: { id: true, slug: true, title: true, kind: true },
+      }),
+    ]);
+    return {
+      ok: this.clickhouse.isEnabled(),
+      topicId: topicId.toString(),
+      days,
+      topic,
+      rows,
+    };
+  }
+
+  async getEntityDrill(entityId: bigint, days: number) {
+    const [sparkline, entity, mv] = await Promise.all([
+      this.clickhouse.queryEntityRankSparkline(entityId, days),
+      this.prisma.entity.findUnique({
+        where: { id: entityId },
+        select: { id: true, canonicalName: true, type: true },
+      }),
+      this.clickhouse.queryMvHealth(),
+    ]);
+    return {
+      ok: this.clickhouse.isEnabled(),
+      entityId: entityId.toString(),
+      days,
+      entity: entity
+        ? {
+            id: entity.id.toString(),
+            canonicalName: entity.canonicalName,
+            type: entity.type,
+          }
+        : null,
+      sparkline,
+      clickhouseMv: mv,
+    };
+  }
+
+  async getClickhouseMvHealth() {
+    return this.clickhouse.queryMvHealth();
   }
 
   async getOverview(chartDays = 14): Promise<Record<string, unknown>> {
@@ -65,6 +113,7 @@ export class BiService {
       kafkaStatus,
       esHealth,
       chTopicTrend,
+      chMvHealth,
     ] = await Promise.all([
       this.prisma.topic.count(),
       this.prisma.entity.count(),
@@ -152,6 +201,7 @@ export class BiService {
       this.kafka.ping(),
       this.elastic.ping(),
       this.clickhouse.queryTopicPopularityTrend(chartDays),
+      this.clickhouse.queryMvHealth(),
     ]);
 
     const rankingQueue = Object.fromEntries(
@@ -159,6 +209,17 @@ export class BiService {
     );
 
     const primarySearch = resolveSearchPrimary(this.qdrant, this.elastic);
+    const opsSummary = (await this.observability.getSummary()) as Record<string, unknown>;
+
+    const topicIds = [...new Set(chTopicTrend.map((r) => r.topic_id))];
+    const topicMeta =
+      topicIds.length === 0
+        ? []
+        : await this.prisma.topic.findMany({
+            where: { id: { in: topicIds.map((id) => BigInt(id)) } },
+            select: { id: true, slug: true, title: true },
+          });
+    const topicById = new Map(topicMeta.map((t) => [Number(t.id), t]));
 
     return toPlainJson({
       generatedAt: now.toISOString(),
@@ -182,20 +243,22 @@ export class BiService {
         kafka: kafkaStatus,
         elasticsearch: esHealth,
       },
+      observability: {
+        status: opsSummary.status,
+        alerts: opsSummary.alerts,
+        outbox: opsSummary.outbox,
+        crawl: opsSummary.crawl,
+      },
       crawlGlobal: {
-        scheduler: {
-          enabled: process.env.CRAWL_SCHEDULER_DISABLED !== 'true',
-          region: process.env.CRAWL_SCHEDULER_REGION?.trim() || null,
-          enabledSources: scheduleEnabledSources,
-          runsLast24h: scheduleRuns24h,
-        },
-        tasksByStatus: Object.fromEntries(
-          crawlByStatus.map((r) => [r.status, r._count.id]),
-        ),
+        ...(opsSummary.crawl as object),
+        runsLast24h: scheduleRuns24h,
         sourcesByRegion: crawlByRegion.map((r) => ({
           region: r.region ?? 'global',
           count: Number(r.count),
         })),
+        tasksByStatus: Object.fromEntries(
+          crawlByStatus.map((r) => [r.status, r._count.id]),
+        ),
       },
       searchScale: {
         primary: primarySearch,
@@ -211,7 +274,15 @@ export class BiService {
           trendType: r.trendType,
           count: Number(r.count),
         })),
-        clickhouseTopicPopularity: chTopicTrend,
+        clickhouseTopicPopularity: chTopicTrend.map((r) => {
+          const t = topicById.get(r.topic_id);
+          return {
+            ...r,
+            topicSlug: t?.slug ?? null,
+            topicTitle: t?.title ?? null,
+          };
+        }),
+        clickhouseMv: chMvHealth,
         outboxPendingByType: outboxByType.map((r) => ({
           type: r.type,
           count: Number(r.count),

@@ -9,21 +9,23 @@
 
 | 需求域 | 愿景要求 | 当前仓库状态 | 差距 / 下一步 |
 |--------|----------|--------------|----------------|
-| 三种排行（客观/半客观/主观趋势） | TopicKind 区分策略与展示 | `TopicKind`: `OBJECTIVE` / `SEMI_OBJECTIVE` / `SUBJECTIVE_TREND` | 管线需按 kind 切换**数据源与权重策略**；管理台展示差异化说明 |
+| 三种排行（客观/半客观/主观趋势） | TopicKind 区分策略与展示 | **`TopicKind` 预设** + `mergePolicyWithTopicKind`；物化按 kind **必填信号/覆盖率**过滤；`GET /v1/topics/:slug` 返回 `kindStrategy`；管理台 `/topics` | 外部信源按 kind 差异化权重仍待接 |
 | 时间维度（日/周/月/年/实时/CUSTOM） | 多窗口排行与快照 | `TimeWindow` 枚举 + `TopicRanking` 唯一键 `(topicVersionId, timeWindow, windowStart)` | REALTIME 语义、滑动窗口、多 TZ 策略需产品化 |
 | 不可变快照 + 版本 | 每次排行完整快照 | `TopicRankSnapshot`：`snapshotVersion`、`rankingJson`、`tTrendSummary`、`confidenceScore`、`generatedByAi` | 已满足核心模型；缺**自动 trendSummary 生成任务链** |
 | 单条目排名演化 | previousRank、rankChange、趋势 | `RankingItem`：`previousRank`、`rankChange`、`TrendType`、多维度 score | 快照内已满足；**历史极值与末端连续升降步数**在 `GET /v1/entities/:id/rank-history` 的 `summary` 中计算；**按实体物化统计表**见 §5.1（未建） |
 | 历史时间线 | `RankingItemHistory` + 分析 | `RankingItemHistory` + **`GET /v1/entities/:id/rank-history`**；话题侧 **`GET /v1/topics/:slug/snapshots`** / **`trend-analyses`** | 缺 **CH↔PG 运营报表**、§13 曲线可视化与实时推送 |
 | 时间衰减 / 权重 | 指数/分段/可配置 | `src/domain/scoring.ts`：`timeWeight`、`blendedObservation`、`scoreEntity` | 算法已有；**物化排行时未保证全链路使用该套权重**（需接 EntityMetric/外部信号） |
 | 趋势分析 | 环比/同比/MA/异常 | 物化成功写入**快照级** `TrendAnalysis`（`entityId` 空）+ **`GET /v1/topics/:slug/trend-analyses`**；`scoring` 含 EWMA/斜率/波动分类 | 缺**独立周期作业**（回填/同比）、**异常阈值**与告警配置 |
-| 抓取：增量、断点、去重 | checkpoint、fingerprint | `CrawlCheckpoint`、`CrawledUrl`；**全球调度** `CrawlSchedulerService` + `region` 队列分片 | 多区域 K8s 生产落地、调度 SLA 与配额 |
-| 向量语义 / 亿级 ES | Qdrant/Milvus + ES | **Qdrant 主检索** + ES 写别名/rollover 模板/bulk 分批 | 托管 ES 集群 ILM、跨集群 DR、 crawl 语义 ANN 全量 |
-| Kafka 事件网 | 全链路事件 | **7 类** Outbox→Kafka + `kafkaPublishedAt` 与 Flusher 双轨；`GET /admin/kafka/events` | 消费方/CDC 仍在演进 |
+| 抓取：增量、断点、去重 | checkpoint、fingerprint | `CrawlCheckpoint`、`CrawledUrl`；**全球调度** `CrawlSchedulerService` + `CrawlScheduleRun` + 管理台 `/crawl` | 多区域 K8s 生产落地、调度 SLA 与配额 |
+| 向量语义 / 亿级 ES | Qdrant/Milvus + ES | **Qdrant 主检索**（`SEARCH_PRIMARY`）+ ES **ILM/rollover** + 规模验证 API | 跨集群 DR、crawl 语义 ANN 全量 |
+| Kafka 事件网 | 全链路事件 | **6 类外发 Kafka** + 1 类仅登记；**本仓库无 Consumer**；双轨 `publishedAt` / `kafkaPublishedAt` | 外部消费方按 `docs/kafka/CONSUMER_BOUNDARY.md` 订阅 |
 | Schema Registry | 中心化契约 | Redpanda SR + `KAFKA_SCHEMA_REGISTRY_URL` REST 注册 | 消息仍为 JSON 封套（非 Avro wire） |
 | 微服务拆分 | 多进程/多服务 | `PROCESS_ROLE` + `platform-worker` / `crawl-worker` + Helm 多 Deployment | 未拆独立仓库 |
 | 多 AZ 运维 | K8s 生产 | `values-production.yaml` PDB + topologySpread + `docs/ops/PRODUCTION.md` | 托管服务与 DR 演练待落地 |
 | AI Agent 体系 | 多 Agent | `POST /admin/snapshots/:id/analyze` + `AiAnalysis` | **单点分析**；缺 Topic Discovery / Merge / Dedup / FactCheck 等待办服务 |
-| 搜索与推荐 | 语义、时间、趋势检索 + 推荐 | 统一搜索 PG+ES、管理台高亮 | 缺 **向量检索**、缺 **推荐与相似排行** API |
+| 搜索与推荐 | 语义、时间、趋势检索 + 推荐 | **Qdrant/ES/PG** 统一搜索；kNN + `similar-entities` / `similar-topics` | 时间范围 DSL、Hybrid RRF、更大规模话题向量 |
+| 生产可观测 | Outbox/爬虫/BI | `observability` 模块 + `/bi` 告警 + Grafana 骨架 | 告警路由生产化 |
+| 规模验证 | 压测与 ILM | `POST /admin/scale/validate`、ES ILM、Qdrant benchmark、CH MV + BI 钻取 | 托管集群常态化压测 |
 | 微服务 | DDD+拆服务 | **单体 Nest** | 按限界上下文拆分为独立服务（可选） |
 | K8s / HA / 冷热分离 | 生产级 | `docker-compose` 开发栈 | 缺 Helm/Operator、备份与多 AZ 方案（文档级规划） |
 
@@ -51,7 +53,7 @@ flowchart TB
     ES[(Elasticsearch 全文)]
     RD[(Redis 缓存/队列)]
     KF[(Kafka/Redpanda)]
-    VDB[(向量库 Qdrant/Milvus 规划中)]
+    VDB[(Qdrant 向量检索)]
     OS[(对象存储 MinIO 规划中)]
   end
 
@@ -160,11 +162,11 @@ flowchart LR
 
 ### 5.2 ClickHouse
 
-当前仓库含 `metric_timeseries` 与同步路径（见 `README`）。生产需：**TTL、分区键、物化视图** 预聚合「按天/按实体」指标。
+`metric_timeseries` + **90d TTL** + MV **`mv_metric_daily_topic`** → `metric_daily_topic`；`SYNC_RANKING_TO_CLICKHOUSE` + direct/outbox 写入；BI **`GET /admin/bi/drill/topic|entity`**；健康 **`GET /admin/bi/clickhouse/mv-health`**。
 
 ### 5.3 Elasticsearch
 
-已有 `ranking_entities`、`ranking_crawled_urls`。扩展方向：为「话题+时间窗口」建只读索引副本，满足「2023 最火歌手」类查询。
+`ranking_entities`、`ranking_crawled_urls`；**写别名 + rollover + ILM 策略**（`ELASTICSEARCH_ILM_ENABLED`）；与 Qdrant **Outbox 双写**；规模 API 见 `docs/ops/SCALE_VALIDATION.md`。
 
 ---
 
@@ -206,15 +208,32 @@ sequenceDiagram
 
 ---
 
-## 8. Kafka 消息流（当前 + 目标）
+## 8. Kafka 消息流（生产者 + 外部队列）
 
-**当前**：事务内写入的 **`OutboxEvent`** 按 `type` 分流：**`ranking.snapshot.completed`** → **`OutboxPublisherService`** 发 **Kafka**（Wire 为 **Envelope v1**：`envelopeVersion`、`type`、`payload`、`meta`；`payload` 由 **`buildRankingSnapshotCompletedOutboxPayload`** 构造；发布前 **`KafkaEventSchemaService`** 用 **AJV + `src/kafka/schemas/*.schema.json`** 校验；路由与 topic 见 **`src/kafka/event-registry.ts`**、消费方说明见 **`docs/kafka/EVENT_CATALOG.md`**）；**`clickhouse.ranking.snapshot.ingest`**（`SYNC_RANKING_TO_CLICKHOUSE` + **`CLICKHOUSE_WRITE_MODE=outbox`**）→ **`buildClickhouseRankingSnapshotOutboxPayload`**，由 **ClickhouseOutboxFlusher** 消费；**`elasticsearch.entity.sync`** / **`elasticsearch.crawled_url.sync`** → **`buildElasticEntitySyncOutboxPayload`** / **`buildElasticCrawledUrlSyncOutboxPayload`**，由 **ES Flusher** 消费；**`ranking.followup.requested`**（**`RANKING_FOLLOWUP_OUTBOX`**）→ **`buildRankingFollowupRequestedOutboxPayload`**，**不经 Kafka**，仅占位列。常量见 **`src/outbox/outbox.constants.ts`**；**`GET /admin/outbox`** 与 **OpenAPI** 见 **`docs/openapi/admin-outbox.yaml`**；管理台 **`/outbox`** 对主要 `type` 提供快捷筛选、摘要列与 JSON 键高亮。
+**边界（必读）**：本仓库 **只生产、不消费** Kafka。进程内侧效应由 **Outbox Flusher / BullMQ** 完成，**不是** Kafka Consumer。详见 **`docs/kafka/CONSUMER_BOUNDARY.md`**。
 
-**目标**（演进）：
+**外发 Kafka**（`OutboxPublisherService`，`kafkaPublishedAt`；`publishToKafka: true`）：
 
-- 更多领域事件入 Kafka（`crawl.url.fetched`、`entity.signal.updated`、`ranking.requested`、`ai.analysis.requested` 等），在 **`event-registry.ts`** 注册并配套 JSON Schema；
-- **Confluent/Apicurio Schema Registry**（中心化 `$id`、兼容性策略；当前为仓库内 JSON Schema + 发布侧校验）；
-- **消费者组** 分离：索引、风控、计费、对账。
+| type | 默认 topic | 说明 |
+|------|------------|------|
+| `ranking.snapshot.completed` | `ranking.snapshot.completed` | 快照物化成功 |
+| `crawl.url.fetched` | `crawl.url.fetched` | URL 落库 |
+| `ai.agent.run.completed` | `ai.agent.run.completed` | Agent 运行结束 |
+| `clickhouse.ranking.snapshot.ingest` | `clickhouse.ranking.snapshot.ingest` | CH 镜像（权威：Flusher） |
+| `elasticsearch.entity.sync` | `elasticsearch.entity.sync` | ES 镜像（权威：Flusher） |
+| `elasticsearch.crawled_url.sync` | `elasticsearch.crawled_url.sync` | ES 爬取镜像 |
+
+Wire：**Envelope v1** + AJV（`src/kafka/schemas/`）；路由 **`src/kafka/event-registry.ts`**；目录 **`GET /admin/kafka/events`**。
+
+**仅登记、默认不发 Kafka**：
+
+- **`ranking.followup.requested`**（`publishToKafka: false`）：可选 Outbox 占位；执行由 **BullMQ `ranking-followup`** 负责。
+
+**进程内 Flusher**（`publishedAt`，非 Kafka）：
+
+- **ClickhouseOutboxFlusher**、**ElasticEntityOutboxFlusher**、**ElasticCrawledUrlOutboxFlusher**（与上表 ES/CH 类型对应，双轨时可同时有 `kafkaPublishedAt`）。
+
+**目标**（演进）：更多领域事件注册 + 外部独立 consumer group（索引/风控/计费）；本仓库保持 producer 边界。
 
 ---
 
@@ -238,13 +257,9 @@ sequenceDiagram
 
 ## 10. 搜索与推荐
 
-**已有**：`GET /v1/search` 聚合实体+爬取；ES/ PG 双路径；实体索引 **`dense_vector`（1536，`cosine`）** 与 OpenAI embedding；**`semantic=1` / `entitySemantic=1`** 走 kNN；**`GET /v1/recommendations/similar-topics`**（PG `TopicEmbedding` + 余弦）、**`GET /v1/recommendations/similar-entities`**（ES kNN）。管理台高亮。
+**已有**：`SEARCH_PRIMARY=auto|qdrant|es|pg`；**`QdrantSearchService`** 双 collection（全文 `searchText` + 向量 kNN）；ES/PG 回退；Outbox 与 ES/Qdrant **并行双写**；**`GET /v1/search/health`**；**`POST /admin/reindex-*`**；**`GET /v1/recommendations/similar-*`**；管理台高亮。
 
-**缺口**：
-
-- **时间检索**：`windowStart`/`snapshotTime` 范围 DSL；
-- **Hybrid**：lexical + vector 线性融合与 RRF；
-- **推荐**：`TopicRanking` 协同、更大规模话题向量迁 ES/Qdrant。
+**缺口**：时间范围 DSL、Hybrid RRF、协同过滤推荐。
 
 ---
 
@@ -284,7 +299,7 @@ sequenceDiagram
 
 ## 13. 前端（Next.js）
 
-**已有**：管理台多页、ECharts、快照对比、搜索、爬取、**Outbox**（**Kafka / CH / ES 实体 / ES 爬取 / `ranking.followup.requested`** 快捷筛选，表格多类 **`payload` 摘要**，JSON 契约键高亮）、ES 健康等；**话题版本** 页含 **`TrendAnalysis` 快照摘要**、**近期快照**（含 **`hasScoreModel`** / 分解 API）、**热榜预览**（**`resolved.hasScoreModel`**、**score-breakdowns** 链）、**policyJson 编辑（PATCH）**；**热榜 SSE**：`GET /v1/realtime/stream`（Redis Pub/Sub，快照 **`snapshot_ready`** / **`ranking_failed`**）；**实体** 页 **rank-history** JSON + **`/entities/rank-history`** 折线图；**`/trends`** 热点表（`GET /v1/trends/hot`）。**快照详情** `/snapshots/:id` 展示 **ScoreModel / `scoreBreakdown`**，**`AI 简报` 工具条**可打开 **`GET …/score-breakdowns`**，支持 **`?analysisKind=`** / **`?analysisPage=`** / **`?analysisLimit=`**，与 **`GET /v1/snapshots/:id/analyses`** 分页对齐。**快照对比** 说明中提及单元格 **`scoreBreakdown`** 与按列拉取关系表 JSON。
+**已有**：管理台多页、**`/bi` 大屏**（observability 告警、CH MV、**实体/话题钻取侧栏**）、**`/scale`**（ILM/压测）、**`/crawl` 调度**、**`/topics` kindStrategy**、**Outbox** 快捷筛选、ES/Qdrant 健康等；**话题版本** 页含 **`TrendAnalysis` 快照摘要**、**近期快照**（含 **`hasScoreModel`** / 分解 API）、**热榜预览**（**`resolved.hasScoreModel`**、**score-breakdowns** 链）、**policyJson 编辑（PATCH）**；**热榜 SSE**：`GET /v1/realtime/stream`（Redis Pub/Sub，快照 **`snapshot_ready`** / **`ranking_failed`**）；**实体** 页 **rank-history** JSON + **`/entities/rank-history`** 折线图；**`/trends`** 热点表（`GET /v1/trends/hot`）。**快照详情** `/snapshots/:id` 展示 **ScoreModel / `scoreBreakdown`**，**`AI 简报` 工具条**可打开 **`GET …/score-breakdowns`**，支持 **`?analysisKind=`** / **`?analysisPage=`** / **`?analysisLimit=`**，与 **`GET /v1/snapshots/:id/analyses`** 分页对齐。**快照对比** 说明中提及单元格 **`scoreBreakdown`** 与按列拉取关系表 JSON。
 
 **缺口（产品级）**：
 
@@ -295,7 +310,7 @@ sequenceDiagram
 
 ## 14. 部署与运维
 
-**开发**：`docker-compose.yml` — Postgres、Redis、Redpanda、ClickHouse、Elasticsearch。
+**开发**：`docker-compose.yml` — Postgres、Redis、Redpanda（Kafka）、ClickHouse、Elasticsearch、**Qdrant**、可选 Prometheus/Grafana。
 
 **生产（规划）**：
 
@@ -325,10 +340,11 @@ sequenceDiagram
 
 ### Phase C — 规模
 
-1. PG 分区、只读副本、ES 索引滚动（✅ 骨架：`DATABASE_READ_URL` + `PrismaReadService`；`POST /admin/scale/postgres/ensure-partitions`；`ELASTICSEARCH_USE_WRITE_ALIAS` + rollover/bootstrap API）。  
-2. 向量库 + 语义去重 + 相似话题（✅ ES/PG 向量与 `TopicEmbedding`；✅ **`CRAWL_SEMANTIC_DEDUP_CROSS_SOURCE`**；✅ **可选 `QDRANT_URL`** + `docker-compose` qdrant 服务）。  
-3. 爬虫分布式与代理池（✅ **`CRAWL_PROXY_POOL`** 轮询；✅ **`CRAWL_QUEUE_SHARD`** 队列分片；多 `crawl-worker` 进程）。  
-4. **运维骨架**：✅ `deploy/helm/ranking`；✅ compose **MinIO**；CH **90d TTL**（`002_metric_timeseries_ttl.sql`）。  
+1. PG 分区、只读副本、ES **ILM + rollover**（✅ `POST /admin/scale/elasticsearch/*`；`docs/ops/SCALE_VALIDATION.md`）。  
+2. **Qdrant 主检索** + 语义去重 + 相似话题（✅ `SEARCH_PRIMARY`；✅ **`CRAWL_SEMANTIC_DEDUP_CROSS_SOURCE`**）。  
+3. 爬虫全球调度 + 代理池（✅ **`CrawlSchedulerService`**；✅ **`CRAWL_PROXY_POOL`** / **`CRAWL_QUEUE_SHARD`**）。  
+4. CH MV + BI 钻取 + 规模验证套件（✅ `metric_daily_topic`；✅ `POST /admin/scale/validate`）。  
+5. **运维骨架**：✅ Helm；✅ 可观测 Grafana 预置看板。  
 
 ### Phase D — 商业化可靠性与合规
 
@@ -343,4 +359,4 @@ sequenceDiagram
 - **算法库已包含时间衰减与趋势分类**，但**与全量数据平面、Agent、向量与高并发运维尚未完全接线**。  
 - 本文档可作为**长期演进的单一蓝图**；具体迭代请按 §15 分阶段落到 Issue / 里程碑。
 
-维护：架构变更时请同步更新本文件与根目录 `README.md` 的「Priority」段落。
+维护：架构变更时请同步更新本文件、根目录 `README.md`，以及 `docs/kafka/CONSUMER_BOUNDARY.md` / `EVENT_CATALOG.md`。

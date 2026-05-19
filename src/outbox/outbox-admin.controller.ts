@@ -49,11 +49,13 @@ class OutboxListQueryDto {
  * - `rows`：经 `toPlainJson` 后的 `OutboxEvent` 列表；`id` 等为十进制字符串，`payload` 为 JSON 对象
  *
  * 常见 **`type` → `payload` 契约**（写入侧由下列 **builder** 固化；常量见 `src/outbox/outbox.constants.ts`）：
- * - `ranking.snapshot.completed`（**Kafka**）→ `buildRankingSnapshotCompletedOutboxPayload`（`src/rankings/ranking-snapshot-completed-outbox-payload.ts`）
- * - `clickhouse.ranking.snapshot.ingest`（**ClickHouse Flusher**）→ `buildClickhouseRankingSnapshotOutboxPayload`（`src/rankings/clickhouse-ranking-snapshot-outbox-payload.ts`）
- * - `elasticsearch.entity.sync`（**ES 实体 Flusher**）→ **`buildElasticEntitySyncOutboxPayload`**（**`payload`**：`src/search/elastic-entity-sync-outbox-payload.ts`；同事务 **`type`+`payload`**：`elasticEntitySyncOutboxCreate`，`src/search/elastic-entity-outbox.ts`）
- * - `elasticsearch.crawled_url.sync`（**ES 爬取 Flusher**）→ **`buildElasticCrawledUrlSyncOutboxPayload`**（**`payload`**：`src/search/elastic-crawled-url-sync-outbox-payload.ts`；封装 **`elasticCrawledUrlSyncOutboxCreate`，`src/search/elastic-crawled-url-outbox.ts`**）
- * - `ranking.followup.requested`（**不经 Kafka**；需 `RANKING_FOLLOWUP_OUTBOX`）→ `buildRankingFollowupRequestedOutboxPayload`（`src/rankings/ranking-followup-requested-outbox-payload.ts`）
+ * - `ranking.snapshot.completed`（**Kafka 外发**）→ `buildRankingSnapshotCompletedOutboxPayload`
+ * - `clickhouse.ranking.snapshot.ingest`（**CH Flusher** + 可选 Kafka 镜像）→ `buildClickhouseRankingSnapshotOutboxPayload`
+ * - `elasticsearch.entity.sync`（**ES Flusher** + 可选 Kafka 镜像）→ `buildElasticEntitySyncOutboxPayload` / `elasticEntitySyncOutboxCreate`
+ * - `elasticsearch.crawled_url.sync`（**ES Flusher** + 可选 Kafka 镜像）→ `buildElasticCrawledUrlSyncOutboxPayload` / `elasticCrawledUrlSyncOutboxCreate`
+ * - `ranking.followup.requested`（**不发 Kafka**；BullMQ；需 `RANKING_FOLLOWUP_OUTBOX`）→ `buildRankingFollowupRequestedOutboxPayload`
+ *
+ * 消费边界：`docs/kafka/CONSUMER_BOUNDARY.md`（本仓库无 Kafka Consumer）。
  *
  * 管理台 **`/outbox`**：上述各类 **快捷 `type`、表格摘要列、JSON 契约键高亮**（见 `README`）。
  *

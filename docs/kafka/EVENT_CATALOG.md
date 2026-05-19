@@ -2,6 +2,8 @@
 
 Outbox → Kafka 外发契约。实现：`src/kafka/`（注册表、AJV、Schema Registry REST）。
 
+**消费边界**：本仓库 **不运行 Kafka Consumer**；外部队列说明见 **[CONSUMER_BOUNDARY.md](./CONSUMER_BOUNDARY.md)**。
+
 ## 封套（Envelope）v1
 
 | 字段 | 说明 |
@@ -15,17 +17,19 @@ Schema：`src/kafka/schemas/event-envelope-v1.schema.json`。
 
 ## Topic 全量注册
 
-路由定义：**`src/kafka/event-registry.ts`**。运维目录：**`GET /admin/kafka/events`**。
+路由定义：**`src/kafka/event-registry.ts`**。运维目录：**`GET /admin/kafka/events`**（含 `publishToKafka`、`sideEffect`）。
 
-| `OutboxEvent.type` | 默认 Topic | 环境变量 |
-|--------------------|------------|----------|
-| `ranking.snapshot.completed` | `ranking.snapshot.completed` | `KAFKA_TOPIC_RANKING_SNAPSHOT_COMPLETED` |
-| `ranking.followup.requested` | `ranking.followup.requested` | `KAFKA_TOPIC_RANKING_FOLLOWUP_REQUESTED` |
-| `crawl.url.fetched` | `crawl.url.fetched` | `KAFKA_TOPIC_CRAWL_URL_FETCHED` |
-| `clickhouse.ranking.snapshot.ingest` | `clickhouse.ranking.snapshot.ingest` | `KAFKA_TOPIC_CLICKHOUSE_RANKING_SNAPSHOT` |
-| `elasticsearch.entity.sync` | `elasticsearch.entity.sync` | `KAFKA_TOPIC_ELASTIC_ENTITY_SYNC` |
-| `elasticsearch.crawled_url.sync` | `elasticsearch.crawled_url.sync` | `KAFKA_TOPIC_ELASTIC_CRAWLED_URL_SYNC` |
-| `ai.agent.run.completed` | `ai.agent.run.completed` | `KAFKA_TOPIC_AI_AGENT_RUN_COMPLETED` |
+| `OutboxEvent.type` | 默认 Topic | Kafka 外发 | 进程内侧效应 |
+|--------------------|------------|------------|--------------|
+| `ranking.snapshot.completed` | `ranking.snapshot.completed` | ✅ | — |
+| `crawl.url.fetched` | `crawl.url.fetched` | ✅ | — |
+| `ai.agent.run.completed` | `ai.agent.run.completed` | ✅ | — |
+| `clickhouse.ranking.snapshot.ingest` | `clickhouse.ranking.snapshot.ingest` | ✅ 镜像 | CH Flusher |
+| `elasticsearch.entity.sync` | `elasticsearch.entity.sync` | ✅ 镜像 | ES Flusher |
+| `elasticsearch.crawled_url.sync` | `elasticsearch.crawled_url.sync` | ✅ 镜像 | ES Flusher |
+| `ranking.followup.requested` | `ranking.followup.requested` | ❌ | BullMQ `ranking-followup` |
+
+Topic 环境变量：`KAFKA_TOPIC_*`（见 registry 各行的 `topicEnvVar`）。
 
 ## Schema Registry
 
@@ -33,20 +37,20 @@ Schema：`src/kafka/schemas/event-envelope-v1.schema.json`。
 - 生产：`KAFKA_SCHEMA_REGISTRY_URL` — Confluent/Apicurio 兼容 REST
 - 发布前注册 subject（`{topic}-value`）；消息体仍为 **UTF-8 JSON 封套**（非 Avro wire）
 
-## Outbox 与 Flusher
+## Outbox 双轨
 
-同一 Outbox 行可：
-
-1. 由 **Platform Worker** 写入 Kafka（`kafkaPublishedAt`）
-2. 由 **ES/CH Flusher** 写索引（`publishedAt`）
+| 字段 | 含义 |
+|------|------|
+| `kafkaPublishedAt` | 已外发到 Kafka（仅 `publishToKafka=true` 的 type） |
+| `publishedAt` | 进程内 Flusher 已完成（ES/CH） |
 
 ## 新增事件 checklist
 
 1. `outbox.constants.ts` 增加 type  
-2. `event-registry.ts` 的 `ROUTED`  
+2. `event-registry.ts` 的 `ROUTED`（设置 `publishToKafka`、`sideEffect`）  
 3. `src/kafka/schemas/*-payload-v1.schema.json`  
 4. 业务处 `outboxEvent.create`  
-5. 更新本文档  
+5. 更新本文档与 **CONSUMER_BOUNDARY.md**  
 
 ## 校验与救急
 

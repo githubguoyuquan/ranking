@@ -14,6 +14,7 @@ export const NEST_V1 = {
   rankingsRun: `${V1}/rankings/run`,
   snapshotsCompare: `${V1}/snapshots/compare`,
   crawlSources: `${V1}/crawl/sources`,
+  crawlSourceById: `${V1}/crawl/sources/:sourceId`,
   crawlTasks: `${V1}/crawl/tasks`,
   crawlUrls: `${V1}/crawl/urls`,
 } as const;
@@ -97,6 +98,10 @@ export function nestV1TrendsHotPath(query?: URLSearchParams): string {
   const base = `${V1}/trends/hot`;
   const qs = query?.toString() ?? "";
   return qs ? `${base}?${qs}` : base;
+}
+
+export function nestV1CrawlSourcePath(sourceId: string): string {
+  return `${V1}/crawl/sources/${encodeURIComponent(sourceId)}`;
 }
 
 export function nestV1CrawlSourcesListPath(limit: number): string {

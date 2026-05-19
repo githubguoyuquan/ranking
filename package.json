@@ -15,7 +15,8 @@
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "lint:web": "npm run lint --prefix web",
     "lint:all": "npm run lint && npm run lint:web && npm run typecheck --prefix web",
-    "test": "vitest run"
+    "test": "vitest run",
+    "scale:validate": "bash scripts/scale-validate.sh"
   },
   "dependencies": {
     "@clickhouse/client": "^1.18.5",

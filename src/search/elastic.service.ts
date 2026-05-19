@@ -12,6 +12,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EMBEDDING_DIMS } from './embedding.constants';
 import { EmbeddingService } from './embedding.service';
 import { ELASTIC_INDEX_CRAWLED_URLS, ELASTIC_INDEX_ENTITIES } from './elastic.constants';
+import {
+  buildIlmPolicyBody,
+  elasticIlmEnabled,
+  elasticIlmPolicyName,
+} from './elastic-ilm.config';
 
 function aliasesToText(aliases: Prisma.JsonValue | null | undefined): string {
   if (aliases === null || aliases === undefined) return '';
@@ -143,6 +148,7 @@ export class ElasticService implements OnModuleDestroy {
   scaleHints(): Record<string, unknown> {
     return {
       useWriteAlias: this.usesWriteAlias(),
+      ilmEnabled: elasticIlmEnabled(),
       refreshOnWrite: this.refreshOnWrite() === true,
       bulkBatchSize: Number(process.env.ELASTICSEARCH_BULK_BATCH_SIZE ?? '500') || 500,
       indexShards: process.env.ELASTICSEARCH_INDEX_SHARDS?.trim() || '3',
@@ -161,26 +167,215 @@ export class ElasticService implements OnModuleDestroy {
     const replicas = Number(process.env.ELASTICSEARCH_INDEX_REPLICAS ?? '1') || 1;
     const maxDocs = Number(process.env.ELASTICSEARCH_ROLLOVER_MAX_DOCS ?? '50000000') || 50_000_000;
     const templates: Record<string, unknown> = {};
-    for (const pattern of [`${ELASTIC_INDEX_ENTITIES}*`, `${ELASTIC_INDEX_CRAWLED_URLS}*`]) {
-      const name = `ranking_${pattern.replace(/\*/g, '')}_template`;
+    const bases = [ELASTIC_INDEX_ENTITIES, ELASTIC_INDEX_CRAWLED_URLS];
+    for (const base of bases) {
+      const pattern = `${base}*`;
+      const name = `ranking_${base}_template`;
+      const settings: Record<string, unknown> = {
+        number_of_shards: shards,
+        number_of_replicas: replicas,
+        refresh_interval: '30s',
+        'index.max_result_window': 10000,
+      };
+      if (elasticIlmEnabled() && this.usesWriteAlias()) {
+        settings['index.lifecycle.name'] = elasticIlmPolicyName(base);
+        settings['index.lifecycle.rollover_alias'] = this.writeAliasName(base);
+      }
       await this.client.indices.putIndexTemplate({
         name,
         index_patterns: [pattern],
-        template: {
-          settings: {
-            number_of_shards: shards,
-            number_of_replicas: replicas,
-            refresh_interval: '30s',
-            'index.max_result_window': 10000,
-          },
-        },
+        template: { settings },
       });
-      templates[pattern] = { template: name, shards, replicas, maxDocs };
+      templates[pattern] = {
+        template: name,
+        shards,
+        replicas,
+        maxDocs,
+        ilm: elasticIlmEnabled() ? elasticIlmPolicyName(base) : null,
+      };
     }
     return {
       ok: true,
       templates,
-      hint: 'Enable ELASTICSEARCH_USE_WRITE_ALIAS=true and POST bootstrap-aliases before bulk ingest',
+      ilmEnabled: elasticIlmEnabled(),
+      hint: elasticIlmEnabled()
+        ? 'POST ensure-ilm then bootstrap-ilm-indices (or bootstrap-aliases for legacy)'
+        : 'Enable ELASTICSEARCH_USE_WRITE_ALIAS=true and POST bootstrap-aliases before bulk ingest',
+    };
+  }
+
+  /** 托管 ES：安装 ILM 策略（entities + crawled_urls） */
+  async ensureIlmPolicies(): Promise<unknown> {
+    if (!this.client) return { ok: false, detail: 'ELASTICSEARCH_NODE not set' };
+    const policies: Record<string, unknown> = {};
+    for (const base of [ELASTIC_INDEX_ENTITIES, ELASTIC_INDEX_CRAWLED_URLS]) {
+      const name = elasticIlmPolicyName(base);
+      const body = buildIlmPolicyBody(base);
+      await this.client.ilm.putLifecycle({ name, ...body });
+      policies[base] = { policy: name, body };
+    }
+    return { ok: true, policies, ilmEnabled: elasticIlmEnabled() };
+  }
+
+  /** ILM 解释与写别名挂载情况（规模验证） */
+  async getIlmStatus(): Promise<unknown> {
+    if (!this.client) return { ok: false, detail: 'ELASTICSEARCH_NODE not set' };
+    const out: Record<string, unknown> = { ok: true, indices: {} };
+    for (const base of [ELASTIC_INDEX_ENTITIES, ELASTIC_INDEX_CRAWLED_URLS]) {
+      const policy = elasticIlmPolicyName(base);
+      let policyExists = false;
+      try {
+        await this.client.ilm.getLifecycle({ name: policy });
+        policyExists = true;
+      } catch {
+        policyExists = false;
+      }
+      const alias = this.writeAliasName(base);
+      let aliasIndices: string[] = [];
+      try {
+        const aliases = await this.client.indices.getAlias({ name: alias });
+        aliasIndices = Object.keys(aliases);
+      } catch {
+        aliasIndices = [];
+      }
+      let explain: unknown = null;
+      const physical = aliasIndices[0] ?? `${base}-000001`;
+      try {
+        explain = await this.client.ilm.explainLifecycle({ index: physical });
+      } catch {
+        explain = { detail: 'no lifecycle explain (index may not exist)' };
+      }
+      (out.indices as Record<string, unknown>)[base] = {
+        policy,
+        policyExists,
+        writeAlias: alias,
+        aliasIndices,
+        explain,
+      };
+    }
+    return out;
+  }
+
+  /**
+   * ILM + rollover 初始索引：`{base}-000001` 挂 `-write` 别名。
+   * 需 `ELASTICSEARCH_USE_WRITE_ALIAS=true` 且已 `ensure-ilm`。
+   */
+  async bootstrapIlmIndices(): Promise<unknown> {
+    if (!this.client) return { ok: false, detail: 'ELASTICSEARCH_NODE not set' };
+    if (!elasticIlmEnabled()) {
+      return { ok: false, detail: 'Set ELASTICSEARCH_ILM_ENABLED=true' };
+    }
+    if (!this.usesWriteAlias()) {
+      return {
+        ok: false,
+        detail: 'Set ELASTICSEARCH_USE_WRITE_ALIAS=true for ILM rollover alias',
+      };
+    }
+    await this.ensureIlmPolicies();
+    const results: Record<string, unknown> = {};
+    for (const base of [ELASTIC_INDEX_ENTITIES, ELASTIC_INDEX_CRAWLED_URLS]) {
+      const initial = `${base}-000001`;
+      const alias = this.writeAliasName(base);
+      const exists = await this.client.indices.exists({ index: initial });
+      if (!exists) {
+        if (base === ELASTIC_INDEX_ENTITIES) {
+          await this.client.indices.create({
+            index: initial,
+            mappings: {
+              properties: {
+                entityId: { type: 'keyword' },
+                type: { type: 'keyword' },
+                canonicalName: {
+                  type: 'text',
+                  analyzer: 'standard',
+                  fields: { keyword: { type: 'keyword', ignore_above: 256 } },
+                },
+                aliases: { type: 'text', analyzer: 'standard' },
+                embedding: {
+                  type: 'dense_vector',
+                  dims: EMBEDDING_DIMS,
+                  index: true,
+                  similarity: 'cosine',
+                },
+              },
+            },
+            aliases: {
+              [alias]: { is_write_index: true },
+            },
+          });
+        } else {
+          await this.client.indices.create({
+            index: initial,
+            mappings: {
+              properties: {
+                crawledUrlId: { type: 'keyword' },
+                sourceId: { type: 'keyword' },
+                url: {
+                  type: 'text',
+                  analyzer: 'standard',
+                  fields: { keyword: { type: 'keyword', ignore_above: 2048 } },
+                },
+                mimeType: { type: 'keyword' },
+                textPreview: { type: 'text', analyzer: 'standard' },
+                pageTitle: { type: 'text', analyzer: 'standard' },
+                status: { type: 'keyword' },
+                fetchedAt: { type: 'date' },
+              },
+            },
+            aliases: {
+              [alias]: { is_write_index: true },
+            },
+          });
+        }
+        this.logger.log(`ILM bootstrap created ${initial} -> ${alias}`);
+      }
+      results[base] = { initial, alias, created: !exists };
+    }
+    return { ok: true, results };
+  }
+
+  /** 规模验证：实体全文检索压测（返回延迟分位） */
+  async benchmarkEntitySearch(
+    query = 'rank',
+    iterations = 20,
+  ): Promise<{
+    ok: boolean;
+    iterations: number;
+    hitsPerQuery: number;
+    latencyMs: { min: number; max: number; p50: number; p95: number; avg: number };
+    detail?: string;
+  }> {
+    if (!this.client) {
+      return {
+        ok: false,
+        iterations: 0,
+        hitsPerQuery: 0,
+        latencyMs: { min: 0, max: 0, p50: 0, p95: 0, avg: 0 },
+        detail: 'ELASTICSEARCH_NODE not set',
+      };
+    }
+    const n = Math.min(Math.max(iterations, 1), 200);
+    const samples: number[] = [];
+    let hits = 0;
+    for (let i = 0; i < n; i++) {
+      const t0 = performance.now();
+      const rows = await this.searchEntities(query, 10);
+      samples.push(performance.now() - t0);
+      hits = rows.length;
+    }
+    const sorted = [...samples].sort((a, b) => a - b);
+    const pct = (p: number) => sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))] ?? 0;
+    return {
+      ok: true,
+      iterations: n,
+      hitsPerQuery: hits,
+      latencyMs: {
+        min: sorted[0] ?? 0,
+        max: sorted[sorted.length - 1] ?? 0,
+        p50: pct(0.5),
+        p95: pct(0.95),
+        avg: samples.reduce((a, b) => a + b, 0) / (samples.length || 1),
+      },
     };
   }
 

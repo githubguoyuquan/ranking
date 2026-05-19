@@ -5,11 +5,20 @@ import { KafkaModule } from '../kafka/kafka.module';
 import { RankingsModule } from '../rankings/rankings.module';
 import { ScaleModule } from '../scale/scale.module';
 import { SearchModule } from '../search/search.module';
+import { ObservabilityModule } from '../observability/observability.module';
 import { BiAdminController } from './bi-admin.controller';
 import { BiService } from './bi.service';
 
 @Module({
-  imports: [RankingsModule, AnalyticsModule, CacheModule, KafkaModule, SearchModule, ScaleModule],
+  imports: [
+    RankingsModule,
+    AnalyticsModule,
+    CacheModule,
+    KafkaModule,
+    SearchModule,
+    ScaleModule,
+    ObservabilityModule,
+  ],
   controllers: [BiAdminController],
   providers: [BiService],
   exports: [BiService],

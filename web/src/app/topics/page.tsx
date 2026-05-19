@@ -64,13 +64,65 @@ const EMPTY_QUICK_WEIGHTS: QuickWeightsState = {
 const selectClass =
   "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-xs outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
+type KindStrategy = {
+  kind: string;
+  description: string;
+  weights: Record<string, number>;
+  requiredSignalKeys: string[];
+  minCoverageToRank: number;
+  decay?: { halfLifeDays?: number };
+};
+
 type TopicMeta = {
   id: string;
   slug: string;
   title: string;
   kind: TopicKindValue;
   locale: string;
+  kindStrategy?: KindStrategy;
 };
+
+function parseKindStrategy(raw: unknown): KindStrategy | undefined {
+  if (raw === null || typeof raw !== "object") return undefined;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.description !== "string") return undefined;
+  const weights =
+    o.weights && typeof o.weights === "object" && !Array.isArray(o.weights)
+      ? (o.weights as Record<string, number>)
+      : {};
+  const requiredSignalKeys = Array.isArray(o.requiredSignalKeys)
+    ? o.requiredSignalKeys.map(String)
+    : [];
+  return {
+    kind: String(o.kind ?? ""),
+    description: o.description,
+    weights,
+    requiredSignalKeys,
+    minCoverageToRank: Number(o.minCoverageToRank) || 0,
+    decay:
+      o.decay && typeof o.decay === "object"
+        ? (o.decay as { halfLifeDays?: number })
+        : undefined,
+  };
+}
+
+function parseTopicMetaFromJson(
+  j: Record<string, unknown>,
+  slugFallback: string,
+): TopicMeta {
+  const kindRaw = j.kind != null ? String(j.kind) : "";
+  const kind: TopicKindValue = isTopicKindValue(kindRaw)
+    ? kindRaw
+    : "SEMI_OBJECTIVE";
+  return {
+    id: String(j.id ?? ""),
+    slug: String(j.slug ?? slugFallback),
+    title: String(j.title ?? ""),
+    kind,
+    locale: String(j.locale ?? ""),
+    kindStrategy: parseKindStrategy(j.kindStrategy),
+  };
+}
 
 type TopicVersionRow = {
   id: string;
@@ -630,19 +682,10 @@ function TopicsPageInner() {
         return;
       }
       const j = JSON.parse(text) as Record<string, unknown>;
-      const kindRaw = j.kind != null ? String(j.kind) : "";
-      const kind: TopicKindValue = isTopicKindValue(kindRaw)
-        ? kindRaw
-        : "SEMI_OBJECTIVE";
-      setTopicMeta({
-        id: String(j.id ?? ""),
-        slug: String(j.slug ?? slugForApi),
-        title: String(j.title ?? ""),
-        kind,
-        locale: String(j.locale ?? ""),
-      });
-      setTopicKindDraft(kind);
-      setTopicTitleDraft(String(j.title ?? ""));
+      const meta = parseTopicMetaFromJson(j, slugForApi);
+      setTopicMeta(meta);
+      setTopicKindDraft(meta.kind);
+      setTopicTitleDraft(meta.title);
     } catch (e) {
       setTopicMeta(null);
       setTopicMsg(e instanceof Error ? e.message : String(e));
@@ -690,19 +733,10 @@ function TopicsPageInner() {
       if (topicRes.ok) {
         try {
           const j = JSON.parse(topicText) as Record<string, unknown>;
-          const kindRaw = j.kind != null ? String(j.kind) : "";
-          const kind: TopicKindValue = isTopicKindValue(kindRaw)
-            ? kindRaw
-            : "SEMI_OBJECTIVE";
-          setTopicMeta({
-            id: String(j.id ?? ""),
-            slug: String(j.slug ?? slugForApi),
-            title: String(j.title ?? ""),
-            kind,
-            locale: String(j.locale ?? ""),
-          });
-          setTopicKindDraft(kind);
-          setTopicTitleDraft(String(j.title ?? ""));
+          const meta = parseTopicMetaFromJson(j, slugForApi);
+          setTopicMeta(meta);
+          setTopicKindDraft(meta.kind);
+          setTopicTitleDraft(meta.title);
           setTopicMsg("");
         } catch {
           setTopicMeta(null);
@@ -881,6 +915,18 @@ function TopicsPageInner() {
                       ?.hint
                   }
                 </p>
+                {topicMeta?.kindStrategy ? (
+                  <div className="mt-2 rounded-md border border-border/80 bg-background/80 p-2 text-[11px] text-muted-foreground">
+                    <p>{topicMeta.kindStrategy.description}</p>
+                    <p className="mt-1 font-mono">
+                      必选: {topicMeta.kindStrategy.requiredSignalKeys.join(", ")}
+                    </p>
+                    <p className="font-mono">
+                      覆盖率 ≥ {topicMeta.kindStrategy.minCoverageToRank} · 半衰期{" "}
+                      {topicMeta.kindStrategy.decay?.halfLifeDays ?? "—"}d
+                    </p>
+                  </div>
+                ) : null}
               </div>
               <div className="space-y-2 sm:col-span-2">
                 <Label htmlFor="topic-title">标题 title</Label>

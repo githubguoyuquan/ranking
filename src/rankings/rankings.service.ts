@@ -49,7 +49,12 @@ import { ElasticService } from '../search/elastic.service';
 import { QdrantSearchService } from '../search/qdrant-search.service';
 import { upsertEntityTopicStatsBatch } from '../domain/entity-topic-stats';
 import { parseRankingPolicyJson, type RankingPolicyJson } from '../domain/policy-json';
-import { mergePolicyWithTopicKind } from '../domain/topic-kind-policy';
+import {
+  entityHasRequiredSignals,
+  mergePolicyWithTopicKind,
+  topicKindPreset,
+  topicKindStrategyPublic,
+} from '../domain/topic-kind-policy';
 import type { ApiKeyScope } from '../compliance/pii-redact';
 import { redactSnapshotPlainForScopes } from '../compliance/entity-pii';
 import type { AuthenticatedRequestContext } from '../compliance/compliance-auth.types';
@@ -402,6 +407,7 @@ export class RankingsService {
       slug: topic.slug,
       title: topic.title,
       kind: topic.kind,
+      kindStrategy: topicKindStrategyPublic(topic.kind),
       locale: topic.locale,
       tenantId: topic.tenantId?.toString() ?? null,
       createdAt: topic.createdAt.toISOString(),
@@ -1234,10 +1240,39 @@ export class RankingsService {
     policy = mergePolicyWithTopicKind(topicRow.kind, policy);
     const weights = policy.weights;
     const decay = policy.decay;
-    const required = new Set(policy.requiredSignalKeys ?? Object.keys(weights));
+    const requiredKeys = policy.requiredSignalKeys ?? Object.keys(weights);
+    const required = new Set(requiredKeys);
+    const kindPreset = topicKindPreset(topicRow.kind);
+    const minCoverage = kindPreset.minCoverageToRank;
 
-    const entityIds = await this.resolveEntityIds(topicVersion);
+    let entityIds = await this.resolveEntityIds(topicVersion);
     if (entityIds.length === 0) throw new BadRequestException('no entities to rank');
+
+    const metricsForFilter = await this.prisma.entityMetric.findMany({
+      where: {
+        entityId: { in: entityIds },
+        observedAt: { lte: snapshotTime },
+      },
+      select: { entityId: true, metricKey: true, observedAt: true },
+    });
+    const metricsByEntity = new Map<string, { metricKey: string; observedAt: Date }[]>();
+    for (const m of metricsForFilter) {
+      const k = m.entityId.toString();
+      if (!metricsByEntity.has(k)) metricsByEntity.set(k, []);
+      metricsByEntity.get(k)!.push({
+        metricKey: m.metricKey,
+        observedAt: m.observedAt,
+      });
+    }
+    const eligibleIds = entityIds.filter((eid) =>
+      entityHasRequiredSignals(
+        metricsByEntity.get(eid.toString()) ?? [],
+        [...required],
+        snapshotTime,
+      ),
+    );
+    const excludedBySignals = entityIds.length - eligibleIds.length;
+    if (eligibleIds.length > 0) entityIds = eligibleIds;
 
     const existing = await this.prisma.topicRankSnapshot.findUnique({
       where: {
@@ -1324,6 +1359,8 @@ export class RankingsService {
           ? 1
           : [...required].filter((k) => presentKeys.has(k)).length / required.size;
 
+      if (coverage < minCoverage) continue;
+
       const { total, breakdown } = scoreEntity(signals, weights, snapshotTime, decay);
       const tiers = signals.map((s) => s.tier);
       const avgTier = tiers.reduce((a, b) => a + b, 0) / Math.max(1, tiers.length);
@@ -1342,9 +1379,23 @@ export class RankingsService {
     const totals = scored.map((s) => s.total);
     const normalizedTotals = robustMinMaxNormalize(totals);
 
+    if (scored.length === 0) {
+      throw new BadRequestException(
+        `no entities meet TopicKind ${topicRow.kind} signal requirements (minCoverage=${minCoverage})`,
+      );
+    }
+
     const rankRows = scored
       .map((s, i) => ({ s, n: normalizedTotals[i] }))
       .sort((a, b) => b.n - a.n);
+
+    const kindStrategyMeta = {
+      ...topicKindStrategyPublic(topicRow.kind),
+      appliedWeights: weights,
+      appliedDecay: decay,
+      excludedByMissingSignals: excludedBySignals,
+      rankedEntityCount: rankRows.length,
+    };
 
     const itemsCreate: Prisma.RankingItemCreateWithoutSnapshotInput[] = [];
 
@@ -1402,6 +1453,7 @@ export class RankingsService {
         snapshotVersion,
         itemsCreate,
         weights,
+        kindStrategyMeta,
       );
       await this.maybeSyncRankingSnapshotToClickhouse(
         result,
@@ -1498,6 +1550,7 @@ export class RankingsService {
     snapshotVersion: string,
     itemsCreate: Prisma.RankingItemCreateWithoutSnapshotInput[],
     weights: Record<string, number>,
+    kindStrategyMeta?: Record<string, unknown>,
   ) {
     return this.prisma.$transaction(async (tx) => {
       const scoreModel = await this.resolveOrCreateScoreModel(tx, topicVersion, weights);
@@ -1547,6 +1600,7 @@ export class RankingsService {
             topicVersion: topicVersion.version,
             window: args.timeWindow,
             snapshotTime: snapshotTime.toISOString(),
+            kindStrategy: kindStrategyMeta ?? null,
             items: snap.items.map((it) => ({
               entityId: it.entityId.toString(),
               rank: it.rank,

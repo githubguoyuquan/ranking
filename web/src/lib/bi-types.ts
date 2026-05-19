@@ -1,5 +1,19 @@
+export type OpsAlert = {
+  code: string;
+  severity: "ok" | "warn" | "critical";
+  message: string;
+  value?: number;
+  threshold?: number;
+};
+
 export type BiOverview = {
   generatedAt: string;
+  observability?: {
+    status: "ok" | "warn" | "critical";
+    alerts: OpsAlert[];
+    outbox?: unknown;
+    crawl?: unknown;
+  };
   kpis: {
     topics: number;
     entities: number;
@@ -43,7 +57,15 @@ export type BiOverview = {
       topic_id: number;
       avg_value: number;
       sample_count: number;
+      topicSlug?: string | null;
+      topicTitle?: string | null;
     }>;
+    clickhouseMv?: {
+      ok: boolean;
+      mvExists: boolean;
+      tables: Array<{ name: string; rows: number }>;
+      detail?: string;
+    };
     outboxPendingByType?: Array<{ type: string; count: number }>;
   };
   hotMovers: Array<{

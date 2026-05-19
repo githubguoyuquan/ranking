@@ -1,0 +1,110 @@
+openapi: 3.0.3
+info:
+  title: Ranking platform — Admin Observability (fragment)
+  description: |
+    Outbox lag、爬虫调度指标、Prometheus 抓取。实现：`src/observability/observability-admin.controller.ts`。
+    需 **`admin` API Key**（`@RequireScopes('admin')`）。
+  version: 0.1.0
+
+servers:
+  - url: http://localhost:3000
+
+tags:
+  - name: Observability
+  - name: Admin
+
+paths:
+  /admin/observability/summary:
+    get:
+      tags: [Observability, Admin]
+      summary: 运维可观测聚合（Outbox + 爬虫 + 告警）
+      operationId: adminObservabilitySummary
+      security:
+        - ApiKeyAuth: []
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ObservabilitySummary"
+
+  /admin/observability/outbox:
+    get:
+      tags: [Observability, Admin]
+      summary: 仅 Outbox lag 指标与告警
+      operationId: adminObservabilityOutbox
+      security:
+        - ApiKeyAuth: []
+      responses:
+        "200":
+          description: 成功
+
+  /admin/observability/crawl:
+    get:
+      tags: [Observability, Admin]
+      summary: 爬虫调度指标与相关告警
+      operationId: adminObservabilityCrawl
+      security:
+        - ApiKeyAuth: []
+      responses:
+        "200":
+          description: 成功
+
+  /admin/observability/prometheus:
+    get:
+      tags: [Observability, Admin]
+      summary: Prometheus text exposition（Grafana 抓取）
+      operationId: adminObservabilityPrometheus
+      security:
+        - ApiKeyAuth: []
+      responses:
+        "200":
+          description: Prometheus 文本
+          content:
+            text/plain:
+              schema:
+                type: string
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  schemas:
+    ObservabilitySummary:
+      type: object
+      properties:
+        generatedAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [ok, warn, critical]
+        thresholds:
+          type: object
+        outbox:
+          type: object
+        crawl:
+          type: object
+        alerts:
+          type: array
+          items:
+            $ref: "#/components/schemas/OpsAlert"
+
+    OpsAlert:
+      type: object
+      properties:
+        code:
+          type: string
+        severity:
+          type: string
+          enum: [ok, warn, critical]
+        message:
+          type: string
+        value:
+          type: number
+        threshold:
+          type: number

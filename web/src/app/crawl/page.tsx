@@ -33,6 +33,7 @@ import {
   nestCrawlCheckpointUrl,
   nestCrawlSourcesListUrl,
   nestCrawlSourcesUrl,
+  nestCrawlSourcePatchUrl,
   nestCrawlSourceUrlsUrl,
   nestCrawlTasksListUrl,
   nestCrawlTaskUrl,
@@ -83,6 +84,11 @@ type SourceRow = {
   kind: string;
   baseUrl: string;
   trustTier?: number;
+  scheduleEnabled?: boolean;
+  scheduleIntervalMinutes?: number | null;
+  scheduleCron?: string | null;
+  region?: string | null;
+  schedulePriority?: number;
 };
 
 function parseSources(text: string): SourceRow[] {
@@ -101,6 +107,16 @@ function parseSources(text: string): SourceRow[] {
         baseUrl: o.baseUrl != null ? String(o.baseUrl) : "",
         trustTier:
           typeof o.trustTier === "number" ? o.trustTier : undefined,
+        scheduleEnabled: o.scheduleEnabled === true,
+        scheduleIntervalMinutes:
+          typeof o.scheduleIntervalMinutes === "number"
+            ? o.scheduleIntervalMinutes
+            : null,
+        scheduleCron:
+          o.scheduleCron != null ? String(o.scheduleCron) : null,
+        region: o.region != null ? String(o.region) : null,
+        schedulePriority:
+          typeof o.schedulePriority === "number" ? o.schedulePriority : 0,
       });
     }
     return rows;
@@ -128,6 +144,15 @@ export default function CrawlAdminPage() {
   const [sources, setSources] = useState<SourceRow[]>([]);
   const [checkpointCrawlerName, setCheckpointCrawlerName] = useState("source:1");
   const [lastAsyncCrawlTaskId, setLastAsyncCrawlTaskId] = useState("");
+  const [scheduleEnabled, setScheduleEnabled] = useState(false);
+  const [scheduleInterval, setScheduleInterval] = useState("60");
+  const [scheduleCron, setScheduleCron] = useState("");
+  const [scheduleRegion, setScheduleRegion] = useState("");
+  const [schedulePriority, setSchedulePriority] = useState("0");
+  const [scheduleSaving, setScheduleSaving] = useState(false);
+  const [newScheduleEnabled, setNewScheduleEnabled] = useState(false);
+  const [newScheduleInterval, setNewScheduleInterval] = useState("");
+  const [newScheduleRegion, setNewScheduleRegion] = useState("");
 
   const sourcesListApiUrl = useMemo(
     () => nestCrawlSourcesListUrl(CRAWL_SOURCES_LIST_LIMIT_DEFAULT),
@@ -180,6 +205,24 @@ export default function CrawlAdminPage() {
     setSourceId((s) => (s.trim() ? s : sources[0].id));
   }, [sources]);
 
+  const selectedSource = useMemo(
+    () => sources.find((s) => s.id === sourceId.trim()),
+    [sources, sourceId],
+  );
+
+  useEffect(() => {
+    if (!selectedSource) return;
+    setScheduleEnabled(selectedSource.scheduleEnabled === true);
+    setScheduleInterval(
+      selectedSource.scheduleIntervalMinutes != null
+        ? String(selectedSource.scheduleIntervalMinutes)
+        : "60",
+    );
+    setScheduleCron(selectedSource.scheduleCron ?? "");
+    setScheduleRegion(selectedSource.region ?? "");
+    setSchedulePriority(String(selectedSource.schedulePriority ?? 0));
+  }, [selectedSource]);
+
   async function createSource() {
     setOut("");
     const nm = name.trim();
@@ -208,6 +251,22 @@ export default function CrawlAdminPage() {
           kind,
           ...(tt.value != null ? { trustTier: tt.value } : {}),
           ...(tid.value != null ? { topicId: tid.value } : {}),
+          ...(newScheduleEnabled
+            ? {
+                scheduleEnabled: true,
+                ...(newScheduleInterval.trim()
+                  ? {
+                      scheduleIntervalMinutes: Number.parseInt(
+                        newScheduleInterval.trim(),
+                        10,
+                      ),
+                    }
+                  : {}),
+                ...(newScheduleRegion.trim()
+                  ? { region: newScheduleRegion.trim() }
+                  : {}),
+              }
+            : {}),
         }),
       });
       const text = await res.text();
@@ -227,6 +286,54 @@ export default function CrawlAdminPage() {
       }
     } catch (e) {
       setOut(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function saveSchedule() {
+    const sid = sourceId.trim();
+    if (!sid || !isDecimalBigIntIdString(sid)) {
+      setOut("请先选用有效 sourceId。");
+      return;
+    }
+    let interval: number | null = null;
+    if (scheduleInterval.trim()) {
+      const n = Number.parseInt(scheduleInterval.trim(), 10);
+      if (!Number.isFinite(n) || n < 5 || n > 10080) {
+        setOut("scheduleIntervalMinutes 须为 5–10080 的整数，或留空改用 cron。");
+        return;
+      }
+      interval = n;
+    }
+    const pri = Number.parseInt(schedulePriority.trim() || "0", 10);
+    if (!Number.isFinite(pri) || pri < -100 || pri > 100) {
+      setOut("schedulePriority 须为 -100–100。");
+      return;
+    }
+    setScheduleSaving(true);
+    setOut("");
+    try {
+      const res = await fetch(nestCrawlSourcePatchUrl(sid), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          scheduleEnabled,
+          scheduleIntervalMinutes: interval,
+          scheduleCron: scheduleCron.trim() || null,
+          region: scheduleRegion.trim() || null,
+          schedulePriority: pri,
+        }),
+      });
+      const text = await res.text();
+      setOut(
+        res.ok
+          ? `调度已保存\n${formatMaybeJson(text)}`
+          : `HTTP ${res.status}\n${formatMaybeJson(text)}`,
+      );
+      if (res.ok) void refreshSources();
+    } catch (e) {
+      setOut(e instanceof Error ? e.message : String(e));
+    } finally {
+      setScheduleSaving(false);
     }
   }
 
@@ -475,6 +582,8 @@ export default function CrawlAdminPage() {
                     <th scope="col" className="px-3 py-2 font-medium">name</th>
                     <th scope="col" className="px-3 py-2 font-medium">kind</th>
                     <th scope="col" className="px-3 py-2 font-medium">tier</th>
+                    <th scope="col" className="px-3 py-2 font-medium">调度</th>
+                    <th scope="col" className="px-3 py-2 font-medium">region</th>
                     <th scope="col" className="px-3 py-2 font-medium">baseUrl</th>
                     <th scope="col" className="px-3 py-2 font-medium">操作</th>
                   </tr>
@@ -497,6 +606,12 @@ export default function CrawlAdminPage() {
                       </td>
                       <td className="whitespace-nowrap px-3 py-1.5 text-center text-xs tabular-nums text-muted-foreground">
                         {s.trustTier ?? "—"}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-1.5 text-xs">
+                        {s.scheduleEnabled ? "on" : "—"}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-1.5 font-mono text-xs text-muted-foreground">
+                        {s.region ?? "—"}
                       </td>
                       <td className="max-w-[12rem] truncate px-3 py-1.5 text-xs text-muted-foreground">
                         {s.baseUrl}
@@ -536,6 +651,88 @@ export default function CrawlAdminPage() {
               </table>
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">全球调度（当前信源）</CardTitle>
+          <CardDescription>
+            <code className="text-xs">PATCH /v1/crawl/sources/:sourceId</code>
+            ；启用后由平台 Worker 每分钟入队（
+            <code className="text-xs">CRAWL_SCHEDULER_DISABLED</code> 可关）。
+            区域写入 BullMQ <code className="text-xs">crawl:region</code>。
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4 sm:grid-cols-2">
+          <p className="text-sm text-muted-foreground sm:col-span-2">
+            当前 sourceId:{" "}
+            <span className="font-mono text-foreground">
+              {sourceId.trim() || "—"}
+            </span>
+          </p>
+          <label className="flex items-center gap-2 text-sm sm:col-span-2">
+            <input
+              type="checkbox"
+              checked={scheduleEnabled}
+              onChange={(e) => setScheduleEnabled(e.target.checked)}
+            />
+            scheduleEnabled
+          </label>
+          <div className="space-y-2">
+            <Label htmlFor="crawl-sched-interval">间隔（分钟）</Label>
+            <Input
+              id="crawl-sched-interval"
+              inputMode="numeric"
+              placeholder="60"
+              value={scheduleInterval}
+              onChange={(e) => setScheduleInterval(e.target.value)}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="crawl-sched-cron">cron（UTC，可选）</Label>
+            <Input
+              id="crawl-sched-cron"
+              placeholder="0 */6 * * *"
+              value={scheduleCron}
+              onChange={(e) => setScheduleCron(e.target.value)}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="crawl-sched-region">region</Label>
+            <Input
+              id="crawl-sched-region"
+              placeholder="eu-west"
+              value={scheduleRegion}
+              onChange={(e) => setScheduleRegion(e.target.value)}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="crawl-sched-priority">priority</Label>
+            <Input
+              id="crawl-sched-priority"
+              inputMode="numeric"
+              value={schedulePriority}
+              onChange={(e) => setSchedulePriority(e.target.value)}
+            />
+          </div>
+          <div className="flex flex-wrap gap-2 sm:col-span-2">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={scheduleSaving || !sourceId.trim()}
+              onClick={() => void saveSchedule()}
+            >
+              {scheduleSaving ? "保存中…" : "保存调度"}
+            </Button>
+            {sourceId.trim() ? (
+              <CopyTextButton
+                text={nestCrawlSourcePatchUrl(sourceId.trim())}
+                idleLabel="复制 PATCH URL"
+                className="h-8"
+              />
+            ) : null}
+          </div>
         </CardContent>
       </Card>
 
@@ -619,6 +816,37 @@ export default function CrawlAdminPage() {
               <option value="http-playwright">http-playwright</option>
             </select>
           </div>
+          <label className="flex items-center gap-2 text-sm sm:col-span-2">
+            <input
+              type="checkbox"
+              checked={newScheduleEnabled}
+              onChange={(e) => setNewScheduleEnabled(e.target.checked)}
+            />
+            创建时启用全球调度
+          </label>
+          {newScheduleEnabled ? (
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="crawl-new-sched-interval">调度间隔（分钟）</Label>
+                <Input
+                  id="crawl-new-sched-interval"
+                  inputMode="numeric"
+                  placeholder="60"
+                  value={newScheduleInterval}
+                  onChange={(e) => setNewScheduleInterval(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="crawl-new-sched-region">region</Label>
+                <Input
+                  id="crawl-new-sched-region"
+                  placeholder="ap-east"
+                  value={newScheduleRegion}
+                  onChange={(e) => setNewScheduleRegion(e.target.value)}
+                />
+              </div>
+            </>
+          ) : null}
           <div className="space-y-2">
             <Label htmlFor="crawl-new-trustTier">trustTier（可选）</Label>
             <Input

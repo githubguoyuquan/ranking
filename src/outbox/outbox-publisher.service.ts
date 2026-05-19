@@ -2,7 +2,7 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { PrismaService } from '../prisma/prisma.service';
 import {
   buildKafkaEnvelopeV1,
-  listKafkaRoutedOutboxTypes,
+  listKafkaPublishOutboxTypes,
   resolveKafkaMessageKey,
   resolveKafkaTopicForOutboxType,
 } from '../kafka/event-registry';
@@ -69,7 +69,7 @@ export class OutboxPublisherService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    const types = listKafkaRoutedOutboxTypes();
+    const types = listKafkaPublishOutboxTypes();
     let claimed: Awaited<ReturnType<typeof claimOutboxBatchForKafkaTypes>>;
     try {
       claimed = await claimOutboxBatchForKafkaTypes(this.prisma, {

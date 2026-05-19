@@ -2,6 +2,29 @@
 
 完整产品愿景、与当前实现的**差距对照**、目标架构（DDD/消息/规模演进）见 **[docs/PLATFORM_ARCHITECTURE.md](docs/PLATFORM_ARCHITECTURE.md)**。
 
+## 生产可观测
+
+- **API**：`GET /admin/observability/summary`、`/prometheus`；BI `overview` 含 `observability.alerts`
+- **Grafana**：`docker compose up -d prometheus grafana` → http://localhost:3002
+- 文档：[docs/ops/OBSERVABILITY.md](docs/ops/OBSERVABILITY.md) · OpenAPI：`docs/openapi/admin-observability.yaml`
+
+## 规模验证
+
+- **套件**：`npm run scale:validate` → `POST /admin/scale/validate`（ES ILM 状态 + 检索压测、Qdrant 压测、CH MV 健康）
+- **托管 ES ILM**：`ELASTICSEARCH_ILM_ENABLED=true` · `ensure-ilm` · `bootstrap-ilm-indices`
+- **BI 钻取**：`/bi` 侧栏 · `GET /admin/bi/drill/entity|topic/:id`
+- 文档：[docs/ops/SCALE_VALIDATION.md](docs/ops/SCALE_VALIDATION.md) · OpenAPI：`docs/openapi/admin-scale.yaml`
+
+## 数据库迁移
+
+各环境在升级应用前执行：
+
+```bash
+DATABASE_URL='postgresql://...' npm run prisma:deploy
+```
+
+说明与 Helm Job：[docs/ops/DATABASE_MIGRATIONS.md](docs/ops/DATABASE_MIGRATIONS.md)
+
 ## Priority & phased delivery
 
 1. **P0 — Facts & evolution**  
@@ -17,7 +40,7 @@
    - ✅ 多实例 **Outbox**：`leasedUntil` 租约 + `FOR UPDATE SKIP LOCKED` 抢占，避免并行重复发布  
    - ✅ **爬虫**：Checkpoint / `Source` / `CrawlTask` / `CrawledUrl` + BullMQ `crawl`；**`GET /v1/crawl/tasks`** 按 `limit`（1–100，默认 30）、可选 **`sourceId`** 列出近期任务（引擎监控 / 运营排障）；**可选真 HTTP**（`CRAWL_HTTP_FETCH` 或 `kind: http-fetch`）或 **Playwright**（`CRAWL_USE_PLAYWRIGHT` / `kind: http-playwright`）：`contentHash`、`textPreview`、基础 SSRF；**`CRAWL_HTTP_PROXY` / `Source.httpProxyUrl`** 出站代理；**多实例**共用 Redis 消费同一 `crawl` 队列（`npm run start:crawl-worker` 独立 Worker 进程）；**`CRAWL_PER_HOST_MIN_INTERVAL_MS`** Redis 同 host 节流；**`CRAWL_SEMANTIC_DEDUP`** + `OPENAI_API_KEY` 时同信源正文 embedding 去重（`fetched_semantic_dup` / `duplicateOfId`，不重复入 ES）；未开真抓取时仍为桩 `fetched_stub`
 3. **P2 — Analytics & search**  
-   - ✅ **ClickHouse**：compose、`metric_timeseries`、`AnalyticsModule`；`SYNC_RANKING_TO_CLICKHOUSE` + `CLICKHOUSE_URL` 时 `CLICKHOUSE_WRITE_MODE=direct`（默认）快照后直写，`outbox` 则同事务插入专用 Outbox 行并由 `ClickhouseOutboxFlusherService` 刷入；Outbox 按 `type` 分流，Kafka 仅发布 `ranking.snapshot.completed`  
+   - ✅ **ClickHouse**：compose、`metric_timeseries`、MV `metric_daily_topic`、`AnalyticsModule`；`SYNC_RANKING_TO_CLICKHOUSE` + direct/outbox 写入；CH 行可 **双轨** 镜像到 Kafka（权威路径为进程内 Flusher）  
    - ✅ **Redis 热读缓存**：`GET /v1/snapshots/:id` 长 TTL；`GET /v1/topics/:slug/leaderboard` 独立短 TTL 聚合缓存；无 Redis 或失败时降级查库  
    - ✅ **全球爬虫调度**：`Source.scheduleEnabled` / `scheduleIntervalMinutes` / `scheduleCron` / `region`；`CrawlSchedulerService` 每分钟 cron + `CrawlScheduleRun` 审计；区域队列 `crawl:<region>`（`CrawlRegionalQueueService`）；`GET /admin/crawl/scheduler/status`、`POST tick`、`GET runs`；Helm `crawlWorkerRegions[]`  
    - ✅ **亿级 ES 路径**：`ELASTICSEARCH_USE_WRITE_ALIAS` 写入 `-write` 别名；默认 bulk **不 refresh**；`ELASTICSEARCH_BULK_BATCH_SIZE` 分批；`POST /admin/scale/elasticsearch/ensure-templates` 多分片模板；rollover 见 scale API  
@@ -36,7 +59,7 @@
 ## 微服务进程 / Kafka 事件网 / 多 AZ（已实现骨架）
 
 - **进程拆分**：`PROCESS_ROLE=api|worker|crawl|all`；`npm run start:platform-worker`、`start:crawl-worker`；见 `docs/architecture/SERVICE_BOUNDARIES.md`
-- **Kafka 全量路由**：7 类 Outbox 事件 + `kafkaPublishedAt` 与 ES/CH `publishedAt` 双轨；`GET /admin/kafka/events`；`docs/kafka/EVENT_CATALOG.md`
+- **Kafka（仅生产者）**：6 类外发 + `ranking.followup.requested` 仅登记；**本仓库无 Kafka Consumer**；`kafkaPublishedAt` 与 Flusher `publishedAt` 双轨；`GET /admin/kafka/events`；`docs/kafka/CONSUMER_BOUNDARY.md`
 - **Schema Registry**：`KAFKA_SCHEMA_REGISTRY_URL`（Redpanda `18081` / Confluent 兼容 REST）
 - **生产 Helm**：`deploy/helm/ranking/` 多 Deployment + PDB + topologySpread；`docs/ops/PRODUCTION.md`
 - **Dockerfile**：同镜像 `ranking-platform`，按 command 区分 API/Worker
@@ -46,7 +69,7 @@
 **规模（Phase C）**
 
 - `DATABASE_READ_URL`：只读副本；`rank-history` / `trends/hot` 走 `PrismaReadService`
-- `GET /admin/scale/status`；`POST /admin/scale/postgres/ensure-partitions`；`POST /admin/scale/elasticsearch/bootstrap-aliases` / `rollover-*`
+- `GET /admin/scale/status`；`POST /admin/scale/validate`；ES **ILM** + benchmark；`POST /admin/scale/qdrant/benchmark`；`POST .../ensure-ilm` / `bootstrap-ilm-indices` / `rollover-*`
 - `CRAWL_PROXY_POOL`、`CRAWL_QUEUE_SHARD`、`CRAWL_SEMANTIC_DEDUP_CROSS_SOURCE`
 - 管理台 **`/scale`**
 
@@ -137,7 +160,10 @@ npm run dev   # 默认 http://localhost:3001
 - 可选：`KAFKA_TOPIC_RANKING_SNAPSHOT_COMPLETED`、`KAFKA_CLIENT_ID`  
 - **事件网 / Schema**：Kafka 消息 JSON 见 **`docs/kafka/EVENT_CATALOG.md`**（`envelopeVersion: 1` + `type` + `payload` + `meta`）；发布前 AJV 校验（`KAFKA_SKIP_SCHEMA_VALIDATION=true` 仅应急关闭）。
 - 消息体（Envelope v1）：`envelopeVersion`、`type`、`payload`（如 `ranking.snapshot.completed` 时内含 `schemaVersion: 1` 与 `snapshotId`、`topicRankingId`、`topicVersionId` 等）、`meta: { outboxId, createdAt }`；payload 字段集由 **`buildRankingSnapshotCompletedOutboxPayload`**（`src/rankings/ranking-snapshot-completed-outbox-payload.ts`）与 **`src/kafka/schemas/*.schema.json`** 固化。  
-- `OutboxEvent.type` 另有 `clickhouse.ranking.snapshot.ingest`、`elasticsearch.entity.sync`、`elasticsearch.crawled_url.sync`、`ranking.followup.requested`（需 **`RANKING_FOLLOWUP_OUTBOX=true`** 且跑 **`ranking-followup`** 任务时才写入）等，由各自 **进程内 Flusher** 或占位逻辑消费，**不会**随 Kafka 发布；其中 ES 两行 **`payload`** 在 **`elastic-*-sync-outbox-payload.ts`**，**`OutboxEvent` 行** 仍由 **`elastic-*-outbox.ts`** 的 `*Create` 组装；其余 **`payload`** 由 **`buildClickhouseRankingSnapshotOutboxPayload`**、**`buildRankingFollowupRequestedOutboxPayload`** 等固化（总表见 **`src/outbox/outbox-admin.controller.ts`** 类注释）。  
+- **外发 Kafka**（`publishToKafka: true`）：`ranking.snapshot.completed`、`crawl.url.fetched`、`ai.agent.run.completed`，以及 ES/CH 三类的 **Kafka 镜像**（权威写入仍为进程内 **Flusher**，见 `publishedAt`）。  
+- **不发 Kafka**：`ranking.followup.requested`（`RANKING_FOLLOWUP_OUTBOX=true` 时仅占位；执行靠 **BullMQ `ranking-followup`**）。  
+- 边界说明：**`docs/kafka/CONSUMER_BOUNDARY.md`**；路由表 **`src/kafka/event-registry.ts`**。  
+- Payload builder 总表见 **`src/outbox/outbox-admin.controller.ts`** 类注释。  
 - **运维排查**：`GET /admin/outbox?limit=50&pendingOnly=true&type=...` 只读列出积压行（无鉴权，勿暴露公网）。**接口契约**见源码 **`src/outbox/outbox-admin.controller.ts`** 类注释；**OpenAPI 3 片段**：**`docs/openapi/admin-outbox.yaml`**（可导入 Swagger UI）。管理台 Outbox 页提供 **五种主要 `type` 快捷按钮**（含 ES 两行、Kafka 排行、CH、**`ranking.followup.requested`**）、**清空 type**、**limit/type 框 Enter 加载**、**新标签打开与当前筛选一致的查询 URL**、**复制该 GET URL**（**无可复制文本时复制按钮禁用**；**limit 非法或非正按 40、超过 200 按 200**，与接口校验上限一致；**type 框 maxLength 120**，与 DTO `@MaxLength` 一致）；表格在存在对应行时展示 **Kafka / CH / ES 实体 / ES 爬取 / followup** 等 **`payload` 摘要列**，原始 JSON 区对契约键名 **浅色高亮**。  
 - **OpenAPI 片段**：目录 **`docs/openapi/`**（另含 **`admin-entities.yaml`** → **`GET /admin/entities`**）；**`npm test`** 中 **`src/openapi/docs-openapi.spec.ts`** 会解析目录下全部 **`.yaml`** 并断言 **OpenAPI 3** 与 **`paths`** 非空。  
 - `OUTBOX_FLUSH_MS`：发布轮询间隔（毫秒，默认 2000）

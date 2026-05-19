@@ -10,6 +10,8 @@ import { crawlProxyPoolStatus } from '../ingestion/crawl-proxy-pool';
 import { resolveCrawlQueueName } from '../ingestion/crawl-queue-name';
 import { QdrantService } from './qdrant.service';
 import { ElasticService } from '../search/elastic.service';
+import { QdrantBenchmarkService } from './qdrant-benchmark.service';
+import { ScaleValidationService } from './scale-validation.service';
 
 class EnsurePartitionsDto {
   @IsOptional()
@@ -35,6 +37,44 @@ class RolloverDto {
   maxAge?: string;
 }
 
+class BenchmarkDto {
+  @IsOptional()
+  query?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(200)
+  iterations?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(50)
+  limit?: number;
+}
+
+class ValidationSuiteDto {
+  @IsOptional()
+  esQuery?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(200)
+  esIterations?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(200)
+  qdrantIterations?: number;
+}
+
 @Controller('admin/scale')
 @RequireScopes('admin')
 export class ScaleAdminController {
@@ -44,6 +84,8 @@ export class ScaleAdminController {
     private readonly rollover: ElasticRolloverService,
     private readonly qdrant: QdrantService,
     private readonly elastic: ElasticService,
+    private readonly qdrantBench: QdrantBenchmarkService,
+    private readonly validation: ScaleValidationService,
   ) {}
 
   @Get('status')
@@ -110,5 +152,43 @@ export class ScaleAdminController {
   @Post('elasticsearch/bootstrap-aliases')
   async bootstrapAliases() {
     return toPlainJson(await this.rollover.bootstrapWriteAliases());
+  }
+
+  @Post('elasticsearch/ensure-ilm')
+  async ensureIlm() {
+    return toPlainJson(await this.rollover.ensureIlmPolicies());
+  }
+
+  @Get('elasticsearch/ilm-status')
+  async ilmStatus() {
+    return toPlainJson(await this.rollover.getIlmStatus());
+  }
+
+  @Post('elasticsearch/bootstrap-ilm-indices')
+  async bootstrapIlmIndices() {
+    return toPlainJson(await this.rollover.bootstrapIlmIndices());
+  }
+
+  @Post('elasticsearch/benchmark')
+  async esBenchmark(@Body() body: BenchmarkDto) {
+    return toPlainJson(
+      await this.rollover.benchmarkEntitySearch(body.query, body.iterations),
+    );
+  }
+
+  @Post('qdrant/benchmark')
+  async qdrantBenchmark(@Body() body: BenchmarkDto) {
+    return toPlainJson(
+      await this.qdrantBench.run({
+        query: body.query,
+        iterations: body.iterations,
+        limit: body.limit,
+      }),
+    );
+  }
+
+  @Post('validate')
+  async validateSuite(@Body() body: ValidationSuiteDto) {
+    return toPlainJson(await this.validation.runSuite(body));
   }
 }

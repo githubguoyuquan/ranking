@@ -27,6 +27,8 @@ const links = [
   { href: ADMIN_HREF.rankingsRun, label: "运行排行" },
   { href: ADMIN_HREF.topics, label: "话题版本" },
   { href: ADMIN_HREF.snapshotsCompare, label: "快照对比" },
+  { href: ADMIN_HREF.compliance, label: "合规" },
+  { href: ADMIN_HREF.scale, label: "规模" },
 ] as const;
 
 function AdminShellInner({ children }: { children: React.ReactNode }) {

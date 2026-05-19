@@ -148,10 +148,10 @@ flowchart LR
 
 ### 5.1 建议扩展（支撑愿景中「历史极值 / 连续升降 / Topic 指纹」）
 
-可在后续迁移中增加（**尚未实现**）：
+已实现（`20260519150000_roadmap_entity_stats_fingerprint`）：
 
-- **`EntityTopicStats`**（或物化视图）：`entityId`, `topicId`, `timeWindow`, `bestRank`, `worstRank`, `currentStreakUp`, `currentStreakDown`, `lastUpdatedAt` — 由 Worker 在每次快照后增量更新。
-- **`TopicFingerprint` / `ContentFingerprint`**：语义向量 hash 或 SimHash，支撑「Topic 去重 / 合并」。
+- **`EntityTopicStats`**：每次快照 `persistSnapshotTransaction` 后增量 upsert；`GET /v1/entities/:id/rank-history` 的 `summary` 优先读物化表（`materialized: true`）。
+- **`TopicFingerprint`**：相似话题 embedding 时写入 SimHash（`recommendations` 路径）；支撑后续 Topic Merge Agent。
 - **PG 原生分区**：对大表 `RankingItemHistory`、`CrawledUrl` 按 `generatedAt`/`fetchedAt` 月分区（Prisma 需 raw SQL migration）。
 - **向量库**：独立存储 `embedding`、`entityId/urlId`、版本；检索走 VDB + ES hybrid。
 
@@ -175,7 +175,7 @@ flowchart LR
 | EWMA / 斜率 / 波动 / 趋势分类 | `ewma` `leastSquaresSlope` `standardDev` `classifyTrend` | 输出应对齐 `TrendType` |
 | AI 置信启发式 | `aiConfidence` | 可被 Agent 替换为模型打分 |
 
-**待办**：将 `RankingProcessor`（或其它物化服务）中原始分→**显式调用** `scoreEntity` + 持久化 `ScoreModel` / `ScoreBreakdown`，并把 `TopicVersion.policyJson` 解析为权重与 decay 配置。
+**已实现**：物化路径显式 `scoreEntity` + `ScoreModel` / `ScoreBreakdown`；`policyJson.decay` 与 `TopicKind` 预设合并（`mergePolicyWithTopicKind`）；follow-up 成功时写 `TopicRankSnapshot.trendSummary` / `generatedByAi`。
 
 ---
 
@@ -219,17 +219,17 @@ sequenceDiagram
 
 | Agent | 职责 | 现状 |
 |-------|------|------|
-| Topic Discovery | 从新内容聚类发现可排话题 | 无 |
+| Topic Discovery | 从新内容聚类发现可排话题 | **`topic-discovery-v1`**：`TopicProposal` + 管理台批准 |
 | Ranking Agent | 权重推理、缺数据补全 | 部分在 `scoreEntity`/人工 policy |
 | Trend Analysis Agent | 解读斜率/异常 | 算法有，LLM 未接 |
-| Fact Check | 冲突信源仲裁 | 无 |
-| Duplicate Detection | URL+内容+语义去重 | URL/哈希级有 |
-| Topic Merge | 同义话题合并 | 无 |
+| Fact Check | 冲突信源仲裁 | **`fact-check-v1`**：跨信源指标冲突 → `AiAnalysis` |
+| Duplicate Detection | URL+内容+语义去重 | 抓取去重 + **`duplicate-detection-v1`** 报告 |
+| Topic Merge | 同义话题合并 | **`topic-merge-v1`**：`TopicMergeAudit` + 迁移 `Source` |
 | Time Series Agent | CH+PG 联合结论 | 无 |
 | Summary Agent | 榜单演化叙述 | **部分**：`AiAnalysis` 存快照级摘要 |
 | Credibility Evaluation | 输出可信度 | `confidenceScore` 字段有，**自动化弱** |
 
-**演进**：用 **BullMQ 编排**「DAG 任务」或以 **Temporal** 等工作流引擎；每条任务写 `AiAnalysis` 或独立 `AgentRun` 表（待建模）。
+**演进**：已实现 **BullMQ `ai-agent` 队列** + **`AgentRun`** 表 + 管理台 **`/agents`**；后续可迁 Temporal / Kafka `ai.analysis.requested`。
 
 ---
 
@@ -307,8 +307,10 @@ sequenceDiagram
 ### Phase A — 强化「时间演化」产品真相源（4–8 周级）
 
 1. 快照生成后：**写入 `TrendAnalysis`**（✅ 已在 `RankingsService.persistSnapshotTransaction` 内写入快照级 `payload`）。  
-2. 新 API：实体排行历史 + **极值/连续升降步数**（✅ `GET /v1/entities/:id/rank-history`）。  
-3. `TopicVersion.policyJson` **结构化**：权重、decay、信源 tier 与 `scoreEntity` 对齐（**部分已有**：物化路径使用 `policy.weights` + `scoreEntity`；**管理台可 PATCH** `policyJson`（`src/domain/policy-json.ts` 校验）；可再加强校验与字段级表单）。
+2. 新 API：实体排行历史 + **极值/连续升降步数**（✅ `GET /v1/entities/:id/rank-history`；✅ **`EntityTopicStats` 物化**）。  
+3. `TopicVersion.policyJson` **结构化**：权重、**decay**、**TopicKind 预设** 与 `scoreEntity` 对齐（✅ `parseRankingPolicyJson` + `mergePolicyWithTopicKind`）。  
+4. **周期趋势**：✅ `TrendAnalysisSchedulerService` 每日 UTC `periodic_rollup`（`TREND_ANALYSIS_CRON_DISABLED` 可关）。  
+5. **CH 报表**：✅ `GET /v1/analytics/snapshots/:id/metrics`（PG 元数据 + CH `metric_timeseries`）。
 
 ### Phase B — AI 编排
 
@@ -316,17 +318,18 @@ sequenceDiagram
 2. BullMQ DAG 深化：`ranking.completed` → `trend` → `summary` → `credibility`（逐步替换/串联 follow-up 内逻辑）。  
 3. 多 **`AiAnalysis.agent` 名约定**（**已有**：`rules-v1`、`post-snapshot-summary-v1`；预留 `trend-v1`、`credibility-v1`）与 **detailJson.agentKind**；**`AI_ANALYSIS_DAILY_CAP`**（UTC 日）限制 **`AiAnalysis` 持久化**；**`AI_EMBEDDING_DAILY_CAP`** 限制当日 **成功** embedding **批次数**（一次 `embedMany` 计 1）；**`AI_EMBEDDING_AUDIT`** 控制 embedding 是否写入 **`AiAuditEvent`**（默认开启）。  
 4. **运维只读**：**`GET /admin/ai/spectrum`**（当日配额、chat/embedding 审计计数、`recentSnapshotsWithAi`）；**`GET /admin/ai/audit-events`**（`limit`、`category`、`source`）；生产需网关鉴权。  
-5. Prompt 模板与**进一步深化配额策略**（按租户/按模型等）。
+5. Prompt 模板与**进一步深化配额策略**（✅ 租户 `settingsJson.aiAnalysisDailyCap` 优先于全局 `AI_ANALYSIS_DAILY_CAP`；按模型等待办）。
 
 ### Phase C — 规模
 
 1. PG 分区、只读副本、ES 索引滚动（✅ 骨架：`DATABASE_READ_URL` + `PrismaReadService`；`POST /admin/scale/postgres/ensure-partitions`；`ELASTICSEARCH_USE_WRITE_ALIAS` + rollover/bootstrap API）。  
-2. 向量库 + 语义去重 + 相似话题（✅ ES/PG 向量与 `TopicEmbedding`；✅ **`CRAWL_SEMANTIC_DEDUP_CROSS_SOURCE`** 跨信源 PG 比对）。  
+2. 向量库 + 语义去重 + 相似话题（✅ ES/PG 向量与 `TopicEmbedding`；✅ **`CRAWL_SEMANTIC_DEDUP_CROSS_SOURCE`**；✅ **可选 `QDRANT_URL`** + `docker-compose` qdrant 服务）。  
 3. 爬虫分布式与代理池（✅ **`CRAWL_PROXY_POOL`** 轮询；✅ **`CRAWL_QUEUE_SHARD`** 队列分片；多 `crawl-worker` 进程）。  
+4. **运维骨架**：✅ `deploy/helm/ranking`；✅ compose **MinIO**；CH **90d TTL**（`002_metric_timeseries_ttl.sql`）。  
 
 ### Phase D — 商业化可靠性与合规
 
-1. 鉴权、多租户、PII 分类（✅ `Tenant` / `ApiKey` / 全局 `ApiKeyGuard`；`Entity.piiLevel`；`API_AUTH_REQUIRED`）。  
+1. 鉴权、多租户、PII 分类（✅ `Tenant` / `ApiKey` / 全局 `ApiKeyGuard`；`Entity.piiLevel`；✅ **话题/榜单读路径租户过滤**；✅ **快照/实体 API PII 脱敏**）。  
 2. 法务可解释性（✅ **`GET /admin/compliance/snapshots/:id/export`** JSON/CSV；`ComplianceAuditEvent`；既有 `score-breakdowns` + 物化 `ScoreModel` / `ScoreBreakdown`）。  
 
 ---

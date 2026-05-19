@@ -467,6 +467,12 @@ export default async function HomePage() {
           <AdminQuickEntryRow href={ADMIN_HREF.crawl} copyLabel="复制爬虫页链接">
             爬虫任务（含异步轮询）
           </AdminQuickEntryRow>
+          <AdminQuickEntryRow href={ADMIN_HREF.bi} copyLabel="复制 BI 大屏链接">
+            BI 大屏
+          </AdminQuickEntryRow>
+          <AdminQuickEntryRow href={ADMIN_HREF.agents} copyLabel="复制多 Agent 页链接">
+            多 Agent（Discovery / Merge / FactCheck）
+          </AdminQuickEntryRow>
           <AdminQuickEntryRow
             href={ADMIN_HREF.crawlMonitor}
             copyLabel="复制引擎监控页链接"

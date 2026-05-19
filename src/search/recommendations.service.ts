@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import { AI_AUDIT_SOURCE_EMBEDDING_RECOMMEND } from '../ai-audit/ai-audit.constants';
 import { cosineSimilarity } from '../lib/vector-cosine';
 import { PrismaService } from '../prisma/prisma.service';
@@ -94,6 +95,19 @@ export class RecommendationsService {
         dims: v.length,
         vector: v,
       },
+    });
+    const simhash = createHash('sha256')
+      .update(`${topic.title}\n${topic.slug}`)
+      .digest('hex')
+      .slice(0, 64);
+    await this.prisma.topicFingerprint.upsert({
+      where: { topicId },
+      create: {
+        topicId,
+        simhash,
+        embeddingModel: DEFAULT_EMBEDDING_MODEL,
+      },
+      update: { simhash, embeddingModel: DEFAULT_EMBEDDING_MODEL },
     });
     return v;
   }

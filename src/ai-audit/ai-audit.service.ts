@@ -52,6 +52,19 @@ export class AiAuditService {
     });
   }
 
+  async countAnalysesForTenantSince(tenantId: bigint, since: Date): Promise<number> {
+    return this.prisma.aiAnalysis.count({
+      where: {
+        createdAt: { gte: since },
+        snapshot: {
+          topicRanking: {
+            topicVersion: { topic: { tenantId } },
+          },
+        },
+      },
+    });
+  }
+
   async countSuccessfulEmbeddingsSince(since: Date): Promise<number> {
     return this.prisma.aiAuditEvent.count({
       where: {

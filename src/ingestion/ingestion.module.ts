@@ -1,5 +1,6 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
+import { AgentOrchestrationModule } from '../agent-orchestration/agent-orchestration.module';
 import { SearchModule } from '../search/search.module';
 import { CrawlHostThrottleService } from './crawl-host-throttle.service';
 import { CRAWL_QUEUE } from './crawl-job';
@@ -13,6 +14,7 @@ import { IngestionService } from './ingestion.service';
       name: CRAWL_QUEUE,
     }),
     SearchModule,
+    AgentOrchestrationModule,
   ],
   controllers: [IngestionController],
   providers: [IngestionService, CrawlProcessor, CrawlHostThrottleService],

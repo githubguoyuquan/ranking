@@ -5,6 +5,7 @@ import {
   Entity,
   EntityMetric,
   Prisma,
+  TopicKind,
   TimeWindow,
   TopicRanking,
   TopicRankSnapshot,
@@ -45,7 +46,13 @@ import {
 import { toPlainJson } from '../lib/json';
 import { elasticEntitySyncOutboxCreate } from '../search/elastic-entity-outbox';
 import { ElasticService } from '../search/elastic.service';
+import { upsertEntityTopicStatsBatch } from '../domain/entity-topic-stats';
 import { parseRankingPolicyJson, type RankingPolicyJson } from '../domain/policy-json';
+import { mergePolicyWithTopicKind } from '../domain/topic-kind-policy';
+import type { ApiKeyScope } from '../compliance/pii-redact';
+import { redactSnapshotPlainForScopes } from '../compliance/entity-pii';
+import type { AuthenticatedRequestContext } from '../compliance/compliance-auth.types';
+import { assertTopicAccessible, topicWhereForAuth } from '../compliance/tenant-scope';
 import {
   AI_AGENT_CREDIBILITY_V1,
   AI_AGENT_POST_SNAPSHOT_SUMMARY_V1,
@@ -201,12 +208,12 @@ export class RankingsService {
       where: {
         topicId_version: { topicId: topic.id, version: '2026.05' },
       },
-      update: { policyJson: policy as Prisma.InputJsonValue },
+      update: { policyJson: policy as unknown as Prisma.InputJsonValue },
       create: {
         topicId: topic.id,
         version: '2026.05',
         effectiveFrom: new Date('2026-05-01T00:00:00.000Z'),
-        policyJson: policy as Prisma.InputJsonValue,
+        policyJson: policy as unknown as Prisma.InputJsonValue,
       },
     });
 
@@ -300,7 +307,7 @@ export class RankingsService {
     await this.prisma.topicVersion.update({
       where: { id: version.id },
       data: {
-        policyJson: { ...policy, entityIds } as Prisma.InputJsonValue,
+        policyJson: { ...policy, entityIds } as unknown as Prisma.InputJsonValue,
       },
     });
 
@@ -359,14 +366,91 @@ export class RankingsService {
     };
   }
 
-  async listVersionsBySlug(slug: string) {
-    const topic = await this.prisma.topic.findUnique({
-      where: { slug },
+  async listVersionsBySlug(slug: string, auth?: AuthenticatedRequestContext) {
+    const topic = await this.prisma.topic.findFirst({
+      where: { slug, ...topicWhereForAuth(auth) },
     });
     if (!topic) return [];
+    await assertTopicAccessible(topic, auth);
     return this.prisma.topicVersion.findMany({
       where: { topicId: topic.id },
       orderBy: { effectiveFrom: 'desc' },
+    });
+  }
+
+  async getTopicBySlug(slug: string, auth?: AuthenticatedRequestContext) {
+    const s = slug.trim();
+    const topic = await this.prisma.topic.findFirst({
+      where: { slug: s, ...topicWhereForAuth(auth) },
+      select: {
+        id: true,
+        slug: true,
+        title: true,
+        kind: true,
+        locale: true,
+        tenantId: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+    if (!topic) throw new NotFoundException('topic not found');
+    await assertTopicAccessible(topic, auth);
+    return toPlainJson({
+      id: topic.id.toString(),
+      slug: topic.slug,
+      title: topic.title,
+      kind: topic.kind,
+      locale: topic.locale,
+      tenantId: topic.tenantId?.toString() ?? null,
+      createdAt: topic.createdAt.toISOString(),
+      updatedAt: topic.updatedAt.toISOString(),
+    });
+  }
+
+  async updateTopicBySlug(
+    slug: string,
+    patch: { kind?: TopicKind; title?: string },
+    auth?: AuthenticatedRequestContext,
+  ) {
+    const s = slug.trim();
+    const topic = await this.prisma.topic.findFirst({
+      where: { slug: s, ...topicWhereForAuth(auth) },
+    });
+    if (!topic) throw new NotFoundException('topic not found');
+    await assertTopicAccessible(topic, auth);
+
+    const data: Prisma.TopicUpdateInput = {};
+    if (patch.kind !== undefined) data.kind = patch.kind;
+    if (patch.title !== undefined) {
+      const title = patch.title.trim();
+      if (!title) throw new BadRequestException('title must be non-empty');
+      data.title = title;
+    }
+    if (Object.keys(data).length === 0) {
+      throw new BadRequestException('no fields to update');
+    }
+
+    const updated = await this.prisma.topic.update({
+      where: { id: topic.id },
+      data,
+      select: {
+        id: true,
+        slug: true,
+        title: true,
+        kind: true,
+        locale: true,
+        tenantId: true,
+        updatedAt: true,
+      },
+    });
+    return toPlainJson({
+      id: updated.id.toString(),
+      slug: updated.slug,
+      title: updated.title,
+      kind: updated.kind,
+      locale: updated.locale,
+      tenantId: updated.tenantId?.toString() ?? null,
+      updatedAt: updated.updatedAt.toISOString(),
     });
   }
 
@@ -376,13 +460,17 @@ export class RankingsService {
    */
   async getSnapshotForApi(
     id: bigint,
-    opts?: { includeAiStats?: boolean },
+    opts?: { includeAiStats?: boolean; scopes?: ApiKeyScope[] },
   ): Promise<unknown | null> {
     if (!opts?.includeAiStats) {
       const cached = await this.rankingCache.getSnapshotJson(id);
       if (cached) {
         try {
-          return JSON.parse(cached) as unknown;
+          const parsed = JSON.parse(cached) as unknown;
+          if (opts?.scopes?.length) {
+            redactSnapshotPlainForScopes(parsed, opts.scopes);
+          }
+          return parsed;
         } catch {
           /* 损坏条目，改走 DB */
         }
@@ -392,6 +480,9 @@ export class RankingsService {
     const snap = await this.loadSnapshotFull(id);
     if (!snap) return null;
     const plain = toPlainJson(snap);
+    if (opts?.scopes?.length) {
+      redactSnapshotPlainForScopes(plain, opts.scopes);
+    }
 
     if (!opts?.includeAiStats) {
       await this.rankingCache.setSnapshotJson(id, JSON.stringify(plain));
@@ -399,7 +490,26 @@ export class RankingsService {
     }
 
     const stats = await this.aiAnalysisQuickStatsForSnapshot(id);
-    return { ...(plain as Record<string, unknown>), ...stats };
+    const merged = { ...(plain as Record<string, unknown>), ...stats };
+    if (opts?.scopes?.length) {
+      redactSnapshotPlainForScopes(merged, opts.scopes);
+    }
+    return merged;
+  }
+
+  /** 带租户校验的快照 GET（API 密钥上下文） */
+  async getSnapshotForApiWithAuth(
+    id: bigint,
+    opts?: { includeAiStats?: boolean; auth?: AuthenticatedRequestContext | null },
+  ): Promise<unknown | null> {
+    const snap = await this.loadSnapshotFull(id);
+    if (!snap) return null;
+    await assertTopicAccessible(snap.topicRanking.topicVersion.topic, opts?.auth);
+    const scopes = opts?.auth?.scopes ?? ['read'];
+    return this.getSnapshotForApi(id, {
+      includeAiStats: opts?.includeAiStats,
+      scopes,
+    });
   }
 
   private snapshotInclude() {
@@ -491,6 +601,7 @@ export class RankingsService {
       windowStart?: string;
       includeAiStats?: boolean;
     },
+    auth?: AuthenticatedRequestContext | null,
   ): Promise<unknown | null> {
     if (query.windowStart !== undefined && query.timeWindow === undefined) {
       throw new BadRequestException('timeWindow is required when windowStart is set');
@@ -512,8 +623,11 @@ export class RankingsService {
       }
     }
 
-    const topic = await this.prisma.topic.findUnique({ where: { slug } });
+    const topic = await this.prisma.topic.findFirst({
+      where: { slug, ...topicWhereForAuth(auth ?? undefined) },
+    });
     if (!topic) return null;
+    await assertTopicAccessible(topic, auth ?? undefined);
 
     const topicVersion = query.version
       ? await this.prisma.topicVersion.findUnique({
@@ -565,8 +679,9 @@ export class RankingsService {
     });
     if (!snapshot) return null;
 
-    const snapshotPayload = await this.getSnapshotForApi(snapshot.id, {
+    const snapshotPayload = await this.getSnapshotForApiWithAuth(snapshot.id, {
       includeAiStats: query.includeAiStats === true,
+      auth: auth ?? undefined,
     });
     if (!snapshotPayload) return null;
 
@@ -914,6 +1029,18 @@ export class RankingsService {
       }
     }
 
+    if (chainBlocks.length > 0) {
+      await this.prisma.topicRankSnapshot.update({
+        where: { id: snapshotId },
+        data: {
+          trendSummary: chainBlocks.join('\n\n---\n\n').slice(0, 16_000),
+          generatedByAi:
+            analyzedSummary || analyzedTrend || analyzedCredibility,
+        },
+      });
+      await this.warmSnapshotCache(snapshotId);
+    }
+
     return toPlainJson({
       ok: true,
       snapshotId: data.snapshotId,
@@ -1053,7 +1180,7 @@ export class RankingsService {
 
     const updated = await this.prisma.topicVersion.update({
       where: { id: topicVersionId },
-      data: { policyJson: policy as Prisma.InputJsonValue },
+      data: { policyJson: policy as unknown as Prisma.InputJsonValue },
     });
 
     return toPlainJson({
@@ -1090,8 +1217,21 @@ export class RankingsService {
     args: RunRankingArgs,
   ) {
     const snapshotTime = args.asOf ?? args.windowEnd;
-    const policy = topicVersion.policyJson as unknown as RankingPolicyJson;
-    const weights = policy.weights ?? defaultWeights;
+    const topicRow = await this.prisma.topic.findUnique({
+      where: { id: topicVersion.topicId },
+      select: { kind: true },
+    });
+    if (!topicRow) throw new BadRequestException('topic not found');
+
+    let policy: RankingPolicyJson;
+    try {
+      policy = parseRankingPolicyJson(topicVersion.policyJson);
+    } catch {
+      policy = { weights: { ...defaultWeights } };
+    }
+    policy = mergePolicyWithTopicKind(topicRow.kind, policy);
+    const weights = policy.weights;
+    const decay = policy.decay;
     const required = new Set(policy.requiredSignalKeys ?? Object.keys(weights));
 
     const entityIds = await this.resolveEntityIds(topicVersion);
@@ -1182,7 +1322,7 @@ export class RankingsService {
           ? 1
           : [...required].filter((k) => presentKeys.has(k)).length / required.size;
 
-      const { total, breakdown } = scoreEntity(signals, weights, snapshotTime);
+      const { total, breakdown } = scoreEntity(signals, weights, snapshotTime, decay);
       const tiers = signals.map((s) => s.tier);
       const avgTier = tiers.reduce((a, b) => a + b, 0) / Math.max(1, tiers.length);
 
@@ -1426,6 +1566,14 @@ export class RankingsService {
         })),
       });
 
+      await upsertEntityTopicStatsBatch(
+        tx,
+        topicVersion.topicId,
+        args.timeWindow,
+        snapshotTime,
+        snap.items.map((it) => ({ entityId: it.entityId, rank: it.rank })),
+      );
+
       const itemsForTrend = await tx.rankingItem.findMany({
         where: { snapshotId: snap.id },
         include: { entity: { select: { canonicalName: true } } },
@@ -1572,13 +1720,15 @@ export class RankingsService {
     slug: string,
     timeWindow?: TimeWindow,
     limit = 20,
+    auth?: AuthenticatedRequestContext,
   ) {
     const s = slug.trim();
-    const topic = await this.prisma.topic.findUnique({
-      where: { slug: s },
-      select: { id: true, slug: true, title: true },
+    const topic = await this.prisma.topic.findFirst({
+      where: { slug: s, ...topicWhereForAuth(auth) },
+      select: { id: true, slug: true, title: true, tenantId: true },
     });
     if (!topic) throw new NotFoundException('topic not found');
+    await assertTopicAccessible(topic, auth);
 
     const take = Math.min(Math.max(limit, 1), 100);
     const rows = await this.prisma.trendAnalysis.findMany({
@@ -1683,13 +1833,15 @@ export class RankingsService {
     slug: string,
     timeWindow?: TimeWindow,
     limit = 30,
+    auth?: AuthenticatedRequestContext,
   ) {
     const s = slug.trim();
-    const topic = await this.prisma.topic.findUnique({
-      where: { slug: s },
-      select: { id: true, slug: true, title: true },
+    const topic = await this.prisma.topic.findFirst({
+      where: { slug: s, ...topicWhereForAuth(auth) },
+      select: { id: true, slug: true, title: true, tenantId: true },
     });
     if (!topic) throw new NotFoundException('topic not found');
+    await assertTopicAccessible(topic, auth);
 
     const take = Math.min(Math.max(limit, 1), 100);
     const rows = await this.prisma.topicRankSnapshot.findMany({
@@ -1898,10 +2050,14 @@ export class RankingsService {
     topicSlug: string,
     timeWindow?: TimeWindow,
     limit = 100,
+    auth?: AuthenticatedRequestContext,
   ) {
     const slug = topicSlug.trim();
-    const topic = await this.prisma.topic.findUnique({ where: { slug } });
+    const topic = await this.prisma.topic.findFirst({
+      where: { slug, ...topicWhereForAuth(auth) },
+    });
     if (!topic) throw new NotFoundException('topic not found');
+    await assertTopicAccessible(topic, auth);
     const entity = await this.prisma.entity.findUnique({
       where: { id: entityId },
       select: { id: true, canonicalName: true, type: true },
@@ -1934,10 +2090,34 @@ export class RankingsService {
           endStreakRankImproving: number;
           endStreakRankDeclining: number;
           pointCount: number;
+          materialized?: boolean;
         }
       | null = null;
 
-    if (points.length > 0) {
+    const twForStats = timeWindow ?? points[0]?.timeWindow;
+    if (twForStats) {
+      const statsRow = await this.readPrisma.entityTopicStats.findUnique({
+        where: {
+          entityId_topicId_timeWindow: {
+            entityId,
+            topicId: topic.id,
+            timeWindow: twForStats,
+          },
+        },
+      });
+      if (statsRow) {
+        summary = {
+          bestRank: statsRow.bestRank,
+          worstRank: statsRow.worstRank,
+          endStreakRankImproving: statsRow.currentStreakUp,
+          endStreakRankDeclining: statsRow.currentStreakDown,
+          pointCount: points.length,
+          materialized: true,
+        };
+      }
+    }
+
+    if (points.length > 0 && !summary) {
       const ranks = points.map((p) => p.rank);
       summary = {
         bestRank: Math.min(...ranks),
@@ -1945,6 +2125,7 @@ export class RankingsService {
         endStreakRankImproving: endStreakRankImproving(points),
         endStreakRankDeclining: endStreakRankDeclining(points),
         pointCount: points.length,
+        materialized: false,
       };
     }
 

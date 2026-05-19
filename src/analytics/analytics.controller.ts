@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, NotFoundException, Param, Post } from '@nestjs/common';
 import {
   IsArray,
   IsNumber,
@@ -10,6 +10,7 @@ import { Type } from 'class-transformer';
 import { randomUUID } from 'crypto';
 import { ClickhouseService, type MetricTimeseriesRow } from './clickhouse.service';
 import { toPlainJson } from '../lib/json';
+import { PrismaService } from '../prisma/prisma.service';
 
 class MetricPointDto {
   @IsString()
@@ -38,7 +39,10 @@ class InsertMetricsDto {
 
 @Controller('v1/analytics')
 export class AnalyticsController {
-  constructor(private readonly clickhouse: ClickhouseService) {}
+  constructor(
+    private readonly clickhouse: ClickhouseService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   @Get('clickhouse/health')
   async clickhouseHealth() {
@@ -68,5 +72,51 @@ export class AnalyticsController {
     }));
     await this.clickhouse.insertMetricTimeseries(rows);
     return { ok: true, inserted: rows.length };
+  }
+
+  /** 快照在 ClickHouse 中的指标行 + PG 快照元数据（CH↔PG 联合报表） */
+  @Get('snapshots/:id/metrics')
+  async snapshotMetrics(@Param('id') id: string) {
+    let sid: bigint;
+    try {
+      sid = BigInt(id.trim());
+    } catch {
+      throw new BadRequestException('invalid snapshot id');
+    }
+    const snap = await this.prisma.topicRankSnapshot.findUnique({
+      where: { id: sid },
+      select: {
+        id: true,
+        snapshotTime: true,
+        snapshotVersion: true,
+        confidenceScore: true,
+        trendSummary: true,
+        generatedByAi: true,
+        topicRanking: {
+          select: {
+            timeWindow: true,
+            topicVersion: {
+              select: { topic: { select: { slug: true, title: true, kind: true } } },
+            },
+          },
+        },
+      },
+    });
+    if (!snap) throw new NotFoundException('snapshot not found');
+    const ch = await this.clickhouse.querySnapshotMetrics(sid);
+    return toPlainJson({
+      postgres: {
+        snapshotId: snap.id.toString(),
+        snapshotTime: snap.snapshotTime.toISOString(),
+        snapshotVersion: snap.snapshotVersion,
+        confidenceScore: snap.confidenceScore,
+        trendSummary: snap.trendSummary,
+        generatedByAi: snap.generatedByAi,
+        topicSlug: snap.topicRanking.topicVersion.topic.slug,
+        topicKind: snap.topicRanking.topicVersion.topic.kind,
+        timeWindow: snap.topicRanking.timeWindow,
+      },
+      clickhouse: ch,
+    });
   }
 }

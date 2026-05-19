@@ -73,7 +73,10 @@ function AdminShellInner({ children }: { children: React.ReactNode }) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   useEffect(() => {
-    if (!pathname.startsWith(ADMIN_HREF.crawlMonitor)) {
+    if (
+      !pathname.startsWith(ADMIN_HREF.crawlMonitor) &&
+      !pathname.startsWith(ADMIN_HREF.bi)
+    ) {
       setSidebarHidden(false);
     }
   }, [pathname, setSidebarHidden]);

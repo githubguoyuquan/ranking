@@ -32,6 +32,10 @@ export function backendHealthKafkaUrl(): string {
   return backendAbs(BACKEND_HEALTH.kafka);
 }
 
+export function adminBiOverviewUrl(): string {
+  return backendAbs(BACKEND_ADMIN.biOverview);
+}
+
 export function adminReindexEntitiesUrl(): string {
   return backendAbs(BACKEND_ADMIN.reindexEntities);
 }

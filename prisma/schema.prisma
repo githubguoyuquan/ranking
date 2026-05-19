@@ -74,11 +74,13 @@ model OutboxEvent {
 }
 
 model Tenant {
-  id        BigInt   @id @default(autoincrement())
-  slug      String   @unique
-  name      String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id           BigInt   @id @default(autoincrement())
+  slug         String   @unique
+  name         String
+  /// 租户级配额等（如 `aiAnalysisDailyCap`）；未设则回落全局 env
+  settingsJson Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   apiKeys   ApiKey[]
   topics    Topic[]
@@ -130,10 +132,16 @@ model Topic {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant    Tenant?        @relation(fields: [tenantId], references: [id], onDelete: SetNull)
-  versions  TopicVersion[]
-  sources   Source[]
-  embedding TopicEmbedding?
+  tenant      Tenant?           @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  versions    TopicVersion[]
+  sources     Source[]
+  embedding   TopicEmbedding?
+  fingerprint TopicFingerprint?
+  entityStats EntityTopicStats[]
+  agentRuns   AgentRun[]
+  approvedProposals TopicProposal[] @relation("TopicProposalApproved")
+  mergesAsSource    TopicMergeAudit[] @relation("TopicMergeSource")
+  mergesAsTarget    TopicMergeAudit[] @relation("TopicMergeTarget")
 
   @@index([tenantId])
 }
@@ -204,6 +212,7 @@ model TopicRankSnapshot {
   items        RankingItem[]
   analyses     AiAnalysis[]
   aiAudits     AiAuditEvent[]
+  agentRuns    AgentRun[]
 
   @@unique([topicRankingId, snapshotVersion])
   @@unique([topicRankingId, snapshotTime])
@@ -269,9 +278,40 @@ model Entity {
   relationsTo   EntityRelation[] @relation("EntityTo")
   rankingItems  RankingItem[]
   histories     RankingItemHistory[]
+  topicStats    EntityTopicStats[]
 
   @@index([tenantId])
   @@index([piiLevel])
+}
+
+/// 实体在话题下的名次极值与末端连续升降（每次快照后增量更新）
+model EntityTopicStats {
+  entityId            BigInt
+  topicId             BigInt
+  timeWindow          TimeWindow
+  bestRank            Int
+  worstRank           Int
+  currentStreakUp     Int      @default(0)
+  currentStreakDown   Int      @default(0)
+  lastRank            Int?
+  lastAsOf            DateTime?
+  updatedAt           DateTime @updatedAt
+
+  entity Entity @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  topic  Topic  @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  @@id([entityId, topicId, timeWindow])
+  @@index([topicId, timeWindow])
+}
+
+/// 话题语义指纹（SimHash / 向量元数据），支撑去重与合并
+model TopicFingerprint {
+  topicId        BigInt   @id
+  simhash        String   @db.VarChar(64)
+  embeddingModel String?  @db.VarChar(128)
+  updatedAt      DateTime @updatedAt
+
+  topic Topic @relation(fields: [topicId], references: [id], onDelete: Cascade)
 }
 
 model EntityMetric {
@@ -351,6 +391,7 @@ model Source {
   topic      Topic?       @relation(fields: [topicId], references: [id])
   urls       CrawledUrl[]
   crawlTasks CrawlTask[]
+  topicProposals TopicProposal[]
 
   @@index([tenantId])
 }
@@ -461,4 +502,75 @@ model EntityRelation {
   to   Entity @relation("EntityTo", fields: [toId], references: [id])
 
   @@index([fromId, relation])
+}
+
+/// 多 Agent 编排单次执行记录（BullMQ `ai-agent` 队列）
+model AgentRun {
+  id            BigInt    @id @default(autoincrement())
+  correlationId String    @db.VarChar(64)
+  agent         String    @db.VarChar(120)
+  /// queued | running | completed | failed
+  status        String    @default("queued")
+  inputJson     Json?
+  outputJson    Json?
+  snapshotId    BigInt?
+  topicId       BigInt?
+  proposalId    BigInt?
+  parentRunId   BigInt?
+  error         String?   @db.Text
+  startedAt     DateTime?
+  finishedAt    DateTime?
+  createdAt     DateTime  @default(now())
+
+  snapshot TopicRankSnapshot? @relation(fields: [snapshotId], references: [id], onDelete: SetNull)
+  topic    Topic?               @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  proposal TopicProposal?       @relation(fields: [proposalId], references: [id], onDelete: SetNull)
+  parent   AgentRun?            @relation("AgentRunChain", fields: [parentRunId], references: [id], onDelete: SetNull)
+  children AgentRun[]           @relation("AgentRunChain")
+
+  @@index([correlationId])
+  @@index([agent, status, createdAt])
+  @@index([snapshotId])
+  @@index([topicId])
+  @@index([proposalId])
+}
+
+/// Topic Discovery Agent 产出：待审核话题候选
+model TopicProposal {
+  id              BigInt    @id @default(autoincrement())
+  /// pending | approved | rejected | merged
+  status          String    @default("pending")
+  suggestedSlug   String    @db.VarChar(128)
+  suggestedTitle  String
+  kind            TopicKind @default(SEMI_OBJECTIVE)
+  confidence      Float     @default(0.5)
+  evidenceJson    Json
+  sourceId        BigInt?
+  clusterKey      String?   @unique @db.VarChar(128)
+  approvedTopicId BigInt?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  source        Source?    @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  approvedTopic Topic?     @relation("TopicProposalApproved", fields: [approvedTopicId], references: [id], onDelete: SetNull)
+  agentRuns     AgentRun[]
+
+  @@index([status, createdAt])
+  @@index([sourceId])
+}
+
+/// Topic Merge Agent 审计
+model TopicMergeAudit {
+  id            BigInt   @id @default(autoincrement())
+  sourceTopicId BigInt
+  targetTopicId BigInt
+  mergedBy      String   @default("system") @db.VarChar(128)
+  detailJson    Json
+  createdAt     DateTime @default(now())
+
+  sourceTopic Topic @relation("TopicMergeSource", fields: [sourceTopicId], references: [id])
+  targetTopic Topic @relation("TopicMergeTarget", fields: [targetTopicId], references: [id])
+
+  @@index([targetTopicId, createdAt])
+  @@index([sourceTopicId])
 }

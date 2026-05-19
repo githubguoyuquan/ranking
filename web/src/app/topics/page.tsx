@@ -31,10 +31,16 @@ import {
   nestTopicLeaderboardUrl,
   nestTopicSnapshotsUrl,
   nestTopicTrendAnalysesUrl,
+  nestTopicUrl,
   nestTopicVersionsUrl,
   nestTopicVersionPolicyUrl,
   nestSnapshotScoreBreakdownsUrl,
 } from "@/lib/nest-api-urls";
+import {
+  TOPIC_KIND_OPTIONS,
+  type TopicKindValue,
+  isTopicKindValue,
+} from "@/lib/topic-kind";
 import { unifiedSearchAdminPathFromQuery } from "@/lib/unified-search-admin-path";
 import { isIsoDateString } from "@/lib/iso-date";
 import { TIME_WINDOW_SET } from "@/lib/time-window";
@@ -53,6 +59,17 @@ const EMPTY_QUICK_WEIGHTS: QuickWeightsState = {
   mentions: "",
   social: "",
   news: "",
+};
+
+const selectClass =
+  "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-xs outline-none focus-visible:ring-2 focus-visible:ring-ring";
+
+type TopicMeta = {
+  id: string;
+  slug: string;
+  title: string;
+  kind: TopicKindValue;
+  locale: string;
 };
 
 type TopicVersionRow = {
@@ -276,6 +293,12 @@ function TopicsPageInner() {
   const { abs } = useAdminAppUrl();
   const searchParams = useSearchParams();
   const [slug, setSlug] = useState("global-female-singers");
+  const [topicMeta, setTopicMeta] = useState<TopicMeta | null>(null);
+  const [topicKindDraft, setTopicKindDraft] =
+    useState<TopicKindValue>("SEMI_OBJECTIVE");
+  const [topicTitleDraft, setTopicTitleDraft] = useState("");
+  const [topicSaving, setTopicSaving] = useState(false);
+  const [topicMsg, setTopicMsg] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<string>("");
   const [versionRows, setVersionRows] = useState<TopicVersionRow[]>([]);
@@ -596,16 +619,101 @@ function TopicsPageInner() {
     },
   });
 
+  async function loadTopicMeta() {
+    setTopicMsg("");
+    try {
+      const res = await fetch(nestTopicUrl(slugForApi), { cache: "no-store" });
+      const text = await res.text();
+      if (!res.ok) {
+        setTopicMeta(null);
+        setTopicMsg(`话题 ${res.status}: ${text.slice(0, 400)}`);
+        return;
+      }
+      const j = JSON.parse(text) as Record<string, unknown>;
+      const kindRaw = j.kind != null ? String(j.kind) : "";
+      const kind: TopicKindValue = isTopicKindValue(kindRaw)
+        ? kindRaw
+        : "SEMI_OBJECTIVE";
+      setTopicMeta({
+        id: String(j.id ?? ""),
+        slug: String(j.slug ?? slugForApi),
+        title: String(j.title ?? ""),
+        kind,
+        locale: String(j.locale ?? ""),
+      });
+      setTopicKindDraft(kind);
+      setTopicTitleDraft(String(j.title ?? ""));
+    } catch (e) {
+      setTopicMeta(null);
+      setTopicMsg(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function saveTopicMeta() {
+    setTopicSaving(true);
+    setTopicMsg("");
+    try {
+      const body: { kind: TopicKindValue; title?: string } = {
+        kind: topicKindDraft,
+      };
+      const title = topicTitleDraft.trim();
+      if (title) body.title = title;
+      const res = await fetch(nestTopicUrl(slugForApi), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const text = await res.text();
+      if (!res.ok) {
+        setTopicMsg(`${res.status} ${text.slice(0, 2000)}`);
+        return;
+      }
+      setTopicMsg("已保存 TopicKind / 标题");
+      await loadTopicMeta();
+    } catch (e) {
+      setTopicMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTopicSaving(false);
+    }
+  }
+
   async function load() {
     setLoading(true);
     setResult("");
     setVersionRows([]);
     try {
-      const res = await fetch(nestTopicVersionsUrl(slugForApi), {
-        cache: "no-store",
-      });
-      const text = await res.text();
-      if (res.ok) {
+      const [topicRes, versionsRes] = await Promise.all([
+        fetch(nestTopicUrl(slugForApi), { cache: "no-store" }),
+        fetch(nestTopicVersionsUrl(slugForApi), { cache: "no-store" }),
+      ]);
+      const topicText = await topicRes.text();
+      if (topicRes.ok) {
+        try {
+          const j = JSON.parse(topicText) as Record<string, unknown>;
+          const kindRaw = j.kind != null ? String(j.kind) : "";
+          const kind: TopicKindValue = isTopicKindValue(kindRaw)
+            ? kindRaw
+            : "SEMI_OBJECTIVE";
+          setTopicMeta({
+            id: String(j.id ?? ""),
+            slug: String(j.slug ?? slugForApi),
+            title: String(j.title ?? ""),
+            kind,
+            locale: String(j.locale ?? ""),
+          });
+          setTopicKindDraft(kind);
+          setTopicTitleDraft(String(j.title ?? ""));
+          setTopicMsg("");
+        } catch {
+          setTopicMeta(null);
+        }
+      } else {
+        setTopicMeta(null);
+        setTopicMsg(`话题 ${topicRes.status}: ${topicText.slice(0, 400)}`);
+      }
+
+      const text = await versionsRes.text();
+      if (versionsRes.ok) {
         setVersionRows(parseVersionsJson(text));
       } else {
         setVersionRows([]);
@@ -616,7 +724,13 @@ function TopicsPageInner() {
       } catch {
         formatted = text;
       }
-      setResult(`${res.ok ? "" : `HTTP ${res.status}\n`}${formatted}`);
+      const prefix =
+        !versionsRes.ok && versionsRes.status !== topicRes.status
+          ? `versions HTTP ${versionsRes.status}\n`
+          : !versionsRes.ok
+            ? `HTTP ${versionsRes.status}\n`
+            : "";
+      setResult(`${prefix}${formatted}`);
     } catch (e) {
       setResult(e instanceof Error ? e.message : String(e));
     } finally {
@@ -665,6 +779,8 @@ function TopicsPageInner() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">话题版本</h1>
         <p className="mt-1 text-sm text-muted-foreground">
+          <code className="rounded bg-muted px-1">GET {NEST_V1_DOC.topic}</code> ·{" "}
+          <code className="rounded bg-muted px-1">PATCH {NEST_V1_DOC.topic}</code> ·{" "}
           <code className="rounded bg-muted px-1">GET {NEST_V1_DOC.topicsVersions}</code> ·{" "}
           <code className="rounded bg-muted px-1">GET {NEST_V1_DOC.topicsLeaderboard}</code> ·{" "}
           <code className="rounded bg-muted px-1">GET {NEST_V1_DOC.topicsTrendAnalyses}</code> ·{" "}
@@ -718,6 +834,85 @@ function TopicsPageInner() {
             >
               {leaderboardLoading ? "加载中…" : "热榜"}
             </Button>
+          </div>
+
+          <div
+            className="space-y-3 rounded-lg border border-border/80 bg-muted/20 p-4"
+            aria-labelledby="topic-kind-heading"
+          >
+            <div>
+              <h2
+                id="topic-kind-heading"
+                className="text-sm font-medium text-foreground"
+              >
+                话题属性（TopicKind）
+              </h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                物化排行时与 <code className="rounded bg-muted px-1">policyJson</code>{" "}
+                合并默认权重与衰减；显式 policy 字段仍优先。
+                {topicMeta ? (
+                  <span className="ml-1 font-mono text-[11px]">
+                    topicId={topicMeta.id}
+                  </span>
+                ) : null}
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="space-y-2 sm:col-span-2 lg:col-span-1">
+                <Label htmlFor="topic-kind">TopicKind</Label>
+                <select
+                  id="topic-kind"
+                  className={selectClass}
+                  value={topicKindDraft}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (isTopicKindValue(v)) setTopicKindDraft(v);
+                  }}
+                >
+                  {TOPIC_KIND_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label} ({o.value})
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-muted-foreground">
+                  {
+                    TOPIC_KIND_OPTIONS.find((o) => o.value === topicKindDraft)
+                      ?.hint
+                  }
+                </p>
+              </div>
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="topic-title">标题 title</Label>
+                <Input
+                  id="topic-title"
+                  maxLength={200}
+                  value={topicTitleDraft}
+                  onChange={(e) => setTopicTitleDraft(e.target.value)}
+                  placeholder={topicMeta?.title ?? "话题展示名"}
+                />
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={topicSaving || !topicMeta}
+                onClick={() => void saveTopicMeta()}
+              >
+                {topicSaving ? "保存中…" : "保存话题属性"}
+              </Button>
+              <CopyTextButton
+                text={nestTopicUrl(slugForApi)}
+                idleLabel="复制 GET topic URL"
+                className="h-8"
+              />
+              {topicMsg ? (
+                <span className="text-xs text-muted-foreground" role="status">
+                  {topicMsg}
+                </span>
+              ) : null}
+            </div>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-3">

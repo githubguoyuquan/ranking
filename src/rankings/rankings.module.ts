@@ -1,5 +1,6 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
+import { TrendAnalysisSchedulerService } from './trend-analysis-scheduler.service';
 import { AnalyticsModule } from '../analytics/analytics.module';
 import { AgentModule } from '../agent/agent.module';
 import { RealtimeModule } from '../realtime/realtime.module';
@@ -27,7 +28,12 @@ import { RankingsService } from './rankings.service';
     }),
   ],
   controllers: [RankingsController],
-  providers: [RankingsService, RankingProcessor, RankingFollowupProcessor],
+  providers: [
+    RankingsService,
+    RankingProcessor,
+    RankingFollowupProcessor,
+    TrendAnalysisSchedulerService,
+  ],
   exports: [RankingsService],
 })
 export class RankingsModule {}

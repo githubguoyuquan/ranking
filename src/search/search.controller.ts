@@ -30,6 +30,7 @@ import {
 } from 'class-validator';
 import { PiiLevel } from '@prisma/client';
 import { RequireScopes } from '../compliance/api-key.guard';
+import { redactEntityRecord } from '../compliance/entity-pii';
 import { getAuthFromRequest } from '../compliance/request-auth';
 import { AI_AUDIT_SOURCE_EMBEDDING_SEARCH } from '../ai-audit/ai-audit.constants';
 import { toPlainJson } from '../lib/json';
@@ -353,7 +354,11 @@ export class SearchController {
    */
   @Get('admin/entities')
   @RequireScopes('admin')
-  async listEntities(@Query('q') q?: string, @Query('limit') limitRaw?: string) {
+  async listEntities(
+    @Query('q') q?: string,
+    @Query('limit') limitRaw?: string,
+    @Req() req?: Request,
+  ) {
     const take = Math.min(Math.max(Number(limitRaw) || 40, 1), 100);
     const needle = q?.trim();
     const rows = await this.prisma.entity.findMany({
@@ -363,7 +368,9 @@ export class SearchController {
       orderBy: { id: 'desc' },
       take,
     });
-    return toPlainJson(rows);
+    const auth = req ? getAuthFromRequest(req) : undefined;
+    const scopes = auth?.scopes ?? ['read'];
+    return toPlainJson(rows.map((r) => redactEntityRecord(r, scopes)));
   }
 
   /** 创建实体；启用 ES 时与 Outbox 同事务，提交后由 Flusher 异步写索引 */

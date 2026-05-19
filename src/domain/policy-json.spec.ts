@@ -39,4 +39,12 @@ describe('parseRankingPolicyJson', () => {
       }),
     ).toThrow(/not in weights/);
   });
+
+  it('accepts decay.halfLifeDays', () => {
+    const p = parseRankingPolicyJson({
+      weights: { a: 1 },
+      decay: { halfLifeDays: 21 },
+    });
+    expect(p.decay?.halfLifeDays).toBe(21);
+  });
 });

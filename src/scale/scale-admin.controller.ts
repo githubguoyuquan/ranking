@@ -8,6 +8,7 @@ import { PostgresPartitionService } from './postgres-partition.service';
 import { ElasticRolloverService } from './elastic-rollover.service';
 import { crawlProxyPoolStatus } from '../ingestion/crawl-proxy-pool';
 import { resolveCrawlQueueName } from '../ingestion/crawl-queue-name';
+import { QdrantService } from './qdrant.service';
 
 class EnsurePartitionsDto {
   @IsOptional()
@@ -40,10 +41,12 @@ export class ScaleAdminController {
     private readonly prismaRead: PrismaReadService,
     private readonly partitions: PostgresPartitionService,
     private readonly rollover: ElasticRolloverService,
+    private readonly qdrant: QdrantService,
   ) {}
 
   @Get('status')
-  status() {
+  async status() {
+    const qdrantPing = await this.qdrant.ping();
     return toPlainJson({
       postgres: {
         readReplicaConfigured: this.prismaRead.usesReadReplica,
@@ -54,6 +57,11 @@ export class ScaleAdminController {
         entitiesIndex: process.env.ELASTICSEARCH_INDEX_ENTITIES ?? 'ranking_entities',
         crawledUrlsIndex:
           process.env.ELASTICSEARCH_INDEX_CRAWLED_URLS ?? 'ranking_crawled_urls',
+      },
+      qdrant: { ...this.qdrant.status(), ping: qdrantPing },
+      objectStorage: {
+        minioConfigured: Boolean(process.env.MINIO_ENDPOINT?.trim()),
+        bucket: process.env.MINIO_BUCKET ?? null,
       },
       crawl: {
         queueName: resolveCrawlQueueName(),

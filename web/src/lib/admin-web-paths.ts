@@ -21,6 +21,8 @@ export const ADMIN_HREF = {
   outbox: "/outbox",
   compliance: "/compliance",
   scale: "/scale",
+  bi: "/bi",
+  agents: "/agents",
 } as const;
 
 /** `/topics` 管理页；`slug` 与演示 seed / 热榜页一致，上限见 `TOPIC_SLUG_MAX_LEN` */

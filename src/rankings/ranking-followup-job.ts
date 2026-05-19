@@ -13,6 +13,7 @@ export type RankingFollowupPayload = {
   timeWindow: TimeWindow;
 };
 
+/** BullMQ `jobId` 不得含 `:`；与主排行队列的 hash id 规则一致用连字符 */
 export function buildRankingFollowupJobId(snapshotId: string): string {
-  return `ranking-followup:${snapshotId}`;
+  return `ranking-followup-${snapshotId}`;
 }

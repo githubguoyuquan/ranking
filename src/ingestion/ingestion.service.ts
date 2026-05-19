@@ -16,6 +16,7 @@ import {
   urlFingerprint,
 } from './crawl-job';
 import { clampCrawlTasksListTake } from './crawl-list-limits';
+import { AgentOrchestrationService } from '../agent-orchestration/agent-orchestration.service';
 import { CrawlHostThrottleService } from './crawl-host-throttle.service';
 import {
   crawlSemanticDedupCandidateLimit,
@@ -39,6 +40,7 @@ export class IngestionService {
     private readonly embedding: EmbeddingService,
     private readonly hostThrottle: CrawlHostThrottleService,
     @InjectQueue(CRAWL_QUEUE) private readonly crawlQueue: Queue<CrawlJobPayload>,
+    private readonly agentOrchestration: AgentOrchestrationService,
   ) {}
 
   async getCheckpoint(crawlerName: string) {
@@ -463,6 +465,10 @@ export class IngestionService {
         where: { id: taskId },
         data: { status: 'completed', cursor: payload.cursor ?? undefined },
       });
+
+      void this.agentOrchestration
+        .maybeEnqueueDiscoveryAfterCrawl(sourceId)
+        .catch(() => undefined);
     } catch (e) {
       await this.prisma.crawlTask.update({
         where: { id: taskId },

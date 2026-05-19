@@ -24,7 +24,13 @@ class AnalyzeSnapshotDto {
   chainContext?: string;
 }
 
-const LIST_ANALYSES_AGENT_KINDS = ['followup', 'trend', 'credibility', 'default'] as const;
+const LIST_ANALYSES_AGENT_KINDS = [
+  'followup',
+  'trend',
+  'credibility',
+  'factcheck',
+  'default',
+] as const;
 
 class ListAnalysesQueryDto {
   @IsOptional()

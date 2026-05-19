@@ -65,8 +65,9 @@ export function scoreEntity(
   signals: SignalObservation[],
   weights: Record<string, number>,
   now: Date,
+  decayParams?: DecayParams,
 ): { total: number; breakdown: Record<string, number> } {
-  const decay: DecayParams = { halfLifeDays: 10 };
+  const decay: DecayParams = decayParams ?? { halfLifeDays: 10 };
   const breakdown: Record<string, number> = {};
 
   for (const s of signals) {

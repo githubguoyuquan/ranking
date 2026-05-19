@@ -16,6 +16,7 @@ import {
   nestV1SnapshotPath,
   nestV1SnapshotScoreBreakdownsPath,
   nestV1TopicLeaderboardPath,
+  nestV1TopicPath,
   nestV1TopicSnapshotsPath,
   nestV1TopicTrendAnalysesPath,
   nestV1TopicVersionsPath,
@@ -80,6 +81,10 @@ export function nestSnapshotScoreBreakdownsUrl(snapshotId: string): string {
 
 export function nestSnapshotCompareUrl(): string {
   return nestAbs(NEST_V1.snapshotsCompare);
+}
+
+export function nestTopicUrl(topicSlug: string): string {
+  return nestAbs(nestV1TopicPath(topicSlug));
 }
 
 export function nestTopicVersionsUrl(topicSlug: string): string {

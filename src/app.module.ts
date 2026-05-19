@@ -1,10 +1,13 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
+import { ScheduleModule } from '@nestjs/schedule';
 import { bullMqConnectionFromEnv } from './config/redis';
 import { AiAuditModule } from './ai-audit/ai-audit.module';
 import { ComplianceModule } from './compliance/compliance.module';
 import { ScaleModule } from './scale/scale.module';
 import { AgentModule } from './agent/agent.module';
+import { AgentOrchestrationModule } from './agent-orchestration/agent-orchestration.module';
+import { BiModule } from './bi/bi.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { CacheModule } from './cache/cache.module';
 import { HealthController } from './health.controller';
@@ -17,6 +20,7 @@ import { SearchModule } from './search/search.module';
 
 @Module({
   imports: [
+    ScheduleModule.forRoot(),
     BullModule.forRoot({
       connection: bullMqConnectionFromEnv(),
     }),
@@ -27,11 +31,13 @@ import { SearchModule } from './search/search.module';
     AnalyticsModule,
     OutboxModule,
     AgentModule,
+    AgentOrchestrationModule,
     IngestionModule,
     RankingsModule,
     SearchModule,
     ScaleModule,
     ComplianceModule,
+    BiModule,
   ],
   controllers: [HealthController],
 })

@@ -23,6 +23,7 @@
 
 4. **P3 — Agents & UI**  
    - ✅ **管理前端**：`web/` — Next.js、快照图表、**搜索**（页眉 `GET /v1/search/health`；`/search?q=&limit=&entityIndex=&crawlIndex=&sourceId=&status=` 预填表单；**`limit` 前端钳制 1–30 与 DTO 一致**；**提交检索后地址栏与请求参数对齐**；**命中实体名可再点进同名检索**；**ES health 新标签 JSON**；**与表单一致的 GET /v1/search 新标签**、**复制 API URL**；**q 为空时主检索框 Enter 不提交**（与「搜索」按钮一致）；**limit/sourceId/status 在已有 q 时 Enter 触发搜索**（**sourceId 非空须十进制 ≤38 位**）/ **索引**（`POST /admin/reindex-*`；**`/reindex` 页脚 `GET /v1/search/health` 新标签**）/ **实体 / 爬虫**（`/entities?q=` 预填；列表 **q 最多 200 字符**（与聚合搜索一致）；**新标签打开当前 `GET /admin/entities`**；**新建/编辑 Enter 提交**；**canonicalName 为空时不 POST/PATCH**；**PATCH/DELETE 路径 id 须十进制（前端预校验）**；名称列→搜索；**爬虫**页 **数据源列表加载后自动选用首条**（避免空库误请求 id=1）、**新标签** `GET /v1/crawl/sources` / **当前 source urls**；**新建源 Enter**：**name/baseUrl 均非空**；**可选 trustTier 1–5（与 DTO 一致，表列 tier）、topicId（十进制，可空）**；**任务区**：**sourceId（十进制 ≤38 位）与 seedUrl 均非空**方可提交（与按钮一致）；**GET 任务列表**（全量或当前 source）可 **新标签打开 / 复制 URL**；异步 + 轮询 `GET /v1/crawl/tasks/:id`（**轮询前校验任务 id 为十进制**）、**话题**（热榜区 **复制 snapshotId / topicVersionId**；**新标签**当前 **versions / leaderboard**；**热榜 windowStart 非空时校验 ISO**；**slug/version/timeWindow/windowStart 框与 URL 预填截断（160/64/16/80）**）、**演示数据**（slug **Enter** · **复制**快照 ids / topicVersionId；成功写入后页脚 **首张快照**、**本批对比** 与 **索引/爬虫/Outbox** 等链）、**运行排行**（**topicVersionId** 未填不提交；**填写时校验十进制 id（≤38 位，与 BigInt 一致）**；**timeWindow / ISO 框 maxLength 16/80**；**提交前校验** `timeWindow` 枚举与 **ISO** 窗口时间；**演示数据**链至 **`/rankings/run?topicVersionId=`**；各框 **Enter** · **复制 POST 体**；**异步** **GET job / ranking status** 新标签与 **复制 id**）、**Outbox limit/type Enter**、根级 **loading / error**、快照 **Agent 简报**  
+   - ✅ **多 Agent 编排**：BullMQ 队列 **`ai-agent`**、`AgentRun` / `TopicProposal` / `TopicMergeAudit`；**`topic-discovery-v1`**（爬取标题聚类 → 提案）、**`topic-merge-v1`**（相似度 + 迁移 `Source`）、**`fact-check-v1`**（跨信源指标冲突 → `AiAnalysis`）、**`duplicate-detection-v1`**；管理台 **`/agents`**；`GET/POST /admin/agents/*`（见 `.env.example` **`AI_AGENT_*`**）
    - ✅ **Agent（最小）**：`POST /admin/snapshots/:id/analyze` → `AiAnalysis`；body 可选 **`agent`（≤120）**、**`topN`（1–50）**、**`chainContext`（≤8192，有 `OPENAI_API_KEY` 时写入 user 前缀）**；约定名 **`rules-v1`**（默认）、**`post-snapshot-summary-v1`** / **`trend-v1`** / **`credibility-v1`**（后两者可由 `ranking-followup` 选配，`detailJson.agentKind` 分别为 `followup` / `trend` / `credibility`）；`GET /v1/snapshots/:id/analyses` 返回 **`{ filter, total, analyses }`**，可选 **`agentKind`**、**`agent`**、**`limit`（1–200，默认 50）**、**`offset`**；可选 `OPENAI_API_KEY` 调 GPT；**`AI_ANALYSIS_DAILY_CAP`**（UTC 日 **`AiAnalysis` 条数**）；**`AI_EMBEDDING_DAILY_CAP`**（UTC 日 **成功 embedding 批次数**，一次 `embedMany` 计 1）、**`AI_EMBEDDING_AUDIT`**（默认开启；`false` 不写 **`AiAuditEvent`**）；**`GET /admin/ai/spectrum`** / **`GET /admin/ai/audit-events`**（可筛 `category`、`source`）；生产需正式鉴权；**`RANKING_FOLLOWUP_ANALYZE_PIPELINE`**（非空则**仅**按逗号顺序跑多步、后续步将前序摘要写入 user 前缀；见 `.env.example`）或 **`RANKING_FOLLOWUP_ANALYZE`** / **`RANKING_FOLLOWUP_ANALYZE_TREND`** / **`RANKING_FOLLOWUP_ANALYZE_CREDIBILITY`**；共用 **`RANKING_FOLLOWUP_ANALYZE_TOPN`**；返回体含 **`analyzePipeline`**、**`analyzedSummary`** / **`analyzedTrend`** / **`analyzedCredibility`**（流水线中含 **`rules-v1`** 等时仍可能 **`analyzed`** 为 true）；**`detailJson.usedChainContext`** 标记链式上文；管理台快照详情 **Agent 区**提供 **可选表单（与 DTO 一致）**、**新标签打开 analyses**、**复制 GET / POST URL**、`aria-live` 状态；得分分布图容器带 **简要 `aria-label`（读屏）**  
    - ✅ **热榜实时（SSE）**：`GET /v1/realtime/stream`（Redis Pub/Sub；管理台话题页 / 运行排行页订阅 **`topics`** 或 **`topicRankingIds`**；事件 **`snapshot_ready`** / **`ranking_failed`**）  
    - ✅ **Playwright 爬取**：`CRAWL_USE_PLAYWRIGHT` 或 `Source.kind=http-playwright`；依赖 `playwright` + `npx playwright install chromium`  
@@ -44,7 +45,18 @@
 - `GET /admin/compliance/snapshots/:id/export?format=json|csv`；`ComplianceAuditEvent`
 - 管理台 **`/compliance`**
 
-迁移：`npx prisma migrate deploy`（含 `20260519120000_phase_cd_scale_compliance`）。
+迁移：`npx prisma migrate deploy`（含 `20260519120000_phase_cd_scale_compliance`、`20260519150000_roadmap_entity_stats_fingerprint`）。
+
+## 路线图落地（§15 可代码化部分）
+
+- **Phase A**：`EntityTopicStats` 物化、`policyJson.decay`、`TopicKind` 预设、`GET /v1/analytics/snapshots/:id/metrics`、UTC 日 `periodic_rollup` 定时任务  
+- **Phase B**：follow-up 写 `trendSummary` / `generatedByAi`；租户 `settingsJson.aiAnalysisDailyCap`  
+- **Phase C/D**：沿用既有 scale/compliance；compose 增 **MinIO / Qdrant**；`deploy/helm/ranking` 骨架  
+- 详见 `docs/PLATFORM_ARCHITECTURE.md` §5.1 / §15
+
+## BI 大屏
+
+管理台 **`/bi`**（侧栏「BI 大屏」）：全屏 KPI + ECharts（14 日快照量、趋势标签分布、涨榜 Top10）+ 依赖健康 + 最新快照表；数据来自 **`GET /admin/bi/overview`**（30s 自动刷新）。进入页默认隐藏侧栏，Esc /「退出全屏」恢复。
 
 ## Priority （后续投入）
 

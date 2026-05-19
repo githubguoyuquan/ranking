@@ -2,6 +2,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { bullMqConnectionFromEnv } from './config/redis';
 import { IngestionModule } from './ingestion/ingestion.module';
+import { AgentOrchestrationModule } from './agent-orchestration/agent-orchestration.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { SearchModule } from './search/search.module';
 
@@ -16,6 +17,7 @@ import { SearchModule } from './search/search.module';
     }),
     PrismaModule,
     SearchModule,
+    AgentOrchestrationModule,
     IngestionModule,
   ],
 })

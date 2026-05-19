@@ -9,8 +9,11 @@ export type AdminNavItem = {
 
 export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   { href: ADMIN_HREF.home, label: "系统概览" },
+  { href: ADMIN_HREF.bi, label: "BI 大屏" },
+  { href: ADMIN_HREF.agents, label: "多 Agent" },
   { href: ADMIN_HREF.search, label: "聚合搜索" },
   { href: ADMIN_HREF.entities, label: "实体管理" },
+  { href: ADMIN_HREF.entityRankHistory, label: "名次曲线" },
   { href: ADMIN_HREF.reindex, label: "索引维护" },
   { href: ADMIN_HREF.rankingsRun, label: "运行排行" },
   { href: ADMIN_HREF.topics, label: "话题版本" },

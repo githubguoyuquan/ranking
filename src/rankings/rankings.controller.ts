@@ -8,7 +8,10 @@ import {
   Patch,
   Post,
   Query,
+  Req,
 } from '@nestjs/common';
+import type { Request } from 'express';
+import { getAuthFromRequest } from '../compliance/request-auth';
 import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -26,7 +29,7 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
-import { TimeWindow } from '@prisma/client';
+import { TimeWindow, TopicKind } from '@prisma/client';
 import { toPlainJson } from '../lib/json';
 import { RankingsService } from './rankings.service';
 
@@ -152,6 +155,18 @@ export class PatchTopicVersionPolicyBodyDto {
   policyJson!: Record<string, unknown>;
 }
 
+export class PatchTopicBodyDto {
+  @IsOptional()
+  @IsEnum(TopicKind)
+  kind?: TopicKind;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(200)
+  title?: string;
+}
+
 export class TrendsHotQueryDto {
   @IsOptional()
   @IsEnum(TimeWindow)
@@ -246,15 +261,20 @@ export class RankingsController {
   }
 
   @Get('v1/snapshots/:id')
-  async snapshot(@Param('id') id: string, @Query() query: SnapshotQueryDto) {
+  async snapshot(
+    @Param('id') id: string,
+    @Query() query: SnapshotQueryDto,
+    @Req() req: Request,
+  ) {
     let sid: bigint;
     try {
       sid = BigInt(id.trim());
     } catch {
       throw new BadRequestException('invalid snapshot id');
     }
-    const snap = await this.rankings.getSnapshotForApi(sid, {
+    const snap = await this.rankings.getSnapshotForApiWithAuth(sid, {
       includeAiStats: query.includeAiStats === true,
+      auth: getAuthFromRequest(req),
     });
     if (!snap) throw new NotFoundException();
     return snap;
@@ -294,15 +314,40 @@ export class RankingsController {
   }
 
   @Get('v1/topics/:slug/leaderboard')
-  async leaderboard(@Param('slug') slug: string, @Query() query: LeaderboardQueryDto) {
-    const row = await this.rankings.getLeaderboardForApi(slug, query);
+  async leaderboard(
+    @Param('slug') slug: string,
+    @Query() query: LeaderboardQueryDto,
+    @Req() req: Request,
+  ) {
+    const row = await this.rankings.getLeaderboardForApi(slug, query, getAuthFromRequest(req));
     if (!row) throw new NotFoundException();
     return row;
   }
 
+  @Get('v1/topics/:slug')
+  async topic(@Param('slug') slug: string, @Req() req: Request) {
+    return await this.rankings.getTopicBySlug(slug, getAuthFromRequest(req));
+  }
+
+  @Patch('v1/topics/:slug')
+  async patchTopic(
+    @Param('slug') slug: string,
+    @Body() body: PatchTopicBodyDto,
+    @Req() req: Request,
+  ) {
+    if (body.kind === undefined && body.title === undefined) {
+      throw new BadRequestException('provide kind and/or title');
+    }
+    return await this.rankings.updateTopicBySlug(
+      slug,
+      { kind: body.kind, title: body.title },
+      getAuthFromRequest(req),
+    );
+  }
+
   @Get('v1/topics/:slug/versions')
-  async versions(@Param('slug') slug: string) {
-    return toPlainJson(await this.rankings.listVersionsBySlug(slug));
+  async versions(@Param('slug') slug: string, @Req() req: Request) {
+    return toPlainJson(await this.rankings.listVersionsBySlug(slug, getAuthFromRequest(req)));
   }
 
   /** 更新 TopicVersion.policyJson（须非 frozen；服务端强校验 weights / entityIds） */
@@ -336,12 +381,14 @@ export class RankingsController {
   async topicTrendAnalyses(
     @Param('slug') slug: string,
     @Query() query: TopicTrendAnalysesQueryDto,
+    @Req() req: Request,
   ) {
     try {
       return await this.rankings.listTrendAnalysesForTopicSlug(
         slug,
         query.timeWindow,
         query.limit,
+        getAuthFromRequest(req),
       );
     } catch (e) {
       if (e instanceof NotFoundException) throw e;
@@ -354,12 +401,14 @@ export class RankingsController {
   async topicSnapshots(
     @Param('slug') slug: string,
     @Query() query: TopicSnapshotsQueryDto,
+    @Req() req: Request,
   ) {
     try {
       return await this.rankings.listSnapshotsForTopicSlug(
         slug,
         query.timeWindow,
         query.limit,
+        getAuthFromRequest(req),
       );
     } catch (e) {
       if (e instanceof NotFoundException) throw e;
@@ -375,6 +424,7 @@ export class RankingsController {
   async entityRankHistory(
     @Param('id') id: string,
     @Query() query: EntityRankHistoryQueryDto,
+    @Req() req: Request,
   ) {
     let entityId: bigint;
     try {
@@ -388,6 +438,7 @@ export class RankingsController {
         query.topicSlug,
         query.timeWindow,
         query.limit,
+        getAuthFromRequest(req),
       );
     } catch (e) {
       if (e instanceof NotFoundException) throw e;

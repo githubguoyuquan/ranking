@@ -16,6 +16,10 @@ export const BACKEND_ADMIN = {
   seedDemo: "/admin/seed-demo",
   outbox: "/admin/outbox",
   entities: "/admin/entities",
+  biOverview: "/admin/bi/overview",
+  agentsOverview: "/admin/agents/overview",
+  agentsRuns: "/admin/agents/runs",
+  agentsProposals: "/admin/agents/proposals",
 } as const;
 
 export function backendAdminSnapshotAnalyzePath(snapshotId: string): string {

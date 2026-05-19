@@ -45,6 +45,10 @@ export function nestV1SnapshotScoreBreakdownsPath(snapshotId: string): string {
   return `${V1}/snapshots/${encodeURIComponent(snapshotId)}/score-breakdowns`;
 }
 
+export function nestV1TopicPath(topicSlug: string): string {
+  return `${V1}/topics/${encodeURIComponent(topicSlug)}`;
+}
+
 export function nestV1TopicVersionsPath(topicSlug: string): string {
   return `${V1}/topics/${encodeURIComponent(topicSlug)}/versions`;
 }
@@ -141,6 +145,7 @@ export function nestV1RealtimeStreamPath(params: URLSearchParams): string {
  * 文档/界面展示用（含 `:param` 占位），**勿**用于实际 HTTP path。
  */
 export const NEST_V1_DOC = {
+  topic: "/v1/topics/:slug",
   topicsVersions: "/v1/topics/:slug/versions",
   topicsLeaderboard: "/v1/topics/:slug/leaderboard",
   topicsTrendAnalyses: "/v1/topics/:slug/trend-analyses",

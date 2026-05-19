@@ -130,4 +130,46 @@ export class ClickhouseService implements OnModuleDestroy {
       `ClickHouse: wrote ${rows.length} metric rows for snapshot ${params.snapshotId}`,
     );
   }
+
+  /** CH↔PG 运营：按 snapshot_id 读取 metric_timeseries（Phase A 报表） */
+  async querySnapshotMetrics(snapshotId: bigint): Promise<{
+    ok: boolean;
+    snapshotId: string;
+    rows: Array<{
+      entity_id: number;
+      metric_key: string;
+      value: number;
+      ts: string;
+      time_window: string;
+    }>;
+    reason?: string;
+  }> {
+    if (!this.client) {
+      return {
+        ok: false,
+        snapshotId: snapshotId.toString(),
+        rows: [],
+        reason: 'CLICKHOUSE_URL not set',
+      };
+    }
+    const sid = Number(snapshotId);
+    const rs = await this.client.query({
+      query: `
+        SELECT entity_id, metric_key, value, ts, time_window
+        FROM metric_timeseries
+        WHERE snapshot_id = {sid:UInt64}
+        ORDER BY entity_id, metric_key
+      `,
+      query_params: { sid },
+      format: 'JSONEachRow',
+    });
+    const rows = (await rs.json()) as Array<{
+      entity_id: number;
+      metric_key: string;
+      value: number;
+      ts: string;
+      time_window: string;
+    }>;
+    return { ok: true, snapshotId: snapshotId.toString(), rows };
+  }
 }

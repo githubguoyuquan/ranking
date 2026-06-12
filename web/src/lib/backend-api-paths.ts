@@ -24,6 +24,7 @@ export const BACKEND_ADMIN = {
   agentsOverview: "/admin/agents/overview",
   agentsRuns: "/admin/agents/runs",
   agentsProposals: "/admin/agents/proposals",
+  crawlOverview: "/admin/crawl/overview",
 } as const;
 
 export function backendAdminSnapshotAnalyzePath(snapshotId: string): string {

@@ -73,3 +73,7 @@ export function adminBiDrillEntityUrl(entityId: string, days = 30): string {
 export function adminBiDrillTopicUrl(topicId: string, days = 14): string {
   return backendAbs(backendAdminBiDrillTopicPath(topicId, days));
 }
+
+export function adminCrawlOverviewUrl(): string {
+  return backendAbs(BACKEND_ADMIN.crawlOverview);
+}

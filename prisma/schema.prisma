@@ -467,6 +467,8 @@ model CrawledUrl {
   /// 供同信源语义去重比对用的 embedding（仅 canonical `fetched` 行可能非空）
   previewEmbedding       Json?
   previewEmbeddingModel  String? @db.VarChar(128)
+  /// meta/og/h1/canonical 等结构化特征
+  domFeaturesJson        Json?
 
   source      Source       @relation(fields: [sourceId], references: [id])
   duplicateOf CrawledUrl?  @relation("CrawledUrlSemanticDup", fields: [duplicateOfId], references: [id], onDelete: SetNull)

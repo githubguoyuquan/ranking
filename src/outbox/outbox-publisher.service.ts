@@ -133,11 +133,14 @@ export class OutboxPublisherService implements OnModuleInit, OnModuleDestroy {
           { key, value: JSON.stringify(envelope) },
         ]);
         if (!ok) {
+          const detail = this.kafka.isConfigured()
+            ? 'Kafka producer unavailable (broker down or connecting)'
+            : 'KAFKA_BROKERS not set';
           await this.prisma.outboxEvent.update({
             where: { id: row.id },
             data: {
               attempts: { increment: 1 },
-              lastError: 'Kafka not configured',
+              lastError: detail,
               leasedUntil: new Date(Date.now() + 30_000),
             },
           });

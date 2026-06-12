@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { runsCrawlScheduler, runsCrawlWorkers } from '../config/process-role';
 import { AgentOrchestrationModule } from '../agent-orchestration/agent-orchestration.module';
 import { SearchModule } from '../search/search.module';
+import { CrawlAdminController } from './crawl-admin.controller';
 import { CrawlHostThrottleService } from './crawl-host-throttle.service';
 import { CRAWL_QUEUE } from './crawl-job';
 import { CrawlProcessor } from './crawl.processor';
@@ -20,7 +21,7 @@ import { IngestionService } from './ingestion.service';
     SearchModule,
     AgentOrchestrationModule,
   ],
-  controllers: [IngestionController, CrawlSchedulerAdminController],
+  controllers: [IngestionController, CrawlSchedulerAdminController, CrawlAdminController],
   providers: [
     IngestionService,
     CrawlRegionalQueueService,

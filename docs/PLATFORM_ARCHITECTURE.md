@@ -269,8 +269,12 @@ Wire：**Envelope v1** + AJV（`src/kafka/schemas/`）；路由 **`src/kafka/eve
 |------|------|------|
 | URL 规范化指纹 | `urlFingerprint` | 保持 |
 | 内容哈希 | `contentHash` | 保持 |
+| DOM 特征 | **`domFeaturesJson`**（meta/og/h1/canonical）；`CRAWL_DOM_FEATURES` | 结构化抽取扩展 |
+| 反爬重试 | **`fetchCrawlWithRetry`** + `CRAWL_FETCH_MAX_RETRIES` + **`CRAWL_USER_AGENT_POOL`** | 验证码/人机挑战 |
+| 同域链接跟进 | **`CRAWL_FOLLOW_LINKS`** BFS + `CRAWL_FOLLOW_LINKS_MAX` | 深度/robots 策略 |
 | 断点 | `CrawlCheckpoint` | 多爬虫名并发分区 |
 | 分布式 | **BullMQ**：多 API / 专用 `crawl-worker` 进程共用 Redis 队列；`CRAWL_WORKER_CONCURRENCY`、`CRAWL_JOB_LOCK_MS` | 队列分片名 + 调度审计 |
+| 运营概览 | **`GET /admin/crawl/overview`** | 与 Prometheus 指标对齐 |
 | 代理/IP | **`CRAWL_HTTP_PROXY`**、`Source.httpProxyUrl`（`fetch`+Playwright） | 代理池 + 出口国别策略、轮换 |
 | 语义去重 | **`CRAWL_SEMANTIC_DEDUP`**：同信源 `previewEmbedding` 余弦、`fetched_semantic_dup` | 跨信源 / 大规模 ANN（ES/pgvector） |
 | 幂等与续跑 | BullMQ jobId + DB 状态 | 与 Outbox 事务对齐 |

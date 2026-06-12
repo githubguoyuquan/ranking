@@ -1,5 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { listKafkaPublishOutboxTypes } from '../kafka/event-registry';
+import {
+  listFlusherOutboxTypes,
+  listKafkaPublishOutboxTypes,
+} from '../kafka/event-registry';
 import { PrismaService } from '../prisma/prisma.service';
 import { outboxLagThresholds } from './outbox-lag.config';
 
@@ -36,22 +39,26 @@ export class OutboxLagService {
 
   async collectMetrics(): Promise<OutboxLagMetrics> {
     const kafkaTypes = listKafkaPublishOutboxTypes();
+    const flusherTypes = listFlusherOutboxTypes();
     const thresholds = outboxLagThresholds();
     const now = Date.now();
 
+    const flusherWhere = {
+      publishedAt: null as null,
+      type: { in: flusherTypes },
+    };
+
     const [flusherPending, flusherByType, flusherOldest, kafkaPending, kafkaByType, kafkaOldest, highAttempts, withError, kafkaAwaiting] =
       await Promise.all([
-        this.prisma.outboxEvent.count({ where: { publishedAt: null } }),
-        this.prisma.$queryRaw<{ type: string; count: bigint }[]>`
-          SELECT type, COUNT(*)::bigint AS count
-          FROM "OutboxEvent"
-          WHERE "publishedAt" IS NULL
-          GROUP BY type
-          ORDER BY count DESC
-          LIMIT 30
-        `,
+        this.prisma.outboxEvent.count({ where: flusherWhere }),
+        this.prisma.outboxEvent.groupBy({
+          by: ['type'],
+          where: flusherWhere,
+          _count: { id: true },
+          orderBy: { _count: { id: 'desc' } },
+        }),
         this.prisma.outboxEvent.findFirst({
-          where: { publishedAt: null },
+          where: flusherWhere,
           orderBy: { createdAt: 'asc' },
           select: { createdAt: true },
         }),
@@ -76,10 +83,13 @@ export class OutboxLagService {
           select: { createdAt: true },
         }),
         this.prisma.outboxEvent.count({
-          where: { publishedAt: null, attempts: { gte: thresholds.highAttemptsWarn } },
+          where: {
+            ...flusherWhere,
+            attempts: { gte: thresholds.highAttemptsWarn },
+          },
         }),
         this.prisma.outboxEvent.count({
-          where: { publishedAt: null, lastError: { not: null } },
+          where: { ...flusherWhere, lastError: { not: null } },
         }),
         this.prisma.outboxEvent.count({
           where: {
@@ -96,7 +106,7 @@ export class OutboxLagService {
         oldestPendingAgeSec: flusherOldest
           ? Math.floor((now - flusherOldest.createdAt.getTime()) / 1000)
           : null,
-        byType: flusherByType.map((r) => ({ type: r.type, count: Number(r.count) })),
+        byType: flusherByType.map((r) => ({ type: r.type, count: r._count.id })),
         highAttemptsCount: highAttempts,
         withLastErrorCount: withError,
       },

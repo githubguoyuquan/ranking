@@ -3,7 +3,7 @@ import { Module } from '@nestjs/common';
 import { runsRankingWorkers } from '../config/process-role';
 import { TrendAnalysisSchedulerService } from './trend-analysis-scheduler.service';
 import { AnalyticsModule } from '../analytics/analytics.module';
-import { AgentModule } from '../agent/agent.module';
+import { AgentOrchestrationModule } from '../agent-orchestration/agent-orchestration.module';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { ScaleModule } from '../scale/scale.module';
 import { SearchModule } from '../search/search.module';
@@ -17,7 +17,7 @@ import { RankingsService } from './rankings.service';
 @Module({
   imports: [
     AnalyticsModule,
-    AgentModule,
+    AgentOrchestrationModule,
     RealtimeModule,
     SearchModule,
     ScaleModule,

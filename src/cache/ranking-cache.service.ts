@@ -96,6 +96,17 @@ export class RankingCacheService implements OnModuleDestroy {
     }
   }
 
+  async invalidateSnapshot(id: bigint): Promise<void> {
+    if (!this.isEnabled()) return;
+    try {
+      await this.redis!.del(this.keySnapshot(id));
+    } catch (e) {
+      this.logger.warn(
+        `Redis ranking cache DEL failed: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
+
   async getLeaderboardJson(key: string): Promise<string | null> {
     if (!this.isEnabled()) return null;
     try {

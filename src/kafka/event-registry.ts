@@ -132,6 +132,14 @@ export function listKafkaPublishOutboxTypes(): string[] {
   return ROUTED.filter((r) => r.publishToKafka).map((r) => r.outboxType);
 }
 
+/** 由进程内 Flusher 消费、应写入 `publishedAt` 的 type（不含纯 Kafka 领域事件） */
+export function listFlusherOutboxTypes(): string[] {
+  return ROUTED.filter(
+    (r) =>
+      r.sideEffect === 'in_process_flusher' || r.sideEffect === 'dual_kafka_and_flusher',
+  ).map((r) => r.outboxType);
+}
+
 export function isKafkaPublishOutboxType(type: string): boolean {
   return ROUTED.some((r) => r.outboxType === type && r.publishToKafka);
 }

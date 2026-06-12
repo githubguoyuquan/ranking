@@ -27,12 +27,24 @@ export const AI_AGENT_FACT_CHECK_V1 = 'fact-check-v1';
 /** URL/内容/语义重复检测报告（只读聚合，可选写 `AgentRun`） */
 export const AI_AGENT_DUPLICATE_DETECTION_V1 = 'duplicate-detection-v1';
 
+/** 读取 `TrendAnalysis.payload` 解读涨/跌榜与标签分布（算法 + 可选 LLM） */
+export const AI_AGENT_TREND_ANALYSIS_V1 = 'trend-analysis-v1';
+
+/** ClickHouse metric_timeseries + PG 快照元数据联合结论 */
+export const AI_AGENT_TIME_SERIES_V1 = 'time-series-v1';
+
+/** policy 权重 vs EntityMetric 覆盖率诊断 */
+export const AI_AGENT_RANKING_V1 = 'ranking-agent-v1';
+
 /** 写入 `AiAnalysis.detailJson.agentKind`，便于管理台与统计区分 */
 export type AiAnalysisAgentKind =
   | 'followup'
   | 'trend'
   | 'credibility'
   | 'factcheck'
+  | 'trend_analysis'
+  | 'timeseries'
+  | 'ranking'
   | 'default';
 
 export function resolveAiAnalysisAgentKind(agent: string): AiAnalysisAgentKind {
@@ -41,22 +53,34 @@ export function resolveAiAnalysisAgentKind(agent: string): AiAnalysisAgentKind {
   if (a === AI_AGENT_TREND_V1) return 'trend';
   if (a === AI_AGENT_CREDIBILITY_V1) return 'credibility';
   if (a === AI_AGENT_FACT_CHECK_V1) return 'factcheck';
+  if (a === AI_AGENT_TREND_ANALYSIS_V1) return 'trend_analysis';
+  if (a === AI_AGENT_TIME_SERIES_V1) return 'timeseries';
+  if (a === AI_AGENT_RANKING_V1) return 'ranking';
   return 'default';
 }
 
-/** `ai-agent` 队列允许的 agent（含快照跟进与话题生命周期） */
-export const AI_AGENT_ORCHESTRATION_ALLOWLIST = new Set([
+/** 快照物化后跟进流水线允许的 agent */
+export const SNAPSHOT_POST_PROCESS_ALLOWLIST = new Set([
   AI_AGENT_RULES_V1,
   AI_AGENT_POST_SNAPSHOT_SUMMARY_V1,
   AI_AGENT_TREND_V1,
   AI_AGENT_CREDIBILITY_V1,
+  AI_AGENT_FACT_CHECK_V1,
+  AI_AGENT_TREND_ANALYSIS_V1,
+  AI_AGENT_TIME_SERIES_V1,
+  AI_AGENT_RANKING_V1,
+]);
+
+/** `ai-agent` 队列允许的 agent（含快照跟进与话题生命周期） */
+export const AI_AGENT_ORCHESTRATION_ALLOWLIST = new Set([
+  ...SNAPSHOT_POST_PROCESS_ALLOWLIST,
   AI_AGENT_TOPIC_DISCOVERY_V1,
   AI_AGENT_TOPIC_MERGE_V1,
-  AI_AGENT_FACT_CHECK_V1,
   AI_AGENT_DUPLICATE_DETECTION_V1,
 ]);
 
 const ORCHESTRATION_PIPELINE_MAX_STEPS = 12;
+const SNAPSHOT_POST_PROCESS_MAX_STEPS = 12;
 
 export function parseOrchestrationPipeline(raw: string): {
   agents: string[];
@@ -78,35 +102,37 @@ export function parseOrchestrationPipeline(raw: string): {
   return { agents, unknown };
 }
 
-/** `ranking-followup` 流水线允许的 `agent`（逗号分隔，顺序即 DAG 执行序） */
-const FOLLOWUP_PIPELINE_ALLOWLIST = new Set([
-  AI_AGENT_RULES_V1,
-  AI_AGENT_POST_SNAPSHOT_SUMMARY_V1,
-  AI_AGENT_TREND_V1,
-  AI_AGENT_CREDIBILITY_V1,
-]);
-
-const FOLLOWUP_PIPELINE_MAX_STEPS = 8;
-
-export function parseFollowupAnalyzePipeline(raw: string): {
+export function parseSnapshotPostProcessPipeline(raw: string): {
   agents: string[];
   unknown: string[];
 } {
   const unknown: string[] = [];
   const agents: string[] = [];
-  const parts = raw
+  for (const p of raw
     .split(',')
     .map((s) => s.trim())
-    .filter(Boolean);
-  for (const p of parts) {
+    .filter(Boolean)) {
     const name = p.slice(0, 120);
-    if (FOLLOWUP_PIPELINE_ALLOWLIST.has(name)) {
-      if (agents.length < FOLLOWUP_PIPELINE_MAX_STEPS) {
-        agents.push(name);
-      }
+    if (SNAPSHOT_POST_PROCESS_ALLOWLIST.has(name)) {
+      if (agents.length < SNAPSHOT_POST_PROCESS_MAX_STEPS) agents.push(name);
     } else {
       unknown.push(p);
     }
   }
   return { agents, unknown };
 }
+
+/** @deprecated 使用 `parseSnapshotPostProcessPipeline`；保留旧名兼容测试 */
+export function parseFollowupAnalyzePipeline(raw: string): {
+  agents: string[];
+  unknown: string[];
+} {
+  return parseSnapshotPostProcessPipeline(raw);
+}
+
+/** 快照跟进链中用于 `generatedByAi` 判定的 agent */
+export const SNAPSHOT_BRIEF_AGENTS = new Set([
+  AI_AGENT_POST_SNAPSHOT_SUMMARY_V1,
+  AI_AGENT_TREND_V1,
+  AI_AGENT_CREDIBILITY_V1,
+]);

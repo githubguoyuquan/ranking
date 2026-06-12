@@ -32,6 +32,12 @@ import {
 } from './crawl-semantic-dedup';
 import { pickCrawlProxyFromPool } from './crawl-proxy-pool';
 import { CrawlRegionalQueueService } from './crawl-regional-queue.service';
+import { fetchCrawlWithRetry, pickCrawlUserAgent } from './crawl-fetch-retry';
+import {
+  crawlFollowLinksEnabled,
+  crawlFollowLinksMaxPerTask,
+  resolveLinkScopeHost,
+} from './crawl-link-extract';
 import { crawlUrlViolation, fetchUrlForCrawl, normalizeCrawlProxyUrl } from './http-fetch';
 import { fetchUrlForCrawlPlaywright } from './http-fetch-playwright';
 
@@ -310,7 +316,7 @@ export class IngestionService {
     });
 
     try {
-      const urls = payload.seedUrls ?? [];
+      const seedUrls = payload.seedUrls ?? [];
       const now = new Date();
       const source = await this.prisma.source.findUnique({ where: { id: sourceId } });
       if (!source) {
@@ -325,8 +331,28 @@ export class IngestionService {
       const usePw = useHttp && (await this.usePlaywrightFetch(sourceId));
       let fetchErrors = 0;
 
-      for (const u of urls) {
+      const followLinks = useHttp && crawlFollowLinksEnabled();
+      const maxUrls = followLinks
+        ? crawlFollowLinksMaxPerTask()
+        : Math.max(seedUrls.length, 1);
+      const queue = [...seedUrls];
+      const visited = new Set<string>();
+      let processed = 0;
+      let lastUrl: string | null = null;
+      let linksEnqueued = 0;
+      const linkScopeHost = resolveLinkScopeHost(
+        source.baseUrl,
+        seedUrls[0] ?? source.baseUrl,
+      );
+
+      while (queue.length > 0 && processed < maxUrls) {
+        const u = queue.shift()!;
         const fp = urlFingerprint(u);
+        if (visited.has(fp)) continue;
+        visited.add(fp);
+        processed += 1;
+        lastUrl = u;
+
         if (!useHttp) {
           await this.prisma.$transaction(async (tx) => {
             const row = await tx.crawledUrl.upsert({
@@ -340,6 +366,7 @@ export class IngestionService {
                 mimeType: null,
                 textPreview: null,
                 pageTitle: null,
+                domFeaturesJson: Prisma.JsonNull,
               },
               update: {
                 status: 'fetched_stub',
@@ -350,6 +377,7 @@ export class IngestionService {
                 duplicateOfId: null,
                 previewEmbedding: Prisma.JsonNull,
                 previewEmbeddingModel: null,
+                domFeaturesJson: Prisma.JsonNull,
               },
             });
             await this.enqueueCrawledUrlEsOutbox(tx, row);
@@ -360,34 +388,7 @@ export class IngestionService {
         const viol = crawlUrlViolation(u);
         if (viol) {
           fetchErrors += 1;
-          await this.prisma.$transaction(async (tx) => {
-            const row = await tx.crawledUrl.upsert({
-              where: { urlFingerprint: fp },
-              create: {
-                sourceId,
-                url: u,
-                urlFingerprint: fp,
-                status: 'fetch_blocked',
-                contentHash: null,
-                fetchedAt: now,
-                mimeType: null,
-                textPreview: null,
-                pageTitle: null,
-              },
-              update: {
-                status: 'fetch_blocked',
-                contentHash: null,
-                fetchedAt: now,
-                mimeType: null,
-                textPreview: null,
-                pageTitle: null,
-                duplicateOfId: null,
-                previewEmbedding: Prisma.JsonNull,
-                previewEmbeddingModel: null,
-              },
-            });
-            await this.enqueueCrawledUrlEsOutbox(tx, row);
-          });
+          await this.persistFetchFailure(sourceId, u, fp, now, 'fetch_blocked');
           continue;
         }
 
@@ -396,42 +397,23 @@ export class IngestionService {
           host = new URL(u).hostname.toLowerCase();
         } catch {
           fetchErrors += 1;
-          await this.prisma.$transaction(async (tx) => {
-            const row = await tx.crawledUrl.upsert({
-              where: { urlFingerprint: fp },
-              create: {
-                sourceId,
-                url: u,
-                urlFingerprint: fp,
-                status: 'fetch_failed',
-                contentHash: null,
-                fetchedAt: now,
-                mimeType: null,
-                textPreview: null,
-                pageTitle: null,
-              },
-              update: {
-                status: 'fetch_failed',
-                contentHash: null,
-                fetchedAt: now,
-                mimeType: null,
-                textPreview: null,
-                pageTitle: null,
-                duplicateOfId: null,
-                previewEmbedding: Prisma.JsonNull,
-                previewEmbeddingModel: null,
-              },
-            });
-            await this.enqueueCrawledUrlEsOutbox(tx, row);
-          });
+          await this.persistFetchFailure(sourceId, u, fp, now, 'fetch_failed');
           continue;
         }
         await this.hostThrottle.waitForHost(host);
 
-        const fetchOpts = { proxyUrl };
-        const fetched = usePw
-          ? await fetchUrlForCrawlPlaywright(u, fetchOpts)
-          : await fetchUrlForCrawl(u, fetchOpts);
+        const fetchOpts = {
+          proxyUrl,
+          userAgent: pickCrawlUserAgent(u),
+          ...(followLinks
+            ? { linkScopeHost, linkExtractMax: 40 }
+            : {}),
+        };
+        const fetched = await fetchCrawlWithRetry(() =>
+          usePw
+            ? fetchUrlForCrawlPlaywright(u, fetchOpts)
+            : fetchUrlForCrawl(u, fetchOpts),
+        );
         if (fetched.ok) {
           const sem = await this.resolveSemanticMeta(
             sourceId,
@@ -441,6 +423,10 @@ export class IngestionService {
           );
           const isSemanticDup = Boolean(sem.canonicalId);
           const status = isSemanticDup ? 'fetched_semantic_dup' : 'fetched';
+          const domJson =
+            fetched.domFeatures != null
+              ? (fetched.domFeatures as Prisma.InputJsonValue)
+              : Prisma.JsonNull;
 
           await this.prisma.$transaction(async (tx) => {
             const row = await tx.crawledUrl.upsert({
@@ -454,6 +440,7 @@ export class IngestionService {
                 mimeType: fetched.mimeType,
                 textPreview: fetched.textPreview,
                 pageTitle: fetched.pageTitle,
+                domFeaturesJson: domJson,
                 fetchedAt: now,
                 duplicateOfId: sem.canonicalId,
                 previewEmbedding:
@@ -467,6 +454,7 @@ export class IngestionService {
                 mimeType: fetched.mimeType,
                 textPreview: fetched.textPreview,
                 pageTitle: fetched.pageTitle,
+                domFeaturesJson: domJson,
                 fetchedAt: now,
                 duplicateOfId: sem.canonicalId,
                 previewEmbedding:
@@ -494,36 +482,20 @@ export class IngestionService {
               });
             }
           });
+
+          if (followLinks && fetched.discoveredLinks?.length) {
+            for (const link of fetched.discoveredLinks) {
+              if (visited.size + queue.length >= maxUrls) break;
+              const lfp = urlFingerprint(link);
+              if (!visited.has(lfp) && !queue.some((q) => urlFingerprint(q) === lfp)) {
+                queue.push(link);
+                linksEnqueued += 1;
+              }
+            }
+          }
         } else {
           fetchErrors += 1;
-          await this.prisma.$transaction(async (tx) => {
-            const row = await tx.crawledUrl.upsert({
-              where: { urlFingerprint: fp },
-              create: {
-                sourceId,
-                url: u,
-                urlFingerprint: fp,
-                status: 'fetch_failed',
-                contentHash: null,
-                fetchedAt: now,
-                mimeType: null,
-                textPreview: null,
-                pageTitle: null,
-              },
-              update: {
-                status: 'fetch_failed',
-                contentHash: null,
-                fetchedAt: now,
-                mimeType: null,
-                textPreview: null,
-                pageTitle: null,
-                duplicateOfId: null,
-                previewEmbedding: Prisma.JsonNull,
-                previewEmbeddingModel: null,
-              },
-            });
-            await this.enqueueCrawledUrlEsOutbox(tx, row);
-          });
+          await this.persistFetchFailure(sourceId, u, fp, now, 'fetch_failed');
         }
       }
 
@@ -533,22 +505,28 @@ export class IngestionService {
         create: {
           crawlerName: payload.crawlerName,
           lastCursor: payload.cursor ?? null,
-          lastUrl: urls[urls.length - 1] ?? null,
+          lastUrl,
           lastProcessed: now,
           meta: {
             kind: metaKind,
-            urlCount: urls.length,
+            seedCount: seedUrls.length,
+            urlCount: processed,
+            linksEnqueued: followLinks ? linksEnqueued : undefined,
+            followLinks,
             fetchErrors: useHttp ? fetchErrors : undefined,
             crawlTaskId: payload.crawlTaskId,
           } as Prisma.InputJsonValue,
         },
         update: {
           lastCursor: payload.cursor ?? undefined,
-          lastUrl: urls[urls.length - 1] ?? undefined,
+          lastUrl: lastUrl ?? undefined,
           lastProcessed: now,
           meta: {
             kind: metaKind,
-            urlCount: urls.length,
+            seedCount: seedUrls.length,
+            urlCount: processed,
+            linksEnqueued: followLinks ? linksEnqueued : undefined,
+            followLinks,
             fetchErrors: useHttp ? fetchErrors : undefined,
             crawlTaskId: payload.crawlTaskId,
           } as Prisma.InputJsonValue,
@@ -570,6 +548,93 @@ export class IngestionService {
       });
       throw e;
     }
+  }
+
+  private async persistFetchFailure(
+    sourceId: bigint,
+    url: string,
+    fp: string,
+    now: Date,
+    status: 'fetch_failed' | 'fetch_blocked',
+  ): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      const row = await tx.crawledUrl.upsert({
+        where: { urlFingerprint: fp },
+        create: {
+          sourceId,
+          url,
+          urlFingerprint: fp,
+          status,
+          contentHash: null,
+          fetchedAt: now,
+          mimeType: null,
+          textPreview: null,
+          pageTitle: null,
+          domFeaturesJson: Prisma.JsonNull,
+        },
+        update: {
+          status,
+          contentHash: null,
+          fetchedAt: now,
+          mimeType: null,
+          textPreview: null,
+          pageTitle: null,
+          duplicateOfId: null,
+          previewEmbedding: Prisma.JsonNull,
+          previewEmbeddingModel: null,
+          domFeaturesJson: Prisma.JsonNull,
+        },
+      });
+      await this.enqueueCrawledUrlEsOutbox(tx, row);
+    });
+  }
+
+  async getCrawlOverview(): Promise<Record<string, unknown>> {
+    const [
+      sourceCount,
+      taskRunning,
+      taskFailed,
+      urlByStatus,
+      recentTasks,
+      schedulerEnabled,
+    ] = await Promise.all([
+      this.prisma.source.count(),
+      this.prisma.crawlTask.count({ where: { status: 'running' } }),
+      this.prisma.crawlTask.count({ where: { status: 'failed' } }),
+      this.prisma.crawledUrl.groupBy({
+        by: ['status'],
+        _count: { _all: true },
+      }),
+      this.prisma.crawlTask.findMany({
+        orderBy: { id: 'desc' },
+        take: 5,
+        select: { id: true, status: true, sourceId: true, createdAt: true },
+      }),
+      this.prisma.source.count({ where: { scheduleEnabled: true } }),
+    ]);
+
+    return {
+      sources: sourceCount,
+      scheduledSources: schedulerEnabled,
+      tasks: { running: taskRunning, failed: taskFailed },
+      urlsByStatus: Object.fromEntries(
+        urlByStatus.map((r) => [r.status, r._count._all]),
+      ),
+      recentTasks: recentTasks.map((t) => ({
+        id: t.id.toString(),
+        sourceId: t.sourceId.toString(),
+        status: t.status,
+        createdAt: t.createdAt.toISOString(),
+      })),
+      features: {
+        httpFetch: process.env.CRAWL_HTTP_FETCH === 'true',
+        playwright: process.env.CRAWL_USE_PLAYWRIGHT === 'true',
+        followLinks: crawlFollowLinksEnabled(),
+        semanticDedup: crawlSemanticDedupEnabled(),
+        crossSourceDedup: crawlSemanticDedupCrossSourceEnabled(),
+        domFeatures: process.env.CRAWL_DOM_FEATURES !== 'false',
+      },
+    };
   }
 
   private async ensureSource(id: bigint) {

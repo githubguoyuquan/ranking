@@ -24,6 +24,14 @@ function apiHeaders(): HeadersInit {
   return h;
 }
 
+type AgentDefinition = {
+  id: string;
+  category: string;
+  description: string;
+  requiredInput: string[];
+  produces: string;
+};
+
 type AgentRunRow = {
   id: string;
   agent: string;
@@ -31,6 +39,7 @@ type AgentRunRow = {
   correlationId: string;
   createdAt: string;
   error?: string | null;
+  outputSummary?: string;
 };
 
 type ProposalRow = {
@@ -42,8 +51,15 @@ type ProposalRow = {
   clusterKey?: string | null;
 };
 
+function outputSummaryFromJson(outputJson: unknown): string | undefined {
+  if (!outputJson || typeof outputJson !== "object") return undefined;
+  const s = (outputJson as { summary?: unknown }).summary;
+  return typeof s === "string" && s.trim() ? s.slice(0, 120) : undefined;
+}
+
 export default function AgentsPage() {
-  const [overview, setOverview] = useState<string>("");
+  const [registry, setRegistry] = useState<AgentDefinition[]>([]);
+  const [snapshotPipeline, setSnapshotPipeline] = useState<string[]>([]);
   const [runs, setRuns] = useState<AgentRunRow[]>([]);
   const [proposals, setProposals] = useState<ProposalRow[]>([]);
   const [msg, setMsg] = useState("");
@@ -52,7 +68,7 @@ export default function AgentsPage() {
   const [mergeSource, setMergeSource] = useState("");
   const [mergeTarget, setMergeTarget] = useState("");
   const [pipeline, setPipeline] = useState(
-    "topic-discovery-v1,duplicate-detection-v1",
+    "post-snapshot-summary-v1,trend-v1,credibility-v1,fact-check-v1,trend-analysis-v1",
   );
 
   const load = useCallback(async () => {
@@ -65,11 +81,18 @@ export default function AgentsPage() {
           headers: apiHeaders(),
         }),
       ]);
-      const ovText = await ov.text();
-      if (ov.ok) setOverview(ovText);
-      const runText = await runRes.text();
+      if (ov.ok) {
+        const j = (await ov.json()) as {
+          registry?: AgentDefinition[];
+          snapshotPostProcessPipeline?: string[];
+        };
+        setRegistry(j.registry ?? []);
+        setSnapshotPipeline(j.snapshotPostProcessPipeline ?? []);
+      }
       if (runRes.ok) {
-        const j = JSON.parse(runText) as { runs?: AgentRunRow[] };
+        const j = (await runRes.json()) as {
+          runs?: Array<AgentRunRow & { outputJson?: unknown }>;
+        };
         setRuns(
           (j.runs ?? []).map((r) => ({
             id: String(r.id),
@@ -78,12 +101,12 @@ export default function AgentsPage() {
             correlationId: r.correlationId,
             createdAt: r.createdAt,
             error: r.error,
+            outputSummary: outputSummaryFromJson(r.outputJson),
           })),
         );
       }
-      const propText = await propRes.text();
       if (propRes.ok) {
-        const j = JSON.parse(propText) as { proposals?: ProposalRow[] };
+        const j = (await propRes.json()) as { proposals?: ProposalRow[] };
         setProposals(
           (j.proposals ?? []).map((p) => ({
             id: String(p.id),
@@ -116,30 +139,50 @@ export default function AgentsPage() {
     if (res.ok) void load();
   }
 
+  const snapshotAgents = registry.filter((r) => r.category === "snapshot");
+
   return (
     <AdminPage
       title="多 Agent 编排"
       description={
         <>
-          Topic Discovery / Merge / FactCheck / Duplicate Detection，统一 BullMQ 队列{" "}
+          统一 BullMQ 队列{" "}
           <code className="rounded bg-muted px-1 text-xs">ai-agent</code> 与{" "}
-          <code className="rounded bg-muted px-1 text-xs">AgentRun</code> 审计。爬取完成后可设{" "}
-          <code className="rounded bg-muted px-1 text-xs">AI_AGENT_CRAWL_DISCOVERY=true</code>{" "}
-          自动发现话题。
+          <code className="rounded bg-muted px-1 text-xs">AgentRun</code>{" "}
+          审计。物化后流水线由{" "}
+          <code className="rounded bg-muted px-1 text-xs">
+            RANKING_FOLLOWUP_AGENT_PIPELINE
+          </code>{" "}
+          配置。
         </>
       }
     >
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">概览</CardTitle>
-          <CardDescription className="font-mono text-xs break-all">
-            {overview || "加载中…"}
+          <CardTitle className="text-base">Agent 目录</CardTitle>
+          <CardDescription>
+            当前 env 快照流水线：
+            {snapshotPipeline.length > 0
+              ? snapshotPipeline.join(" → ")
+              : "（未配置，默认不跑）"}
           </CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-wrap gap-2">
-          <Button type="button" variant="secondary" onClick={() => void load()}>
-            刷新
-          </Button>
+        <CardContent className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {registry.map((a) => (
+            <div
+              key={a.id}
+              className="rounded-md border border-border/60 p-3 text-sm"
+            >
+              <p className="font-mono text-xs font-medium">{a.id}</p>
+              <p className="text-muted-foreground text-xs">
+                {a.category} · {a.produces}
+              </p>
+              <p className="mt-1">{a.description}</p>
+            </div>
+          ))}
+          {registry.length === 0 ? (
+            <p className="text-sm text-muted-foreground">加载中…</p>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -161,12 +204,85 @@ export default function AgentsPage() {
             onClick={() =>
               void post("/admin/agents/pipeline", {
                 pipeline,
-                input: sourceId.trim() ? { sourceId: sourceId.trim() } : {},
+                input: snapshotId.trim()
+                  ? { snapshotId: snapshotId.trim() }
+                  : sourceId.trim()
+                    ? { sourceId: sourceId.trim() }
+                    : {},
               })
             }
           >
             入队 pipeline
           </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">快照 Agent</CardTitle>
+          <CardDescription>
+            需 snapshotId；产出多为 AiAnalysis（{snapshotAgents.length} 个）
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <div className="space-y-2 max-w-xs">
+            <Label htmlFor="snapshot-id">snapshotId</Label>
+            <Input
+              id="snapshot-id"
+              value={snapshotId}
+              onChange={(e) => setSnapshotId(e.target.value)}
+            />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={!snapshotId.trim()}
+              onClick={() =>
+                void post("/admin/agents/factcheck/run", {
+                  snapshotId: snapshotId.trim(),
+                })
+              }
+            >
+              fact-check-v1
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={!snapshotId.trim()}
+              onClick={() =>
+                void post("/admin/agents/trend-analysis/run", {
+                  snapshotId: snapshotId.trim(),
+                })
+              }
+            >
+              trend-analysis-v1
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={!snapshotId.trim()}
+              onClick={() =>
+                void post("/admin/agents/time-series/run", {
+                  snapshotId: snapshotId.trim(),
+                })
+              }
+            >
+              time-series-v1
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={!snapshotId.trim()}
+              onClick={() =>
+                void post("/admin/agents/ranking/run", {
+                  snapshotId: snapshotId.trim(),
+                })
+              }
+            >
+              ranking-agent-v1
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
@@ -235,32 +351,6 @@ export default function AgentsPage() {
             }
           >
             执行合并（入队）
-          </Button>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Fact Check</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-wrap items-end gap-3">
-          <div className="space-y-2">
-            <Label htmlFor="snapshot-id">snapshotId</Label>
-            <Input
-              id="snapshot-id"
-              value={snapshotId}
-              onChange={(e) => setSnapshotId(e.target.value)}
-            />
-          </div>
-          <Button
-            type="button"
-            onClick={() =>
-              void post("/admin/agents/factcheck/run", {
-                snapshotId: snapshotId.trim(),
-              })
-            }
-          >
-            运行 fact-check
           </Button>
         </CardContent>
       </Card>
@@ -336,6 +426,7 @@ export default function AgentsPage() {
                 <th className="py-2 pr-2">id</th>
                 <th className="py-2 pr-2">agent</th>
                 <th className="py-2 pr-2">status</th>
+                <th className="py-2 pr-2">summary</th>
                 <th className="py-2 pr-2">correlation</th>
               </tr>
             </thead>
@@ -345,6 +436,9 @@ export default function AgentsPage() {
                   <td className="py-2 pr-2 font-mono text-xs">{r.id}</td>
                   <td className="py-2 pr-2">{r.agent}</td>
                   <td className="py-2 pr-2">{r.status}</td>
+                  <td className="py-2 pr-2 max-w-[200px] truncate text-xs text-muted-foreground">
+                    {r.outputSummary ?? "—"}
+                  </td>
                   <td className="py-2 pr-2 font-mono text-[10px]">{r.correlationId}</td>
                 </tr>
               ))}

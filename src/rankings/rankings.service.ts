@@ -40,7 +40,6 @@ import { ClickhouseService } from '../analytics/clickhouse.service';
 import { RankingCacheService } from '../cache/ranking-cache.service';
 import {
   OUTBOX_TYPE_CLICKHOUSE_RANKING_SNAPSHOT,
-  OUTBOX_TYPE_RANKING_FOLLOWUP_REQUESTED,
   OUTBOX_TYPE_RANKING_SNAPSHOT_COMPLETED,
 } from '../outbox/outbox.constants';
 import { toPlainJson } from '../lib/json';
@@ -59,21 +58,18 @@ import type { ApiKeyScope } from '../compliance/pii-redact';
 import { redactSnapshotPlainForScopes } from '../compliance/entity-pii';
 import type { AuthenticatedRequestContext } from '../compliance/compliance-auth.types';
 import { assertTopicAccessible, topicWhereForAuth } from '../compliance/tenant-scope';
+import { AgentOrchestrationService } from '../agent-orchestration/agent-orchestration.service';
 import {
   AI_AGENT_CREDIBILITY_V1,
   AI_AGENT_POST_SNAPSHOT_SUMMARY_V1,
   AI_AGENT_TREND_V1,
-  parseFollowupAnalyzePipeline,
 } from '../agent/ai-agent.constants';
-import { SnapshotAnalyzeService } from '../agent/snapshot-analyze.service';
-import { AI_AUDIT_SOURCE_RANKING_FOLLOWUP } from '../ai-audit/ai-audit.constants';
 import {
   parseScoreBreakdownJson,
   stableWeightsFingerprint,
 } from './score-model-utils';
 import { toRankingSnapshotPlainJson } from './snapshot-plain-json';
 import { buildClickhouseRankingSnapshotOutboxPayload } from './clickhouse-ranking-snapshot-outbox-payload';
-import { buildRankingFollowupRequestedOutboxPayload } from './ranking-followup-requested-outbox-payload';
 import { buildRankingSnapshotCompletedOutboxPayload } from './ranking-snapshot-completed-outbox-payload';
 
 const defaultWeights: Record<string, number> = {
@@ -118,7 +114,7 @@ export class RankingsService {
     @InjectQueue(RANKING_QUEUE) private readonly rankingQueue: Queue<RankingJobPayload>,
     @InjectQueue(RANKING_FOLLOWUP_QUEUE)
     private readonly rankingFollowupQueue: Queue<RankingFollowupPayload>,
-    private readonly snapshotAnalyze: SnapshotAnalyzeService,
+    private readonly agentOrchestration: AgentOrchestrationService,
     private readonly rankingCache: RankingCacheService,
     private readonly elastic: ElasticService,
     private readonly qdrant: QdrantSearchService,
@@ -987,137 +983,7 @@ export class RankingsService {
 
   /** BullMQ `ranking-followup` Worker 处理函数 */
   async handleRankingFollowupJob(data: RankingFollowupPayload): Promise<Record<string, unknown>> {
-    const snapshotId = BigInt(data.snapshotId);
-    const snap = await this.prisma.topicRankSnapshot.findUnique({
-      where: { id: snapshotId },
-      select: { id: true, topicRankingId: true, snapshotTime: true },
-    });
-    if (!snap) {
-      this.logger.warn(`followup: snapshot ${data.snapshotId} not found`);
-      return { ok: false, reason: 'snapshot not found' };
-    }
-    this.logger.log(
-      `ranking.followup post-snapshot snapshotId=${data.snapshotId} topicRankingId=${data.topicRankingId} timeWindow=${data.timeWindow}`,
-    );
-    if (process.env.RANKING_FOLLOWUP_OUTBOX === 'true') {
-      await this.prisma.outboxEvent.create({
-        data: {
-          type: OUTBOX_TYPE_RANKING_FOLLOWUP_REQUESTED,
-          payload: buildRankingFollowupRequestedOutboxPayload({
-            snapshotId: data.snapshotId,
-            topicRankingId: data.topicRankingId,
-            topicVersionId: data.topicVersionId,
-            topicId: data.topicId,
-            timeWindow: data.timeWindow,
-            snapshotTime: snap.snapshotTime,
-          }),
-        },
-      });
-    }
-
-    const sidStr = data.snapshotId;
-    const pipeline = this.resolveFollowupAnalyzePipeline();
-    const chainBlocks: string[] = [];
-    let analyzedSummary = false;
-    let analyzedTrend = false;
-    let analyzedCredibility = false;
-
-    for (const agent of pipeline) {
-      const chainContext = chainBlocks.length > 0 ? chainBlocks.join('\n\n---\n\n') : undefined;
-      const res = await this.tryFollowupAiAnalysis(snapshotId, sidStr, agent, chainContext);
-      if (res.ok) {
-        chainBlocks.push(`[${agent}] ${res.summary}`);
-      }
-      if (agent === AI_AGENT_POST_SNAPSHOT_SUMMARY_V1) {
-        analyzedSummary ||= res.ok;
-      } else if (agent === AI_AGENT_TREND_V1) {
-        analyzedTrend ||= res.ok;
-      } else if (agent === AI_AGENT_CREDIBILITY_V1) {
-        analyzedCredibility ||= res.ok;
-      }
-    }
-
-    if (chainBlocks.length > 0) {
-      await this.prisma.topicRankSnapshot.update({
-        where: { id: snapshotId },
-        data: {
-          trendSummary: chainBlocks.join('\n\n---\n\n').slice(0, 16_000),
-          generatedByAi:
-            analyzedSummary || analyzedTrend || analyzedCredibility,
-        },
-      });
-      await this.warmSnapshotCache(snapshotId);
-    }
-
-    return toPlainJson({
-      ok: true,
-      snapshotId: data.snapshotId,
-      analyzed: analyzedSummary || analyzedTrend || analyzedCredibility,
-      analyzedSummary,
-      analyzedTrend,
-      analyzedCredibility,
-      analyzePipeline: pipeline,
-    }) as Record<string, unknown>;
-  }
-
-  private resolveFollowupAnalyzePipeline(): string[] {
-    const raw = process.env.RANKING_FOLLOWUP_ANALYZE_PIPELINE?.trim();
-    if (raw) {
-      const { agents, unknown } = parseFollowupAnalyzePipeline(raw);
-      for (const u of unknown) {
-        this.logger.warn(
-          `followup: RANKING_FOLLOWUP_ANALYZE_PIPELINE unknown segment "${u}" skipped`,
-        );
-      }
-      if (agents.length === 0) {
-        this.logger.warn(
-          `followup: RANKING_FOLLOWUP_ANALYZE_PIPELINE parsed empty from "${raw.slice(0, 120)}"`,
-        );
-      }
-      return agents;
-    }
-    const pipeline: string[] = [];
-    if (process.env.RANKING_FOLLOWUP_ANALYZE === 'true') {
-      pipeline.push(AI_AGENT_POST_SNAPSHOT_SUMMARY_V1);
-    }
-    if (process.env.RANKING_FOLLOWUP_ANALYZE_TREND === 'true') {
-      pipeline.push(AI_AGENT_TREND_V1);
-    }
-    if (process.env.RANKING_FOLLOWUP_ANALYZE_CREDIBILITY === 'true') {
-      pipeline.push(AI_AGENT_CREDIBILITY_V1);
-    }
-    return pipeline;
-  }
-
-  private rankingFollowupAnalyzeTopN(): number {
-    const topNRaw = Number(process.env.RANKING_FOLLOWUP_ANALYZE_TOPN ?? '8');
-    return Math.min(50, Math.max(1, Number.isFinite(topNRaw) ? topNRaw : 8));
-  }
-
-  private async tryFollowupAiAnalysis(
-    snapshotId: bigint,
-    snapshotIdStr: string,
-    agent: string,
-    chainContext?: string,
-  ): Promise<{ ok: true; summary: string } | { ok: false }> {
-    try {
-      const row = await this.snapshotAnalyze.analyzeSnapshot(
-        snapshotId,
-        {
-          agent,
-          topN: this.rankingFollowupAnalyzeTopN(),
-          chainContext,
-        },
-        { auditSource: AI_AUDIT_SOURCE_RANKING_FOLLOWUP },
-      );
-      return { ok: true, summary: row.summary };
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      this.logger.warn(
-        `followup: AiAnalysis (${agent}) skipped for snapshot ${snapshotIdStr}: ${msg}`,
-      );
-      return { ok: false };
-    }
+    return this.agentOrchestration.runSnapshotPostProcessPipeline(data);
   }
 
   private toPayload(topicRankingId: bigint, args: RunRankingArgs): RankingJobPayload {

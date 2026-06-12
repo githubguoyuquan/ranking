@@ -1,5 +1,12 @@
 import { createHash } from 'crypto';
 import { fetch as undiciFetch, ProxyAgent } from 'undici';
+import {
+  crawlDomFeaturesEnabled,
+  extractDomFeatures,
+  type CrawlDomFeatures,
+} from './crawl-dom-extract';
+import { extractSameHostLinks } from './crawl-link-extract';
+import { pickCrawlUserAgent } from './crawl-fetch-retry';
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_BYTES = 2_000_000;
@@ -63,6 +70,8 @@ export type FetchCrawlResult =
       mimeType: string | null;
       textPreview: string | null;
       pageTitle: string | null;
+      domFeatures?: CrawlDomFeatures | null;
+      discoveredLinks?: string[];
     }
   | {
       ok: false;
@@ -71,9 +80,14 @@ export type FetchCrawlResult =
       error: string;
     };
 
-const UA =
-  process.env.CRAWL_USER_AGENT ??
-  'RankingPlatformCrawler/0.1 (+https://github.com/example/ranking; research)';
+export type FetchCrawlOptions = {
+  proxyUrl?: string | null;
+  globalProxyFallback?: boolean;
+  userAgent?: string;
+  /** 同 host 链接跟进：从 HTML 提取 `<a href>` */
+  linkScopeHost?: string;
+  linkExtractMax?: number;
+};
 
 export function normalizeCrawlProxyUrl(raw: string | null | undefined): string | undefined {
   const s = raw?.trim();
@@ -130,7 +144,7 @@ function decodeBasicHtmlEntities(s: string): string {
 
 export async function fetchUrlForCrawl(
   urlStr: string,
-  opts?: { proxyUrl?: string | null; globalProxyFallback?: boolean },
+  opts?: FetchCrawlOptions,
 ): Promise<FetchCrawlResult> {
   const viol = crawlUrlViolation(urlStr);
   if (viol) {
@@ -146,6 +160,7 @@ export async function fetchUrlForCrawl(
       ? normalizeCrawlProxyUrl(process.env.CRAWL_HTTP_PROXY)
       : undefined);
   const dispatcher = proxyRaw ? new ProxyAgent(proxyRaw) : undefined;
+  const ua = opts?.userAgent ?? pickCrawlUserAgent(urlStr);
   try {
     const res = await undiciFetch(urlStr, {
       method: 'GET',
@@ -154,7 +169,7 @@ export async function fetchUrlForCrawl(
       dispatcher,
       headers: {
         Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'User-Agent': UA,
+        'User-Agent': ua,
       },
     });
 
@@ -206,6 +221,18 @@ export async function fetchUrlForCrawl(
     const combined = Buffer.concat(buf);
     const textPreview = buildTextPreview(mimeType, combined);
     const pageTitle = extractPageTitle(mimeType, combined);
+    const domFeatures =
+      crawlDomFeaturesEnabled() ? extractDomFeatures(mimeType, combined) : null;
+    let discoveredLinks: string[] | undefined;
+    if (opts?.linkScopeHost && opts.linkExtractMax && opts.linkExtractMax > 0) {
+      const html = combined.toString('utf8', 0, Math.min(combined.length, 800_000));
+      discoveredLinks = extractSameHostLinks(
+        html,
+        urlStr,
+        opts.linkScopeHost,
+        opts.linkExtractMax,
+      );
+    }
     return {
       ok: true,
       statusCode: res.status,
@@ -214,6 +241,8 @@ export async function fetchUrlForCrawl(
       mimeType,
       textPreview,
       pageTitle,
+      domFeatures,
+      discoveredLinks,
     };
   } catch (e) {
     const msg =

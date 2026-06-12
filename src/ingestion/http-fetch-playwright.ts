@@ -7,12 +7,15 @@ import {
   crawlUrlViolation,
   normalizeCrawlProxyUrl,
   textPreviewMaxChars,
+  type FetchCrawlOptions,
   type FetchCrawlResult,
 } from './http-fetch';
-
-const UA =
-  process.env.CRAWL_USER_AGENT ??
-  'RankingPlatformCrawler/0.1 (+https://github.com/example/ranking; research)';
+import {
+  crawlDomFeaturesEnabled,
+  extractDomFeatures,
+} from './crawl-dom-extract';
+import { extractSameHostLinks } from './crawl-link-extract';
+import { pickCrawlUserAgent } from './crawl-fetch-retry';
 
 function sha256Hex(buf: Buffer): string {
   return createHash('sha256').update(buf).digest('hex');
@@ -21,7 +24,7 @@ function sha256Hex(buf: Buffer): string {
 /** 使用无头 Chromium 渲染后再取 HTML / innerText；需 `playwright` 与浏览器缓存（`npx playwright install chromium`）。 */
 export async function fetchUrlForCrawlPlaywright(
   urlStr: string,
-  opts?: { proxyUrl?: string | null; globalProxyFallback?: boolean },
+  opts?: FetchCrawlOptions,
 ): Promise<FetchCrawlResult> {
   const viol = crawlUrlViolation(urlStr);
   if (viol) {
@@ -39,8 +42,9 @@ export async function fetchUrlForCrawlPlaywright(
 
   try {
     browser = await chromium.launch({ headless: true });
+    const ua = opts?.userAgent ?? pickCrawlUserAgent(urlStr);
     const ctx = await browser.newContext({
-      userAgent: UA,
+      userAgent: ua,
       ...(proxyRaw ? { proxy: { server: proxyRaw } } : {}),
     });
     const page = await ctx.newPage();
@@ -97,6 +101,19 @@ export async function fetchUrlForCrawlPlaywright(
     }
 
     await ctx.close();
+
+    const domFeatures =
+      crawlDomFeaturesEnabled() ? extractDomFeatures('text/html', buf) : null;
+    let discoveredLinks: string[] | undefined;
+    if (opts?.linkScopeHost && opts.linkExtractMax && opts.linkExtractMax > 0) {
+      discoveredLinks = extractSameHostLinks(
+        html,
+        urlStr,
+        opts.linkScopeHost,
+        opts.linkExtractMax,
+      );
+    }
+
     return {
       ok: true,
       statusCode,
@@ -105,6 +122,8 @@ export async function fetchUrlForCrawlPlaywright(
       mimeType: 'text/html',
       textPreview,
       pageTitle,
+      domFeatures,
+      discoveredLinks,
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

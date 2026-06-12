@@ -22,8 +22,11 @@ import {
 import {
   AI_AGENT_DUPLICATE_DETECTION_V1,
   AI_AGENT_FACT_CHECK_V1,
+  AI_AGENT_RANKING_V1,
+  AI_AGENT_TIME_SERIES_V1,
   AI_AGENT_TOPIC_DISCOVERY_V1,
   AI_AGENT_TOPIC_MERGE_V1,
+  AI_AGENT_TREND_ANALYSIS_V1,
   parseOrchestrationPipeline,
 } from '../agent/ai-agent.constants';
 import { toPlainJson } from '../lib/json';
@@ -99,7 +102,7 @@ class MergeRunDto {
   minSimilarity?: number;
 }
 
-class FactCheckRunDto {
+class SnapshotAgentRunDto {
   @IsString()
   snapshotId!: string;
 
@@ -110,6 +113,8 @@ class FactCheckRunDto {
   @Max(50)
   topN?: number;
 }
+
+class FactCheckRunDto extends SnapshotAgentRunDto {}
 
 class ApproveProposalDto {
   @IsOptional()
@@ -136,20 +141,15 @@ export class AgentOrchestrationController {
 
   @Get('admin/agents/overview')
   overview() {
+    const o = this.orchestration.getRegistryOverview();
     return {
       queue: 'ai-agent',
-      agents: [
-        AI_AGENT_TOPIC_DISCOVERY_V1,
-        AI_AGENT_TOPIC_MERGE_V1,
-        AI_AGENT_FACT_CHECK_V1,
-        AI_AGENT_DUPLICATE_DETECTION_V1,
-        'post-snapshot-summary-v1',
-        'trend-v1',
-        'credibility-v1',
-        'rules-v1',
-      ],
-      crawlDiscoveryEnabled: this.orchestration.crawlDiscoveryEnabled(),
-      defaultPipeline: this.orchestration.resolveDefaultPipeline(),
+      agents: o.registry.map((r) => r.id),
+      registry: o.registry,
+      crawlDiscoveryEnabled: o.crawlDiscoveryEnabled,
+      agentEnabled: o.agentEnabled,
+      defaultPipeline: o.defaultPipeline,
+      snapshotPostProcessPipeline: o.snapshotPostProcessPipeline,
     };
   }
 
@@ -274,6 +274,35 @@ export class AgentOrchestrationController {
   async runFactCheck(@Body() body: FactCheckRunDto) {
     return toPlainJson(
       await this.orchestration.enqueueAgent(AI_AGENT_FACT_CHECK_V1, {
+        snapshotId: body.snapshotId,
+        topN: body.topN,
+      }),
+    );
+  }
+
+  @Post('admin/agents/trend-analysis/run')
+  async runTrendAnalysis(@Body() body: SnapshotAgentRunDto) {
+    return toPlainJson(
+      await this.orchestration.enqueueAgent(AI_AGENT_TREND_ANALYSIS_V1, {
+        snapshotId: body.snapshotId,
+        topN: body.topN,
+      }),
+    );
+  }
+
+  @Post('admin/agents/time-series/run')
+  async runTimeSeries(@Body() body: SnapshotAgentRunDto) {
+    return toPlainJson(
+      await this.orchestration.enqueueAgent(AI_AGENT_TIME_SERIES_V1, {
+        snapshotId: body.snapshotId,
+      }),
+    );
+  }
+
+  @Post('admin/agents/ranking/run')
+  async runRankingAgent(@Body() body: SnapshotAgentRunDto) {
+    return toPlainJson(
+      await this.orchestration.enqueueAgent(AI_AGENT_RANKING_V1, {
         snapshotId: body.snapshotId,
         topN: body.topN,
       }),

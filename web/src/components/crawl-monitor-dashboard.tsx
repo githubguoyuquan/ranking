@@ -10,6 +10,7 @@ import {
   HTTP_URL_INPUT_MAX_LEN,
 } from "@/lib/admin-input-limits";
 import { ADMIN_HREF } from "@/lib/admin-web-paths";
+import { adminCrawlOverviewUrl } from "@/lib/backend-api-urls";
 import { isDecimalBigIntIdString } from "@/lib/decimal-id";
 import {
   nestCrawlSourcesListUrl,
@@ -41,6 +42,8 @@ type CrawledUrlRow = {
   url: string;
   status?: string;
   fetchedAt?: string | null;
+  pageTitle?: string | null;
+  domHint?: string | null;
 };
 
 type CrawlTaskBrief = {
@@ -89,6 +92,72 @@ function parseSourcesJson(text: string): SourceRow[] {
   }
 }
 
+type CrawlOverview = {
+  sources: number;
+  scheduledSources: number;
+  tasks: { running: number; failed: number };
+  urlsByStatus: Record<string, number>;
+  features: {
+    httpFetch?: boolean;
+    playwright?: boolean;
+    followLinks?: boolean;
+    semanticDedup?: boolean;
+    crossSourceDedup?: boolean;
+    domFeatures?: boolean;
+  };
+};
+
+function parseOverviewJson(text: string): CrawlOverview | null {
+  try {
+    const o = JSON.parse(text) as Record<string, unknown>;
+    const tasks =
+      typeof o.tasks === "object" && o.tasks !== null
+        ? (o.tasks as Record<string, unknown>)
+        : {};
+    const features =
+      typeof o.features === "object" && o.features !== null
+        ? (o.features as Record<string, unknown>)
+        : {};
+    const urlsByStatus =
+      typeof o.urlsByStatus === "object" && o.urlsByStatus !== null
+        ? (o.urlsByStatus as Record<string, unknown>)
+        : {};
+    return {
+      sources: typeof o.sources === "number" ? o.sources : 0,
+      scheduledSources:
+        typeof o.scheduledSources === "number" ? o.scheduledSources : 0,
+      tasks: {
+        running: typeof tasks.running === "number" ? tasks.running : 0,
+        failed: typeof tasks.failed === "number" ? tasks.failed : 0,
+      },
+      urlsByStatus: Object.fromEntries(
+        Object.entries(urlsByStatus).map(([k, v]) => [k, Number(v) || 0]),
+      ),
+      features: {
+        httpFetch: features.httpFetch === true,
+        playwright: features.playwright === true,
+        followLinks: features.followLinks === true,
+        semanticDedup: features.semanticDedup === true,
+        crossSourceDedup: features.crossSourceDedup === true,
+        domFeatures: features.domFeatures === true,
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
+function domHintFromFeatures(raw: unknown): string | null {
+  if (raw == null || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const meta =
+    typeof o.metaDescription === "string" ? o.metaDescription.trim() : "";
+  if (meta) return meta.slice(0, 80);
+  const og = typeof o.ogTitle === "string" ? o.ogTitle.trim() : "";
+  if (og) return og.slice(0, 80);
+  return null;
+}
+
 function parseUrlsJson(text: string): CrawledUrlRow[] {
   try {
     const arr = JSON.parse(text) as unknown;
@@ -104,6 +173,8 @@ function parseUrlsJson(text: string): CrawledUrlRow[] {
         status: o.status != null ? String(o.status) : undefined,
         fetchedAt:
           o.fetchedAt != null ? String(o.fetchedAt) : null,
+        pageTitle: o.pageTitle != null ? String(o.pageTitle) : null,
+        domHint: domHintFromFeatures(o.domFeaturesJson),
       });
     }
     return out;
@@ -270,6 +341,7 @@ export function CrawlMonitorDashboard() {
   const [recentTasks, setRecentTasks] = useState<CrawlTaskBrief[]>([]);
   const [lastApiPulse, setLastApiPulse] = useState<number | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
+  const [overview, setOverview] = useState<CrawlOverview | null>(null);
 
   const [taskWatchId, setTaskWatchId] = useState("");
   const [taskView, setTaskView] = useState<CrawlTaskRow | null>(null);
@@ -314,6 +386,11 @@ export function CrawlMonitorDashboard() {
     if (!liveRelay) return;
     setApiError(null);
     try {
+      const ovRes = await fetch(adminCrawlOverviewUrl(), { cache: "no-store" });
+      if (ovRes.ok) {
+        setOverview(parseOverviewJson(await ovRes.text()));
+      }
+
       const sRes = await fetch(
         nestCrawlSourcesListUrl(CRAWL_SOURCES_LIST_LIMIT_DEFAULT),
         { cache: "no-store" },
@@ -647,6 +724,67 @@ export function CrawlMonitorDashboard() {
           </div>
         </header>
 
+        {overview ? (
+          <section className="grid gap-3 rounded-xl border border-cyan-500/20 bg-black/35 p-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-white/40">
+                全站概览
+              </p>
+              <p className="mt-1 font-mono text-sm text-cyan-100">
+                {overview.sources} 源 · {overview.scheduledSources} 定时
+              </p>
+              <p className="text-[11px] text-white/50">
+                任务 running {overview.tasks.running} · failed{" "}
+                {overview.tasks.failed}
+              </p>
+            </div>
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-white/40">
+                URL 状态
+              </p>
+              <p className="mt-1 font-mono text-[11px] leading-relaxed text-white/70">
+                {Object.entries(overview.urlsByStatus).length === 0
+                  ? "—"
+                  : Object.entries(overview.urlsByStatus)
+                      .map(([k, v]) => `${k}:${v}`)
+                      .join(" · ")}
+              </p>
+            </div>
+            <div className="sm:col-span-2">
+              <p className="text-[10px] uppercase tracking-wider text-white/40">
+                运行时特性
+              </p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {(
+                  [
+                    ["HTTP", overview.features.httpFetch],
+                    ["Playwright", overview.features.playwright],
+                    ["DOM", overview.features.domFeatures],
+                    ["Follow", overview.features.followLinks],
+                    ["SemDedup", overview.features.semanticDedup],
+                    ["XSrcDedup", overview.features.crossSourceDedup],
+                  ] as const
+                ).map(([label, on]) => (
+                  <span
+                    key={label}
+                    className={cn(
+                      "rounded-full border px-2 py-0.5 text-[10px] font-medium",
+                      on
+                        ? "border-emerald-400/40 bg-emerald-500/15 text-emerald-200"
+                        : "border-white/15 bg-black/40 text-white/35",
+                    )}
+                  >
+                    {label} {on ? "ON" : "off"}
+                  </span>
+                ))}
+              </div>
+              <p className="mt-1 text-[10px] text-white/35">
+                GET {adminCrawlOverviewUrl().replace(/^https?:\/\/[^/]+/, "")}
+              </p>
+            </div>
+          </section>
+        ) : null}
+
         <div className="grid gap-6 lg:grid-cols-12">
           <section className="flex flex-col gap-4 lg:col-span-4">
             <h2 className="text-xs font-semibold uppercase tracking-[0.2em] text-white/40">
@@ -913,6 +1051,7 @@ export function CrawlMonitorDashboard() {
                       <tr>
                         <th className="px-2 py-1.5">id</th>
                         <th className="px-2 py-1.5">状态</th>
+                        <th className="px-2 py-1.5">title / dom</th>
                         <th className="px-2 py-1.5">url</th>
                       </tr>
                     </thead>
@@ -927,6 +1066,12 @@ export function CrawlMonitorDashboard() {
                           </td>
                           <td className="px-2 py-1 text-fuchsia-200/90">
                             {r.status ?? "—"}
+                          </td>
+                          <td
+                            className="max-w-[140px] truncate px-2 py-1 text-white/55"
+                            title={r.pageTitle ?? r.domHint ?? undefined}
+                          >
+                            {r.pageTitle ?? r.domHint ?? "—"}
                           </td>
                           <td className="max-w-[200px] truncate px-2 py-1" title={r.url}>
                             {r.url}

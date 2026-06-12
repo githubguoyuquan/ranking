@@ -36,8 +36,6 @@ services:
       - internal://redpanda:8082,external://localhost:18082
       - --schema-registry-addr
       - internal://0.0.0.0:8081,external://0.0.0.0:18081
-      - --advertise-schema-registry-addr
-      - internal://redpanda:8081,external://localhost:18081
       - --smp
       - "1"
       - --default-log-level=warn

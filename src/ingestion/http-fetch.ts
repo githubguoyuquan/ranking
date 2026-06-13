@@ -5,7 +5,7 @@ import {
   extractDomFeatures,
   type CrawlDomFeatures,
 } from './crawl-dom-extract';
-import { extractSameHostLinks } from './crawl-link-extract';
+import { extractFollowLinks } from './crawl-link-extract';
 import { pickCrawlUserAgent } from './crawl-fetch-retry';
 
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -84,10 +84,22 @@ export type FetchCrawlOptions = {
   proxyUrl?: string | null;
   globalProxyFallback?: boolean;
   userAgent?: string;
-  /** 同 host 链接跟进：从 HTML 提取 `<a href>` */
+  /** 链接跟进：从 HTML 提取 `<a href>`（`linkAllowHosts` 优先于 `linkScopeHost`） */
+  linkAllowHosts?: string[];
   linkScopeHost?: string;
   linkExtractMax?: number;
 };
+
+function resolveLinkAllowHostsFromOpts(
+  opts?: FetchCrawlOptions,
+): Set<string> | null {
+  if (opts?.linkAllowHosts?.length) {
+    return new Set(opts.linkAllowHosts.map((h) => h.toLowerCase()));
+  }
+  const scope = opts?.linkScopeHost?.trim().toLowerCase();
+  if (scope) return new Set([scope]);
+  return null;
+}
 
 export function normalizeCrawlProxyUrl(raw: string | null | undefined): string | undefined {
   const s = raw?.trim();
@@ -224,12 +236,13 @@ export async function fetchUrlForCrawl(
     const domFeatures =
       crawlDomFeaturesEnabled() ? extractDomFeatures(mimeType, combined) : null;
     let discoveredLinks: string[] | undefined;
-    if (opts?.linkScopeHost && opts.linkExtractMax && opts.linkExtractMax > 0) {
+    const allowHosts = resolveLinkAllowHostsFromOpts(opts);
+    if (allowHosts && opts?.linkExtractMax && opts.linkExtractMax > 0) {
       const html = combined.toString('utf8', 0, Math.min(combined.length, 800_000));
-      discoveredLinks = extractSameHostLinks(
+      discoveredLinks = extractFollowLinks(
         html,
         urlStr,
-        opts.linkScopeHost,
+        allowHosts,
         opts.linkExtractMax,
       );
     }

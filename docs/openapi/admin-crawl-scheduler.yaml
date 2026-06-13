@@ -18,7 +18,8 @@ paths:
       tags: [Crawl, Admin]
       summary: 爬虫运营概览
       description: |
-        数据源/任务/URL 状态聚合与运行时特性开关（HTTP、Playwright、DOM 特征、链接跟进等）。
+        数据源/任务/URL 状态聚合、链接策略、区域 Worker 与运行时特性；与
+        `GET /admin/observability/prometheus` 中 `ranking_crawl_*` 指标同源。
       operationId: adminCrawlOverview
       security:
         - ApiKeyAuth: []

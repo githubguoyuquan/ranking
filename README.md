@@ -38,7 +38,7 @@ DATABASE_URL='postgresql://...' npm run prisma:deploy
    - ✅ **Transactional Outbox**：快照提交事务内写入 `OutboxEvent`；`OutboxPublisherService` 定时发往 Kafka 兼容 broker（默认 topic `ranking.snapshot.completed`）。未配置 `KAFKA_BROKERS` 时仅积累 outbox 并打日志。  
    - ✅ 本地 **Redpanda**：`docker compose` 中 `redpanda`，宿主机端口 **19092**（`.env` 中 `KAFKA_BROKERS=localhost:19092`）  
    - ✅ 多实例 **Outbox**：`leasedUntil` 租约 + `FOR UPDATE SKIP LOCKED` 抢占，避免并行重复发布  
-   - ✅ **爬虫**：Checkpoint / `Source` / `CrawlTask` / `CrawledUrl` + BullMQ `crawl`；真 HTTP / Playwright；**DOM 特征**（`domFeaturesJson`：meta/og/h1/canonical）；**反爬重试**（`CRAWL_FETCH_MAX_RETRIES` + `CRAWL_USER_AGENT_POOL`）；**同 host 链接跟进**（`CRAWL_FOLLOW_LINKS`）；语义去重 / 跨信源去重 / 代理池 / 全球调度；`GET /admin/crawl/overview` 运营概览
+   - ✅ **爬虫**：Checkpoint / `Source` / `CrawlTask` / `CrawledUrl` + BullMQ `crawl`；真 HTTP / Playwright；**DOM 特征**；**反爬重试** + UA 池；**链接跟进 BFS**（深度 / 域名白名单 / **`CRAWL_RESPECT_ROBOTS`**）；语义去重 / 代理池 / 全球调度；`GET /admin/crawl/overview` 与 **`ranking_crawl_*` Prometheus** 同源
 3. **P2 — Analytics & search**  
    - ✅ **ClickHouse**：compose、`metric_timeseries`、MV `metric_daily_topic`、`AnalyticsModule`；`SYNC_RANKING_TO_CLICKHOUSE` + direct/outbox 写入；CH 行可 **双轨** 镜像到 Kafka（权威路径为进程内 Flusher）  
    - ✅ **Redis 热读缓存**：`GET /v1/snapshots/:id` 长 TTL；`GET /v1/topics/:slug/leaderboard` 独立短 TTL 聚合缓存；无 Redis 或失败时降级查库  

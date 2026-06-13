@@ -95,7 +95,7 @@ function parseSourcesJson(text: string): SourceRow[] {
 type CrawlOverview = {
   sources: number;
   scheduledSources: number;
-  tasks: { running: number; failed: number };
+  tasks: { running: number; failed: number; queued?: number };
   urlsByStatus: Record<string, number>;
   features: {
     httpFetch?: boolean;
@@ -104,6 +104,21 @@ type CrawlOverview = {
     semanticDedup?: boolean;
     crossSourceDedup?: boolean;
     domFeatures?: boolean;
+    respectRobots?: boolean;
+  };
+  linkPolicy?: {
+    maxDepth?: number;
+    maxUrlsPerTask?: number;
+    allowHosts?: string[];
+    respectRobots?: boolean;
+  };
+  worker?: {
+    queueName?: string;
+    queueShard?: string | null;
+    scheduledRegions?: string[];
+  };
+  scheduler?: {
+    sla?: { healthy?: boolean; staleAfterMinutes?: number };
   };
 };
 
@@ -122,6 +137,22 @@ function parseOverviewJson(text: string): CrawlOverview | null {
       typeof o.urlsByStatus === "object" && o.urlsByStatus !== null
         ? (o.urlsByStatus as Record<string, unknown>)
         : {};
+    const linkPolicy =
+      typeof o.linkPolicy === "object" && o.linkPolicy !== null
+        ? (o.linkPolicy as Record<string, unknown>)
+        : {};
+    const worker =
+      typeof o.worker === "object" && o.worker !== null
+        ? (o.worker as Record<string, unknown>)
+        : {};
+    const scheduler =
+      typeof o.scheduler === "object" && o.scheduler !== null
+        ? (o.scheduler as Record<string, unknown>)
+        : {};
+    const sla =
+      typeof scheduler.sla === "object" && scheduler.sla !== null
+        ? (scheduler.sla as Record<string, unknown>)
+        : {};
     return {
       sources: typeof o.sources === "number" ? o.sources : 0,
       scheduledSources:
@@ -129,6 +160,7 @@ function parseOverviewJson(text: string): CrawlOverview | null {
       tasks: {
         running: typeof tasks.running === "number" ? tasks.running : 0,
         failed: typeof tasks.failed === "number" ? tasks.failed : 0,
+        queued: typeof tasks.queued === "number" ? tasks.queued : undefined,
       },
       urlsByStatus: Object.fromEntries(
         Object.entries(urlsByStatus).map(([k, v]) => [k, Number(v) || 0]),
@@ -140,6 +172,39 @@ function parseOverviewJson(text: string): CrawlOverview | null {
         semanticDedup: features.semanticDedup === true,
         crossSourceDedup: features.crossSourceDedup === true,
         domFeatures: features.domFeatures === true,
+        respectRobots: features.respectRobots === true,
+      },
+      linkPolicy: {
+        maxDepth:
+          typeof linkPolicy.maxDepth === "number"
+            ? linkPolicy.maxDepth
+            : undefined,
+        maxUrlsPerTask:
+          typeof linkPolicy.maxUrlsPerTask === "number"
+            ? linkPolicy.maxUrlsPerTask
+            : undefined,
+        allowHosts: Array.isArray(linkPolicy.allowHosts)
+          ? linkPolicy.allowHosts.map(String)
+          : undefined,
+        respectRobots: linkPolicy.respectRobots === true,
+      },
+      worker: {
+        queueName:
+          typeof worker.queueName === "string" ? worker.queueName : undefined,
+        queueShard:
+          worker.queueShard != null ? String(worker.queueShard) : null,
+        scheduledRegions: Array.isArray(worker.scheduledRegions)
+          ? worker.scheduledRegions.map(String)
+          : undefined,
+      },
+      scheduler: {
+        sla: {
+          healthy: sla.healthy === true,
+          staleAfterMinutes:
+            typeof sla.staleAfterMinutes === "number"
+              ? sla.staleAfterMinutes
+              : undefined,
+        },
       },
     };
   } catch {
@@ -736,7 +801,16 @@ export function CrawlMonitorDashboard() {
               <p className="text-[11px] text-white/50">
                 任务 running {overview.tasks.running} · failed{" "}
                 {overview.tasks.failed}
+                {overview.tasks.queued != null
+                  ? ` · queued ${overview.tasks.queued}`
+                  : ""}
               </p>
+              {overview.scheduler?.sla?.healthy === false ? (
+                <p className="mt-1 text-[11px] text-amber-300">
+                  调度 SLA 异常（超过{" "}
+                  {overview.scheduler.sla.staleAfterMinutes ?? "?"} 分钟未 tick）
+                </p>
+              ) : null}
             </div>
             <div>
               <p className="text-[10px] uppercase tracking-wider text-white/40">
@@ -752,7 +826,7 @@ export function CrawlMonitorDashboard() {
             </div>
             <div className="sm:col-span-2">
               <p className="text-[10px] uppercase tracking-wider text-white/40">
-                运行时特性
+                运行时特性 / 链接策略
               </p>
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {(
@@ -761,6 +835,7 @@ export function CrawlMonitorDashboard() {
                     ["Playwright", overview.features.playwright],
                     ["DOM", overview.features.domFeatures],
                     ["Follow", overview.features.followLinks],
+                    ["Robots", overview.features.respectRobots],
                     ["SemDedup", overview.features.semanticDedup],
                     ["XSrcDedup", overview.features.crossSourceDedup],
                   ] as const
@@ -778,6 +853,21 @@ export function CrawlMonitorDashboard() {
                   </span>
                 ))}
               </div>
+              {overview.features.followLinks ? (
+                <p className="mt-2 text-[10px] text-white/50">
+                  depth≤{overview.linkPolicy?.maxDepth ?? "?"}{" "}
+                  · max {overview.linkPolicy?.maxUrlsPerTask ?? "?"} URLs/task
+                  {overview.linkPolicy?.allowHosts?.length
+                    ? ` · +hosts ${overview.linkPolicy.allowHosts.join(", ")}`
+                    : ""}
+                </p>
+              ) : null}
+              {overview.worker?.scheduledRegions?.length ? (
+                <p className="mt-1 text-[10px] text-cyan-200/70">
+                  定时区域 {overview.worker.scheduledRegions.join(" · ")} · 队列{" "}
+                  {overview.worker.queueName ?? "crawl"}
+                </p>
+              ) : null}
               <p className="mt-1 text-[10px] text-white/35">
                 GET {adminCrawlOverviewUrl().replace(/^https?:\/\/[^/]+/, "")}
               </p>

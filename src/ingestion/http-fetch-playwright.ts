@@ -14,7 +14,7 @@ import {
   crawlDomFeaturesEnabled,
   extractDomFeatures,
 } from './crawl-dom-extract';
-import { extractSameHostLinks } from './crawl-link-extract';
+import { extractFollowLinks } from './crawl-link-extract';
 import { pickCrawlUserAgent } from './crawl-fetch-retry';
 
 function sha256Hex(buf: Buffer): string {
@@ -105,11 +105,17 @@ export async function fetchUrlForCrawlPlaywright(
     const domFeatures =
       crawlDomFeaturesEnabled() ? extractDomFeatures('text/html', buf) : null;
     let discoveredLinks: string[] | undefined;
-    if (opts?.linkScopeHost && opts.linkExtractMax && opts.linkExtractMax > 0) {
-      discoveredLinks = extractSameHostLinks(
+    const allowHosts =
+      opts?.linkAllowHosts?.length
+        ? new Set(opts.linkAllowHosts.map((h) => h.toLowerCase()))
+        : opts?.linkScopeHost
+          ? new Set([opts.linkScopeHost.toLowerCase()])
+          : null;
+    if (allowHosts && opts?.linkExtractMax && opts.linkExtractMax > 0) {
+      discoveredLinks = extractFollowLinks(
         html,
         urlStr,
-        opts.linkScopeHost,
+        allowHosts,
         opts.linkExtractMax,
       );
     }

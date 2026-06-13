@@ -95,6 +95,51 @@ export function formatPrometheusMetrics(
     crawl.crawlTasks.failed24h,
   );
 
+  gauge(
+    'ranking_crawl_tasks_running_all',
+    'Crawl tasks currently running (all time window)',
+    crawl.overview.tasksAll.running,
+  );
+  gauge(
+    'ranking_crawl_tasks_failed_all',
+    'Crawl tasks in failed status',
+    crawl.overview.tasksAll.failed,
+  );
+  gauge(
+    'ranking_crawl_tasks_queued_all',
+    'Crawl tasks in queued status',
+    crawl.overview.tasksAll.queued,
+  );
+  gauge(
+    'ranking_crawl_sources_total',
+    'Registered crawl sources',
+    crawl.overview.sources,
+  );
+  gauge(
+    'ranking_crawl_scheduler_sla_healthy',
+    '1 if crawl scheduler SLA is healthy',
+    crawl.schedulerSla.healthy ? 1 : 0,
+  );
+  gauge(
+    'ranking_crawl_follow_links_enabled',
+    '1 if CRAWL_FOLLOW_LINKS is enabled',
+    crawl.features.followLinks ? 1 : 0,
+  );
+  gauge(
+    'ranking_crawl_respect_robots_enabled',
+    '1 if CRAWL_RESPECT_ROBOTS is enabled',
+    crawl.features.respectRobots ? 1 : 0,
+  );
+
+  for (const [status, count] of Object.entries(crawl.overview.urlsByStatus)) {
+    gauge(
+      'ranking_crawl_urls_by_status',
+      'CrawledUrl rows by status',
+      count,
+      { status },
+    );
+  }
+
   return `${lines.join('\n')}\n`;
 }
 

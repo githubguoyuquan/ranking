@@ -35,9 +35,17 @@ import { CrawlRegionalQueueService } from './crawl-regional-queue.service';
 import { fetchCrawlWithRetry, pickCrawlUserAgent } from './crawl-fetch-retry';
 import {
   crawlFollowLinksEnabled,
+  crawlFollowLinksMaxDepth,
   crawlFollowLinksMaxPerTask,
-  resolveLinkScopeHost,
+  crawlLinkExtractMaxPerPage,
+  isLinkHostAllowed,
+  resolveLinkAllowHosts,
 } from './crawl-link-extract';
+import {
+  crawlRespectRobotsEnabled,
+  isCrawlUrlAllowedByRobots,
+  type RobotsCache,
+} from './crawl-robots';
 import { crawlUrlViolation, fetchUrlForCrawl, normalizeCrawlProxyUrl } from './http-fetch';
 import { fetchUrlForCrawlPlaywright } from './http-fetch-playwright';
 
@@ -335,21 +343,50 @@ export class IngestionService {
       const maxUrls = followLinks
         ? crawlFollowLinksMaxPerTask()
         : Math.max(seedUrls.length, 1);
-      const queue = [...seedUrls];
+      const maxDepth = crawlFollowLinksMaxDepth();
+      const linkAllowHosts = resolveLinkAllowHosts(
+        source.baseUrl,
+        seedUrls[0] ?? source.baseUrl,
+      );
+      const respectRobots = followLinks && crawlRespectRobotsEnabled();
+      const robotsCache: RobotsCache = new Map();
+      type QueueItem = { url: string; depth: number };
+      const queue: QueueItem[] = seedUrls.map((url) => ({ url, depth: 0 }));
       const visited = new Set<string>();
       let processed = 0;
       let lastUrl: string | null = null;
       let linksEnqueued = 0;
-      const linkScopeHost = resolveLinkScopeHost(
-        source.baseUrl,
-        seedUrls[0] ?? source.baseUrl,
-      );
+      let robotsBlocked = 0;
+      let depthSkipped = 0;
 
       while (queue.length > 0 && processed < maxUrls) {
-        const u = queue.shift()!;
+        const item = queue.shift()!;
+        const u = item.url;
         const fp = urlFingerprint(u);
         if (visited.has(fp)) continue;
         visited.add(fp);
+
+        if (followLinks && item.depth > maxDepth) {
+          depthSkipped += 1;
+          continue;
+        }
+
+        if (!isLinkHostAllowed(u, linkAllowHosts)) {
+          fetchErrors += 1;
+          await this.persistFetchFailure(sourceId, u, fp, now, 'fetch_blocked');
+          continue;
+        }
+
+        if (respectRobots) {
+          const ua = pickCrawlUserAgent(u);
+          const robotsOk = await isCrawlUrlAllowedByRobots(u, robotsCache, ua);
+          if (!robotsOk) {
+            robotsBlocked += 1;
+            await this.persistFetchFailure(sourceId, u, fp, now, 'robots_disallowed');
+            continue;
+          }
+        }
+
         processed += 1;
         lastUrl = u;
 
@@ -406,7 +443,10 @@ export class IngestionService {
           proxyUrl,
           userAgent: pickCrawlUserAgent(u),
           ...(followLinks
-            ? { linkScopeHost, linkExtractMax: 40 }
+            ? {
+                linkAllowHosts: [...linkAllowHosts],
+                linkExtractMax: crawlLinkExtractMaxPerPage(),
+              }
             : {}),
         };
         const fetched = await fetchCrawlWithRetry(() =>
@@ -483,14 +523,24 @@ export class IngestionService {
             }
           });
 
-          if (followLinks && fetched.discoveredLinks?.length) {
+          if (followLinks && fetched.discoveredLinks?.length && item.depth < maxDepth) {
             for (const link of fetched.discoveredLinks) {
               if (visited.size + queue.length >= maxUrls) break;
+              if (!isLinkHostAllowed(link, linkAllowHosts)) continue;
               const lfp = urlFingerprint(link);
-              if (!visited.has(lfp) && !queue.some((q) => urlFingerprint(q) === lfp)) {
-                queue.push(link);
-                linksEnqueued += 1;
+              if (visited.has(lfp) || queue.some((q) => urlFingerprint(q.url) === lfp)) {
+                continue;
               }
+              if (respectRobots) {
+                const linkOk = await isCrawlUrlAllowedByRobots(
+                  link,
+                  robotsCache,
+                  pickCrawlUserAgent(link),
+                );
+                if (!linkOk) continue;
+              }
+              queue.push({ url: link, depth: item.depth + 1 });
+              linksEnqueued += 1;
             }
           }
         } else {
@@ -513,6 +563,10 @@ export class IngestionService {
             urlCount: processed,
             linksEnqueued: followLinks ? linksEnqueued : undefined,
             followLinks,
+            maxDepth: followLinks ? maxDepth : undefined,
+            linkAllowHosts: followLinks ? [...linkAllowHosts] : undefined,
+            robotsBlocked: followLinks && respectRobots ? robotsBlocked : undefined,
+            depthSkipped: followLinks ? depthSkipped : undefined,
             fetchErrors: useHttp ? fetchErrors : undefined,
             crawlTaskId: payload.crawlTaskId,
           } as Prisma.InputJsonValue,
@@ -527,6 +581,10 @@ export class IngestionService {
             urlCount: processed,
             linksEnqueued: followLinks ? linksEnqueued : undefined,
             followLinks,
+            maxDepth: followLinks ? maxDepth : undefined,
+            linkAllowHosts: followLinks ? [...linkAllowHosts] : undefined,
+            robotsBlocked: followLinks && respectRobots ? robotsBlocked : undefined,
+            depthSkipped: followLinks ? depthSkipped : undefined,
             fetchErrors: useHttp ? fetchErrors : undefined,
             crawlTaskId: payload.crawlTaskId,
           } as Prisma.InputJsonValue,
@@ -555,7 +613,7 @@ export class IngestionService {
     url: string,
     fp: string,
     now: Date,
-    status: 'fetch_failed' | 'fetch_blocked',
+    status: 'fetch_failed' | 'fetch_blocked' | 'robots_disallowed',
   ): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
       const row = await tx.crawledUrl.upsert({
@@ -587,54 +645,6 @@ export class IngestionService {
       });
       await this.enqueueCrawledUrlEsOutbox(tx, row);
     });
-  }
-
-  async getCrawlOverview(): Promise<Record<string, unknown>> {
-    const [
-      sourceCount,
-      taskRunning,
-      taskFailed,
-      urlByStatus,
-      recentTasks,
-      schedulerEnabled,
-    ] = await Promise.all([
-      this.prisma.source.count(),
-      this.prisma.crawlTask.count({ where: { status: 'running' } }),
-      this.prisma.crawlTask.count({ where: { status: 'failed' } }),
-      this.prisma.crawledUrl.groupBy({
-        by: ['status'],
-        _count: { _all: true },
-      }),
-      this.prisma.crawlTask.findMany({
-        orderBy: { id: 'desc' },
-        take: 5,
-        select: { id: true, status: true, sourceId: true, createdAt: true },
-      }),
-      this.prisma.source.count({ where: { scheduleEnabled: true } }),
-    ]);
-
-    return {
-      sources: sourceCount,
-      scheduledSources: schedulerEnabled,
-      tasks: { running: taskRunning, failed: taskFailed },
-      urlsByStatus: Object.fromEntries(
-        urlByStatus.map((r) => [r.status, r._count._all]),
-      ),
-      recentTasks: recentTasks.map((t) => ({
-        id: t.id.toString(),
-        sourceId: t.sourceId.toString(),
-        status: t.status,
-        createdAt: t.createdAt.toISOString(),
-      })),
-      features: {
-        httpFetch: process.env.CRAWL_HTTP_FETCH === 'true',
-        playwright: process.env.CRAWL_USE_PLAYWRIGHT === 'true',
-        followLinks: crawlFollowLinksEnabled(),
-        semanticDedup: crawlSemanticDedupEnabled(),
-        crossSourceDedup: crawlSemanticDedupCrossSourceEnabled(),
-        domFeatures: process.env.CRAWL_DOM_FEATURES !== 'false',
-      },
-    };
   }
 
   private async ensureSource(id: bigint) {

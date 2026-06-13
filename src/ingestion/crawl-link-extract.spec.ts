@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { extractSameHostLinks } from './crawl-link-extract';
+import {
+  extractFollowLinks,
+  extractSameHostLinks,
+  resolveLinkAllowHosts,
+} from './crawl-link-extract';
 
 describe('extractSameHostLinks', () => {
   it('keeps same-host links and skips assets', () => {
@@ -19,5 +23,15 @@ describe('extractSameHostLinks', () => {
     expect(links).toContain('https://example.com/blog/post');
     expect(links.some((l) => l.includes('other.com'))).toBe(false);
     expect(links.some((l) => l.includes('style.css'))).toBe(false);
+  });
+});
+
+describe('extractFollowLinks', () => {
+  it('follows extra allow-listed hosts', () => {
+    const html = `<a href="https://cdn.example.net/page">CDN</a>`;
+    const allow = resolveLinkAllowHosts('https://example.com/', 'https://example.com/');
+    allow.add('cdn.example.net');
+    const links = extractFollowLinks(html, 'https://example.com/', allow, 5);
+    expect(links).toContain('https://cdn.example.net/page');
   });
 });

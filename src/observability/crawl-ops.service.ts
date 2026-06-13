@@ -1,10 +1,41 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  crawlLinkPolicyForOverview,
+  crawlRuntimeFeatures,
+  crawlWorkerRuntime,
+} from '../ingestion/crawl-runtime-features';
+import { resolveCrawlQueueName } from '../ingestion/crawl-queue-name';
 import type { CrawlOpsMetrics } from './outbox-lag.service';
+import { outboxLagThresholds } from './outbox-lag.config';
 
 @Injectable()
 export class CrawlOpsService {
   constructor(private readonly prisma: PrismaService) {}
+
+  async buildOverviewResponse(): Promise<Record<string, unknown>> {
+    const m = await this.collectMetrics();
+    return {
+      sources: m.overview.sources,
+      scheduledSources: m.overview.scheduledSources,
+      tasks: m.overview.tasksAll,
+      urlsByStatus: m.overview.urlsByStatus,
+      recentTasks: m.overview.recentTasks,
+      features: m.features,
+      linkPolicy: m.linkPolicy,
+      worker: m.worker,
+      scheduler: {
+        ...m.scheduler,
+        sla: m.schedulerSla,
+      },
+      scheduleRuns: m.scheduleRuns,
+      recentScheduleRuns: m.recentRuns,
+      prometheus: {
+        aligned: true,
+        note: '与 GET /admin/observability/prometheus 中 ranking_crawl_* 指标同源',
+      },
+    };
+  }
 
   async collectMetrics(): Promise<CrawlOpsMetrics> {
     const now = new Date();
@@ -12,15 +43,35 @@ export class CrawlOpsService {
     const since24h = new Date(now.getTime() - 86_400_000);
 
     const [
-      enabledSources,
+      sourceCount,
+      scheduledSources,
+      taskRunningAll,
+      taskFailedAll,
+      taskQueuedAll,
+      urlByStatus,
+      recentTasks,
       lastRun,
       runsByStatus,
-      activeQueued,
-      activeRunning,
+      activeQueued24h,
+      activeRunning24h,
       failed24h,
       recentRuns,
+      scheduledRegions,
     ] = await Promise.all([
+      this.prisma.source.count(),
       this.prisma.source.count({ where: { scheduleEnabled: true } }),
+      this.prisma.crawlTask.count({ where: { status: 'running' } }),
+      this.prisma.crawlTask.count({ where: { status: 'failed' } }),
+      this.prisma.crawlTask.count({ where: { status: 'queued' } }),
+      this.prisma.crawledUrl.groupBy({
+        by: ['status'],
+        _count: { _all: true },
+      }),
+      this.prisma.crawlTask.findMany({
+        orderBy: { id: 'desc' },
+        take: 5,
+        select: { id: true, status: true, sourceId: true, createdAt: true },
+      }),
       this.prisma.crawlScheduleRun.findFirst({
         orderBy: { scheduledAt: 'desc' },
         select: { scheduledAt: true },
@@ -50,6 +101,11 @@ export class CrawlOpsService {
           scheduledAt: true,
         },
       }),
+      this.prisma.source.findMany({
+        where: { scheduleEnabled: true, region: { not: null } },
+        distinct: ['region'],
+        select: { region: true },
+      }),
     ]);
 
     const statusMap = Object.fromEntries(
@@ -60,14 +116,30 @@ export class CrawlOpsService {
     const lastAgeSec = lastAt
       ? Math.floor((now.getTime() - lastAt.getTime()) / 1000)
       : null;
+    const staleMinutes = outboxLagThresholds().crawlSchedulerStaleMin;
+    const schedulerHealthy =
+      lastAgeSec == null ? scheduledSources === 0 : lastAgeSec <= staleMinutes * 60;
+
+    const urlsByStatus = Object.fromEntries(
+      urlByStatus.map((r) => [r.status, r._count._all]),
+    );
+
+    const workerRt = crawlWorkerRuntime();
+    const regions = scheduledRegions
+      .map((r) => r.region?.trim())
+      .filter((r): r is string => Boolean(r));
 
     return {
       scheduler: {
         enabled: process.env.CRAWL_SCHEDULER_DISABLED !== 'true',
         region: process.env.CRAWL_SCHEDULER_REGION?.trim() || null,
-        enabledSources,
+        enabledSources: scheduledSources,
         lastScheduleRunAt: lastAt?.toISOString() ?? null,
         lastScheduleRunAgeSec: lastAgeSec,
+      },
+      schedulerSla: {
+        staleAfterMinutes: staleMinutes,
+        healthy: schedulerHealthy,
       },
       scheduleRuns: {
         scheduled1h: statusMap.scheduled ?? 0,
@@ -75,9 +147,33 @@ export class CrawlOpsService {
         failed1h: statusMap.failed ?? 0,
       },
       crawlTasks: {
-        activeQueued,
-        activeRunning,
+        activeQueued: activeQueued24h,
+        activeRunning: activeRunning24h,
         failed24h,
+      },
+      overview: {
+        sources: sourceCount,
+        scheduledSources,
+        tasksAll: {
+          running: taskRunningAll,
+          failed: taskFailedAll,
+          queued: taskQueuedAll,
+        },
+        urlsByStatus,
+        recentTasks: recentTasks.map((t) => ({
+          id: t.id.toString(),
+          sourceId: t.sourceId.toString(),
+          status: t.status,
+          createdAt: t.createdAt.toISOString(),
+        })),
+      },
+      features: crawlRuntimeFeatures(),
+      linkPolicy: crawlLinkPolicyForOverview(),
+      worker: {
+        queueShard: workerRt.queueShard,
+        queueName: resolveCrawlQueueName(),
+        processRole: workerRt.processRole,
+        scheduledRegions: regions,
       },
       recentRuns: recentRuns.map((r) => ({
         id: r.id.toString(),

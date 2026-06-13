@@ -272,6 +272,10 @@ export type CrawlOpsMetrics = {
     lastScheduleRunAt: string | null;
     lastScheduleRunAgeSec: number | null;
   };
+  schedulerSla: {
+    staleAfterMinutes: number;
+    healthy: boolean;
+  };
   scheduleRuns: {
     scheduled1h: number;
     skipped1h: number;
@@ -281,6 +285,41 @@ export type CrawlOpsMetrics = {
     activeQueued: number;
     activeRunning: number;
     failed24h: number;
+  };
+  overview: {
+    sources: number;
+    scheduledSources: number;
+    tasksAll: { running: number; failed: number; queued: number };
+    urlsByStatus: Record<string, number>;
+    recentTasks: Array<{
+      id: string;
+      sourceId: string;
+      status: string;
+      createdAt: string;
+    }>;
+  };
+  features: {
+    httpFetch: boolean;
+    playwright: boolean;
+    followLinks: boolean;
+    semanticDedup: boolean;
+    crossSourceDedup: boolean;
+    domFeatures: boolean;
+    respectRobots: boolean;
+  };
+  linkPolicy: {
+    followLinks: boolean;
+    maxDepth: number;
+    maxUrlsPerTask: number;
+    respectRobots: boolean;
+    allowHosts: string[];
+    extractMaxPerPage: number;
+  };
+  worker: {
+    queueShard: string | null;
+    queueName: string;
+    processRole: string | null;
+    scheduledRegions: string[];
   };
   recentRuns: Array<{
     id: string;

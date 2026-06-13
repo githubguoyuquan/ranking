@@ -29,17 +29,22 @@ crawlWorker:
   # 区域队列 / 代理池（如 CRAWL_QUEUE_SHARD=ap-east）
   extraEnv: {}
 
-# 多区域 crawl 副本（每项生成独立 Deployment）
+# 多区域 crawl 副本（每项生成独立 Deployment + `CRAWL_QUEUE_SHARD=<name>`）
 crawlWorkerRegions: []
+# 示例（生产 uncomment 并按区域配置代理）：
+# crawlWorkerRegions:
+#   - name: eu-west
+#     replicaCount: 2
+#     extraEnv:
+#       CRAWL_HTTP_PROXY: http://proxy-eu:3128
+#   - name: ap-east
+#     replicaCount: 1
+#     extraEnv:
+#       CRAWL_HTTP_PROXY: http://proxy-ap:3128
 
 migrateJob:
   enabled: false
   backoffLimit: 2
-  # - name: eu-west
-  #   replicaCount: 2
-  #   extraEnv:
-  #     CRAWL_QUEUE_SHARD: eu-west
-  #     CRAWL_HTTP_PROXY: http://proxy-eu:3128
 
 web:
   enabled: false

@@ -1,6 +1,6 @@
 # DR 演练与 Failover Runbook
 
-本 runbook 配合 **`GET /admin/ops/dr/readiness`**、**`GET /admin/ops/k8s/probes`** 与 Helm 生产模板使用。
+本 runbook 配合 **`GET /admin/ops/dr/readiness`**、**`GET /admin/ops/k8s/probes`** 与 Helm 生产模板使用。OpenAPI：`docs/openapi/admin-ops.yaml`。
 
 ## 演练前检查
 

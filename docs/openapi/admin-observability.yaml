@@ -66,6 +66,36 @@ paths:
               schema:
                 type: string
 
+  /admin/observability/alerts/routing:
+    get:
+      tags: [Observability, Admin]
+      summary: 统一 Webhook 告警路由配置（URL 脱敏）
+      operationId: adminObservabilityAlertRouting
+      security:
+        - ApiKeyAuth: []
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlertRoutingConfig"
+
+  /admin/observability/alerts/runbook:
+    get:
+      tags: [Observability, Admin]
+      summary: 告警 code → 值班 triage 元数据
+      operationId: adminObservabilityAlertRunbook
+      security:
+        - ApiKeyAuth: []
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlertRunbookResponse"
+
 components:
   securitySchemes:
     ApiKeyAuth:
@@ -108,3 +138,59 @@ components:
           type: number
         threshold:
           type: number
+
+    AlertRoutingConfig:
+      type: object
+      properties:
+        disabled:
+          type: boolean
+        format:
+          type: string
+          enum: [json, slack]
+        cooldownSeconds:
+          type: integer
+        runbookBaseUrl:
+          type: string
+          nullable: true
+        routes:
+          type: object
+          properties:
+            default:
+              type: string
+              nullable: true
+            critical:
+              type: string
+              nullable: true
+            categories:
+              type: object
+              additionalProperties:
+                type: string
+            trendLegacyOverride:
+              type: string
+              nullable: true
+        bearerTokenConfigured:
+          type: boolean
+
+    AlertRunbookEntry:
+      type: object
+      properties:
+        category:
+          type: string
+          enum: [outbox, crawl, trends, ops]
+        title:
+          type: string
+        severityHint:
+          type: string
+          enum: [warn, critical, both]
+        triage:
+          type: array
+          items:
+            type: string
+
+    AlertRunbookResponse:
+      type: object
+      properties:
+        entries:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/AlertRunbookEntry"

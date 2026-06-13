@@ -290,7 +290,7 @@ Wire：**Envelope v1** + AJV（`src/kafka/schemas/`）；路由 **`src/kafka/eve
 
 ## 12. API 设计原则（面向愿景查询）
 
-建议在现有 REST 基础上扩展（**尚未全部存在**）。另：**`GET /admin/outbox`**（**已实现**；契约见 **`src/outbox/outbox-admin.controller.ts`**、**`docs/openapi/admin-outbox.yaml`**）、**`GET /admin/entities`**（**已实现**；**`docs/openapi/admin-entities.yaml`**）；OpenAPI 目录下 **多个 `.yaml`** 由 **`src/openapi/docs-openapi.spec.ts`**（**`npm test`**）做可解析性与 **`paths`** 断言。详情见 **`README`** Kafka/Outbox 与 OpenAPI 小节。
+建议在现有 REST 基础上扩展（**尚未全部存在**）。**OpenAPI 3 片段**（`docs/openapi/`）：`admin-outbox.yaml`、`admin-entities.yaml`、**`admin-ops.yaml`**、**`entity-metrics.yaml`**、**`trends.yaml`**、**`admin-observability.yaml`** 等；**`src/openapi/docs-openapi.spec.ts`**（**`npm test`**）做可解析性与关键 **`paths`** 断言。详情见 **`README`** Kafka/Outbox 与 OpenAPI 小节。
 
 - `GET /v1/entities/:id/rank-history?topicSlug=&timeWindow=&limit=` — **`RankingItemHistory` 时间序列** + 历史最好/最差名次 + 末端连续升降步数（**已实现**）
 - `GET /v1/topics/:slug/leaderboard?version=&timeWindow=&windowStart=&includeAiStats=` — **`{ resolved, snapshot }`**（**已实现**；**`resolved.hasScoreModel`**；嵌套 **`snapshot`** 与 **`GET /v1/snapshots/:id`** 同形）

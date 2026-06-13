@@ -189,7 +189,7 @@ npm run dev   # 默认 http://localhost:3001 — C 端 `/`，管理台 `/console
 - 边界说明：**`docs/kafka/CONSUMER_BOUNDARY.md`**；路由表 **`src/kafka/event-registry.ts`**。  
 - Payload builder 总表见 **`src/outbox/outbox-admin.controller.ts`** 类注释。  
 - **运维排查**：`GET /admin/outbox?limit=50&pendingOnly=true&type=...` 只读列出积压行（无鉴权，勿暴露公网）。**接口契约**见源码 **`src/outbox/outbox-admin.controller.ts`** 类注释；**OpenAPI 3 片段**：**`docs/openapi/admin-outbox.yaml`**（可导入 Swagger UI）。管理台 Outbox 页提供 **五种主要 `type` 快捷按钮**（含 ES 两行、Kafka 排行、CH、**`ranking.followup.requested`**）、**清空 type**、**limit/type 框 Enter 加载**、**新标签打开与当前筛选一致的查询 URL**、**复制该 GET URL**（**无可复制文本时复制按钮禁用**；**limit 非法或非正按 40、超过 200 按 200**，与接口校验上限一致；**type 框 maxLength 120**，与 DTO `@MaxLength` 一致）；表格在存在对应行时展示 **Kafka / CH / ES 实体 / ES 爬取 / followup** 等 **`payload` 摘要列**，原始 JSON 区对契约键名 **浅色高亮**。  
-- **OpenAPI 片段**：目录 **`docs/openapi/`**（另含 **`admin-entities.yaml`** → **`GET /admin/entities`**）；**`npm test`** 中 **`src/openapi/docs-openapi.spec.ts`** 会解析目录下全部 **`.yaml`** 并断言 **OpenAPI 3** 与 **`paths`** 非空。  
+- **OpenAPI 片段**：目录 **`docs/openapi/`** — `admin-observability.yaml`、`admin-ops.yaml`、`entity-metrics.yaml`、`trends.yaml`、`admin-outbox.yaml`、`admin-entities.yaml` 等；**`npm test`** 中 **`src/openapi/docs-openapi.spec.ts`** 解析全部 **`.yaml`** 并断言路径契约。  
 - `OUTBOX_FLUSH_MS`：发布轮询间隔（毫秒，默认 2000）
 
 ## Run locally

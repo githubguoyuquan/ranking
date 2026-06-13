@@ -10,7 +10,7 @@
 | GET | `/admin/observability/crawl` | 仅爬虫调度 |
 | GET | `/admin/bi/overview` | BI 大屏（内嵌 `observability`） |
 
-OpenAPI 片段：`docs/openapi/admin-observability.yaml`、`admin-bi.yaml`、`admin-crawl-scheduler.yaml`。
+OpenAPI 片段：`docs/openapi/admin-observability.yaml`、`admin-bi.yaml`、`admin-crawl-scheduler.yaml`、**`admin-ops.yaml`**、**`entity-metrics.yaml`**、**`trends.yaml`**。
 
 ## Outbox lag 指标
 

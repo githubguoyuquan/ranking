@@ -1,0 +1,290 @@
+openapi: 3.0.3
+info:
+  title: Ranking platform — Entity metrics & signal preview (fragment)
+  description: |
+    实体排行信号（`EntityMetric`）读取、运营写入与物化前覆盖率预览。
+    实现：`src/rankings/entity-metrics.controller.ts`。
+    `POST /admin/entities/:id/metrics` 需 **`admin` API Key**。
+  version: 0.1.0
+
+servers:
+  - url: http://localhost:3000
+
+tags:
+  - name: EntityMetrics
+  - name: Rankings
+  - name: Admin
+
+paths:
+  /v1/entities/{id}/metrics:
+    get:
+      tags: [EntityMetrics, Rankings]
+      summary: 读取实体排行信号观测
+      description: |
+        默认最近 50 条（`limit` 1–500）。`latestOnly=true` 时按 `metricKey` 取各键最新一条。
+      operationId: listEntityMetrics
+      parameters:
+        - $ref: "#/components/parameters/EntityId"
+        - name: metricKey
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 120
+        - name: since
+          in: query
+          required: false
+          description: ISO 8601；仅返回 observedAt >= since
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 50
+        - name: latestOnly
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EntityMetricsListResponse"
+        "400":
+          description: 非法 entity id
+        "404":
+          description: entity not found
+
+  /admin/entities/{id}/metrics:
+    post:
+      tags: [EntityMetrics, Admin]
+      summary: 批量写入 EntityMetric（外部管道 / 运营补数）
+      operationId: ingestEntityMetrics
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/EntityId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IngestEntityMetricsRequest"
+      responses:
+        "200":
+          description: 写入成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestEntityMetricsResponse"
+        "400":
+          description: 校验失败
+        "404":
+          description: entity not found
+
+  /v1/topic-versions/{topicVersionId}/signal-preview:
+    get:
+      tags: [EntityMetrics, Rankings]
+      summary: 物化前预览 TopicVersion 下各实体信号覆盖率
+      description: |
+        按 TopicKind 策略计算 `requiredSignalKeys`、`minCoverageToRank` 与每实体 `rankEligible`。
+      operationId: topicVersionSignalPreview
+      parameters:
+        - $ref: "#/components/parameters/TopicVersionId"
+        - name: asOf
+          in: query
+          required: false
+          description: 信号截断时间（默认 now）
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignalPreviewResponse"
+        "400":
+          description: 非法 topicVersionId
+        "404":
+          description: topicVersion not found
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  parameters:
+    EntityId:
+      name: id
+      in: path
+      required: true
+      description: 十进制 Entity id
+      schema:
+        type: string
+        pattern: "^[0-9]+$"
+    TopicVersionId:
+      name: topicVersionId
+      in: path
+      required: true
+      description: 十进制 TopicVersion id
+      schema:
+        type: string
+        pattern: "^[0-9]+$"
+
+  schemas:
+    EntityMetricRow:
+      type: object
+      properties:
+        id:
+          type: string
+        entityId:
+          type: string
+        metricKey:
+          type: string
+        value:
+          type: number
+        unit:
+          type: string
+          nullable: true
+        sourceTier:
+          type: integer
+          minimum: 1
+          maximum: 5
+        observedAt:
+          type: string
+          format: date-time
+
+    EntityMetricsListResponse:
+      type: object
+      required: [entityId, count, metrics]
+      properties:
+        entityId:
+          type: string
+        latestOnly:
+          type: boolean
+        count:
+          type: integer
+        metrics:
+          type: array
+          items:
+            $ref: "#/components/schemas/EntityMetricRow"
+
+    EntityMetricIngestRow:
+      type: object
+      required: [metricKey, value, observedAt]
+      properties:
+        metricKey:
+          type: string
+          minLength: 1
+          maxLength: 120
+        value:
+          type: number
+        observedAt:
+          type: string
+          format: date-time
+        unit:
+          type: string
+          maxLength: 64
+        sourceTier:
+          type: integer
+          minimum: 1
+          maximum: 5
+          default: 3
+
+    IngestEntityMetricsRequest:
+      type: object
+      required: [metrics]
+      properties:
+        metrics:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            $ref: "#/components/schemas/EntityMetricIngestRow"
+        topicId:
+          type: string
+          description: 可选；ClickHouse 写入时使用的 topic_id（缺省 0）
+
+    IngestEntityMetricsResponse:
+      type: object
+      required: [entityId, ingested, metrics]
+      properties:
+        entityId:
+          type: string
+        ingested:
+          type: integer
+        metrics:
+          type: array
+          items:
+            $ref: "#/components/schemas/EntityMetricRow"
+
+    SignalPreviewEntity:
+      type: object
+      properties:
+        entityId:
+          type: string
+        canonicalName:
+          type: string
+          nullable: true
+        presentKeys:
+          type: array
+          items:
+            type: string
+        missingKeys:
+          type: array
+          items:
+            type: string
+        coverage:
+          type: number
+        hasRequiredSignals:
+          type: boolean
+        rankEligible:
+          type: boolean
+        latestSignals:
+          type: array
+          items:
+            type: object
+
+    SignalPreviewResponse:
+      type: object
+      properties:
+        topicVersionId:
+          type: string
+        topicId:
+          type: string
+        topicSlug:
+          type: string
+        asOf:
+          type: string
+          format: date-time
+        kindStrategy:
+          type: object
+        entityCount:
+          type: integer
+        eligibleCount:
+          type: integer
+        excludedByMissingSignals:
+          type: integer
+        requiredSignalKeys:
+          type: array
+          items:
+            type: string
+        minCoverageToRank:
+          type: number
+        entities:
+          type: array
+          items:
+            $ref: "#/components/schemas/SignalPreviewEntity"

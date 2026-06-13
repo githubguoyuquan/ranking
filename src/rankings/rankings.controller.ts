@@ -395,13 +395,13 @@ export class RankingsController {
     }
   }
 
-  /** 近期快照级 TrendAnalysis 涨榜聚合（演示用只读） */
+  /** 近期快照级 TrendAnalysis 涨榜聚合。OpenAPI：`docs/openapi/trends.yaml` */
   @Get('v1/trends/hot')
   async trendsHot(@Query() query: TrendsHotQueryDto) {
     return await this.rankings.listHotTrends(query.timeWindow, query.limit);
   }
 
-  /** 扫描近期快照趋势异常（名次跳变 / SURGE 簇 / 连续升降 streak） */
+  /** 扫描近期快照趋势异常。OpenAPI：`docs/openapi/trends.yaml` */
   @Get('v1/trends/anomalies')
   async trendsAnomalies(@Query() query: TrendsAnomaliesQueryDto) {
     return this.trendAnomaly.listAnomaliesForApi({
@@ -411,7 +411,7 @@ export class RankingsController {
     });
   }
 
-  /** 趋势异常告警摘要（含阈值配置；运维） */
+  /** 趋势异常告警摘要。OpenAPI：`docs/openapi/trends.yaml` */
   @Get('admin/trends/alerts')
   @RequireScopes('admin')
   async trendsAlerts(@Query() query: TrendsAnomaliesQueryDto) {

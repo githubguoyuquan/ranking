@@ -3,6 +3,10 @@ import { RequireScopes } from '../compliance/api-key.guard';
 import { toPlainJson } from '../lib/json';
 import { DrReadinessService } from './dr-readiness.service';
 
+/**
+ * DR / K8s 运维 API。
+ * OpenAPI：`docs/openapi/admin-ops.yaml`
+ */
 @Controller('admin/ops')
 @RequireScopes('admin')
 export class OpsAdminController {

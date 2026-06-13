@@ -8,7 +8,7 @@ import { ObservabilityService } from './observability.service';
 import { OutboxLagService } from './outbox-lag.service';
 
 /**
- * 生产可观测：Outbox lag、爬虫调度、Prometheus 抓取。
+ * 生产可观测：Outbox lag、爬虫调度、Prometheus 抓取、告警路由。
  * OpenAPI：`docs/openapi/admin-observability.yaml`
  */
 @Controller('admin/observability')

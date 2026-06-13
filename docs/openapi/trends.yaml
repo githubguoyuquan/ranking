@@ -1,0 +1,234 @@
+openapi: 3.0.3
+info:
+  title: Ranking platform — Trends & anomalies (fragment)
+  description: |
+    热榜聚合、趋势异常扫描与运维告警摘要。实现：`src/rankings/rankings.controller.ts`。
+    `GET /admin/trends/alerts` 需 **`admin` API Key**。
+    Runbook：`docs/ops/ALERT_ONCALL_RUNBOOK.md`。
+  version: 0.1.0
+
+servers:
+  - url: http://localhost:3000
+
+tags:
+  - name: Trends
+  - name: Admin
+
+paths:
+  /v1/trends/hot:
+    get:
+      tags: [Trends]
+      summary: 近期快照级 TrendAnalysis 涨榜聚合
+      operationId: trendsHot
+      parameters:
+        - $ref: "#/components/parameters/TimeWindow"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /v1/trends/anomalies:
+    get:
+      tags: [Trends]
+      summary: 扫描近期快照趋势异常
+      description: |
+        检测名次跳变、SURGE/VOLATILE 簇、涨跌失衡、连续升降 streak 等。
+        默认扫描近 48h TrendAnalysis；`limit` 截断返回条数（1–200）。
+      operationId: trendsAnomalies
+      parameters:
+        - $ref: "#/components/parameters/TimeWindow"
+        - name: hours
+          in: query
+          required: false
+          description: 扫描窗口（小时，1–168；默认 48）
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 168
+            default: 48
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrendAnomaliesResponse"
+
+  /admin/trends/alerts:
+    get:
+      tags: [Trends, Admin]
+      summary: 趋势异常告警摘要（含完整阈值配置）
+      operationId: adminTrendsAlerts
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TimeWindow"
+        - name: hours
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 168
+            default: 48
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrendAnomalyScanResponse"
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  parameters:
+    TimeWindow:
+      name: timeWindow
+      in: query
+      required: false
+      schema:
+        $ref: "#/components/schemas/TimeWindow"
+
+  schemas:
+    TimeWindow:
+      type: string
+      enum: [REALTIME, DAY, WEEK, MONTH, YEAR, CUSTOM]
+
+    TrendAlertSeverity:
+      type: string
+      enum: [warn, critical]
+
+    TrendAnomalyItem:
+      type: object
+      required: [code, severity, topicId, message, detectedAt]
+      properties:
+        code:
+          type: string
+          enum:
+            - entity_rank_surge
+            - entity_rank_plunge
+            - snapshot_surge_cluster
+            - snapshot_volatile_cluster
+            - snapshot_momentum_imbalance
+            - entity_streak_improving
+            - entity_streak_declining
+        severity:
+          $ref: "#/components/schemas/TrendAlertSeverity"
+        topicId:
+          type: string
+        topicSlug:
+          type: string
+        snapshotId:
+          type: string
+        entityId:
+          type: string
+        entityName:
+          type: string
+        message:
+          type: string
+        value:
+          type: number
+        threshold:
+          type: number
+        detectedAt:
+          type: string
+          format: date-time
+        runbookAnchor:
+          type: string
+          description: 对应 ALERT_ONCALL_RUNBOOK 锚点
+
+    TrendAnomalyThresholds:
+      type: object
+      properties:
+        minRankChangeWarn:
+          type: integer
+        minRankChangeCritical:
+          type: integer
+        surgeCountWarn:
+          type: integer
+        volatileShareWarn:
+          type: number
+        momentumImbalanceRatio:
+          type: number
+        streakStepsWarn:
+          type: integer
+
+    TrendAnomaliesResponse:
+      type: object
+      required: [filter, status, count, anomalies, generatedAt]
+      properties:
+        filter:
+          type: object
+          properties:
+            hours:
+              type: integer
+            timeWindow:
+              nullable: true
+              allOf:
+                - $ref: "#/components/schemas/TimeWindow"
+            limit:
+              type: integer
+        status:
+          type: string
+          enum: [ok, warn, critical]
+        scannedAnalyses:
+          type: integer
+        scannedStreakEntities:
+          type: integer
+        count:
+          type: integer
+        anomalies:
+          type: array
+          items:
+            $ref: "#/components/schemas/TrendAnomalyItem"
+        thresholds:
+          $ref: "#/components/schemas/TrendAnomalyThresholds"
+        generatedAt:
+          type: string
+          format: date-time
+
+    TrendAnomalyScanResponse:
+      allOf:
+        - $ref: "#/components/schemas/TrendAnomaliesResponse"
+        - type: object
+          properties:
+            filter:
+              type: object
+              properties:
+                hours:
+                  type: integer
+                timeWindow:
+                  nullable: true
+                  allOf:
+                    - $ref: "#/components/schemas/TimeWindow"

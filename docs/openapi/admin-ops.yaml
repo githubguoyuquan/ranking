@@ -1,0 +1,197 @@
+openapi: 3.0.3
+info:
+  title: Ranking platform — Admin Ops / DR (fragment)
+  description: |
+    DR 就绪、K8s 探针聚合、Outbox Kafka 重放计划。实现：`src/ops/ops-admin.controller.ts`。
+    需 **`admin` API Key**（`@RequireScopes('admin')`）。
+    Runbook：`docs/ops/DR_RUNBOOK.md`。
+  version: 0.1.0
+
+servers:
+  - url: http://localhost:3000
+
+tags:
+  - name: Ops
+  - name: Admin
+
+paths:
+  /admin/ops/dr/readiness:
+    get:
+      tags: [Ops, Admin]
+      summary: DR 演练 / failover 前检查清单
+      description: |
+        聚合 Postgres（主/读副本）、Redis、Kafka、ClickHouse、Elasticsearch、Qdrant、
+        Outbox lag、爬虫调度 SLA、checkpoint 等检查项。
+      operationId: adminOpsDrReadiness
+      security:
+        - ApiKeyAuth: []
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DrReadinessResponse"
+
+  /admin/ops/k8s/probes:
+    get:
+      tags: [Ops, Admin]
+      summary: K8s 探针聚合（live / ready / db / redis / kafka）
+      operationId: adminOpsK8sProbes
+      security:
+        - ApiKeyAuth: []
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/K8sProbeSummary"
+
+  /admin/ops/dr/outbox-replay-plan:
+    get:
+      tags: [Ops, Admin]
+      summary: Outbox Kafka 重放计划（只读统计）
+      operationId: adminOpsOutboxReplayPlan
+      security:
+        - ApiKeyAuth: []
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OutboxReplayPlan"
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  schemas:
+    DrCheckSeverity:
+      type: string
+      enum: [ok, warn, critical]
+
+    DrCheckItem:
+      type: object
+      required: [code, severity, message]
+      properties:
+        code:
+          type: string
+          example: postgres_primary
+        severity:
+          $ref: "#/components/schemas/DrCheckSeverity"
+        message:
+          type: string
+        value:
+          oneOf:
+            - type: number
+            - type: string
+            - type: boolean
+        hint:
+          type: string
+
+    DrReadinessResponse:
+      type: object
+      required: [status, generatedAt, processRole, deployment, checks, outbox, crawl]
+      properties:
+        status:
+          $ref: "#/components/schemas/DrCheckSeverity"
+        generatedAt:
+          type: string
+          format: date-time
+        processRole:
+          type: string
+          example: worker
+        deployment:
+          type: object
+          properties:
+            region:
+              type: string
+              nullable: true
+            cluster:
+              type: string
+              nullable: true
+            k8sNamespace:
+              type: string
+              nullable: true
+        checks:
+          type: array
+          items:
+            $ref: "#/components/schemas/DrCheckItem"
+        outbox:
+          type: object
+          description: Outbox lag 指标（flusher / kafka 双轨）
+        crawl:
+          type: object
+          properties:
+            scheduler:
+              type: object
+            schedulerSla:
+              type: object
+
+    K8sProbeSummary:
+      type: object
+      required: [ok, probes, processRole, recommended]
+      properties:
+        ok:
+          type: boolean
+        probes:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              ok:
+                type: boolean
+              detail:
+                type: string
+        processRole:
+          type: string
+        recommended:
+          type: object
+          properties:
+            readinessPath:
+              type: string
+              example: /health/ready
+            livenessPath:
+              type: string
+              example: /health
+            startupPath:
+              type: string
+              example: /health/ready
+
+    OutboxReplayPlan:
+      type: object
+      required:
+        - kafkaTypes
+        - pendingKafkaTotal
+        - pendingFlusherTotal
+        - byKafkaType
+        - oldestKafkaPendingAgeSec
+        - hint
+      properties:
+        kafkaTypes:
+          type: array
+          items:
+            type: string
+        pendingKafkaTotal:
+          type: integer
+        pendingFlusherTotal:
+          type: integer
+        byKafkaType:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+              count:
+                type: integer
+        oldestKafkaPendingAgeSec:
+          type: integer
+          nullable: true
+        hint:
+          type: string

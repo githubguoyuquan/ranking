@@ -16,6 +16,8 @@ npm run dr:readiness
 |-----|------|
 | `GET /admin/observability/summary` | Outbox + 爬虫 + `alerts[]` |
 | `GET /admin/trends/alerts` | 趋势异常扫描 |
+
+OpenAPI：`docs/openapi/trends.yaml`、`admin-observability.yaml`。
 | `GET /admin/observability/alerts/routing` | Webhook 路由（URL 脱敏） |
 | `GET /admin/observability/alerts/runbook` | 告警代码 triage JSON |
 | `GET /admin/bi/overview` | BI 大屏（`observability` + `trends`） |

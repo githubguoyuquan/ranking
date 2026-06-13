@@ -113,6 +113,7 @@ export class SignalPreviewQueryDto {
   asOf?: string;
 }
 
+/** EntityMetric 读取/写入与物化前信号预览。OpenAPI：`docs/openapi/entity-metrics.yaml` */
 @Controller()
 export class EntityMetricsController {
   constructor(private readonly entityMetrics: EntityMetricsService) {}

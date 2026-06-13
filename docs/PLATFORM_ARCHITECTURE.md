@@ -15,7 +15,7 @@
 | 单条目排名演化 | previousRank、rankChange、趋势 | `RankingItem`：`previousRank`、`rankChange`、`TrendType`、多维度 score | 快照内已满足；**历史极值与末端连续升降步数**在 `GET /v1/entities/:id/rank-history` 的 `summary` 中计算；**按实体物化统计表**见 §5.1（未建） |
 | 历史时间线 | `RankingItemHistory` + 分析 | `RankingItemHistory` + **`GET /v1/entities/:id/rank-history`**；话题侧 **`GET /v1/topics/:slug/snapshots`** / **`trend-analyses`** | 缺 **CH↔PG 运营报表**、§13 曲线可视化与实时推送 |
 | 时间衰减 / 权重 | 指数/分段/可配置 | `scoring.ts` + **`EntityMetric` 全链路**：`POST /admin/entities/:id/metrics` 写入 → 物化 `scoreEntity`；可选 CH `metric_timeseries`（`SYNC_RANKING_TO_CLICKHOUSE`） | 自动从抓取页抽取结构化信号仍待接 |
-| 趋势分析 | 环比/同比/MA/异常 | 物化成功写入**快照级** `TrendAnalysis`（`entityId` 空）+ **`GET /v1/topics/:slug/trend-analyses`**；`scoring` 含 EWMA/斜率/波动分类 | 缺**独立周期作业**（回填/同比）、**异常阈值**与告警配置 |
+| 趋势分析 | 环比/同比/MA/异常 | 物化写入 `TrendAnalysis` + **`GET /v1/topics/:slug/trend-analyses`**；**`GET /v1/trends/anomalies`** 异常扫描 + **`TrendAnomalyAlertCronService`** Webhook；BI `trends.alerts` | 同比回填、可配置告警路由生产化 |
 | 抓取：增量、断点、去重 | checkpoint、fingerprint | `CrawlCheckpoint`、`CrawledUrl`；**全球调度** `CrawlSchedulerService` + `CrawlScheduleRun` + 管理台 `/crawl` | 多区域 K8s 生产落地、调度 SLA 与配额 |
 | 向量语义 / 亿级 ES | Qdrant/Milvus + ES | **Qdrant 主检索**（`SEARCH_PRIMARY`）+ ES **ILM/rollover** + 规模验证 API | 跨集群 DR、crawl 语义 ANN 全量 |
 | Kafka 事件网 | 全链路事件 | **6 类外发 Kafka** + 1 类仅登记；**本仓库无 Consumer**；双轨 `publishedAt` / `kafkaPublishedAt` | 外部消费方按 `docs/kafka/CONSUMER_BOUNDARY.md` 订阅 |

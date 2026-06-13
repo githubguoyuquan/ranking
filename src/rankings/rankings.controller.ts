@@ -30,8 +30,10 @@ import {
   MinLength,
 } from 'class-validator';
 import { TimeWindow, TopicKind } from '@prisma/client';
+import { RequireScopes } from '../compliance/api-key.guard';
 import { toPlainJson } from '../lib/json';
 import { RankingsService } from './rankings.service';
+import { TrendAnomalyService } from './trend-anomaly.service';
 
 export class RunRankingDto {
   @IsString()
@@ -180,9 +182,32 @@ export class TrendsHotQueryDto {
   limit?: number;
 }
 
+export class TrendsAnomaliesQueryDto {
+  @IsOptional()
+  @IsEnum(TimeWindow)
+  timeWindow?: TimeWindow;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(168)
+  hours?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(200)
+  limit?: number;
+}
+
 @Controller()
 export class RankingsController {
-  constructor(private readonly rankings: RankingsService) {}
+  constructor(
+    private readonly rankings: RankingsService,
+    private readonly trendAnomaly: TrendAnomalyService,
+  ) {}
 
   @Post('admin/seed-demo')
   async seedDemo(@Body() body: SeedDemoDto) {
@@ -374,6 +399,33 @@ export class RankingsController {
   @Get('v1/trends/hot')
   async trendsHot(@Query() query: TrendsHotQueryDto) {
     return await this.rankings.listHotTrends(query.timeWindow, query.limit);
+  }
+
+  /** 扫描近期快照趋势异常（名次跳变 / SURGE 簇 / 连续升降 streak） */
+  @Get('v1/trends/anomalies')
+  async trendsAnomalies(@Query() query: TrendsAnomaliesQueryDto) {
+    return this.trendAnomaly.listAnomaliesForApi({
+      hours: query.hours,
+      timeWindow: query.timeWindow,
+      limit: query.limit,
+    });
+  }
+
+  /** 趋势异常告警摘要（含阈值配置；运维） */
+  @Get('admin/trends/alerts')
+  @RequireScopes('admin')
+  async trendsAlerts(@Query() query: TrendsAnomaliesQueryDto) {
+    const scan = await this.trendAnomaly.scanRecentAnomalies({
+      hours: query.hours ?? 48,
+      timeWindow: query.timeWindow,
+    });
+    return toPlainJson({
+      ...scan,
+      filter: {
+        hours: query.hours ?? 48,
+        timeWindow: query.timeWindow ?? null,
+      },
+    });
   }
 
   /** 近期 `TrendAnalysis`（默认仅快照级摘要 `entityId` 为空） */

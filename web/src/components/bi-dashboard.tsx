@@ -441,6 +441,21 @@ export function BiDashboard() {
           </div>
         ) : null}
 
+        {data?.trends?.alerts?.length ? (
+          <div className="space-y-2 rounded-lg border border-orange-500/40 bg-orange-500/10 px-3 py-2">
+            <p className="text-xs font-semibold uppercase tracking-wider text-orange-200/90">
+              趋势异常 · {data.trends.status} · 扫描 {data.trends.scannedAnalyses} 条分析
+            </p>
+            <ul className="space-y-1 text-sm text-orange-50/90">
+              {data.trends.alerts.map((a) => (
+                <li key={`${a.code}-${a.entityId ?? a.topicId ?? a.message}`} className="font-mono text-xs">
+                  [{a.severity}] {a.message}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
         {data ? (
           <>
             <div className="flex flex-wrap gap-2">

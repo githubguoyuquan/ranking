@@ -100,6 +100,12 @@ export function nestV1TrendsHotPath(query?: URLSearchParams): string {
   return qs ? `${base}?${qs}` : base;
 }
 
+export function nestV1TrendsAnomaliesPath(query?: URLSearchParams): string {
+  const base = `${V1}/trends/anomalies`;
+  const qs = query?.toString() ?? "";
+  return qs ? `${base}?${qs}` : base;
+}
+
 export function nestV1CrawlSourcePath(sourceId: string): string {
   return `${V1}/crawl/sources/${encodeURIComponent(sourceId)}`;
 }
@@ -175,6 +181,8 @@ export const NEST_V1_DOC = {
   topicsSnapshots: "/v1/topics/:slug/snapshots",
   topicVersionPolicy: "/v1/topic-versions/:id/policy",
   trendsHot: "/v1/trends/hot",
+  trendsAnomalies: "/v1/trends/anomalies",
+  trendsAlertsAdmin: "/admin/trends/alerts",
   entityRankHistory: "/v1/entities/:id/rank-history",
   entityMetrics: "/v1/entities/:id/metrics",
   topicVersionSignalPreview: "/v1/topic-versions/:id/signal-preview",

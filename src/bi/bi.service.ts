@@ -11,6 +11,7 @@ import { ElasticService } from '../search/elastic.service';
 import { QdrantSearchService } from '../search/qdrant-search.service';
 import { resolveSearchPrimary } from '../search/search-primary';
 import { ObservabilityService } from '../observability/observability.service';
+import { TrendAnomalyService } from '../rankings/trend-anomaly.service';
 
 @Injectable()
 export class BiService {
@@ -24,6 +25,7 @@ export class BiService {
     private readonly elastic: ElasticService,
     private readonly qdrant: QdrantSearchService,
     private readonly observability: ObservabilityService,
+    private readonly trendAnomaly: TrendAnomalyService,
   ) {}
 
   async getTopicTimeseries(days: number) {
@@ -210,6 +212,7 @@ export class BiService {
 
     const primarySearch = resolveSearchPrimary(this.qdrant, this.elastic);
     const opsSummary = (await this.observability.getSummary()) as Record<string, unknown>;
+    const trendScan = await this.trendAnomaly.scanRecentAnomalies({ hours: 48 });
 
     const topicIds = [...new Set(chTopicTrend.map((r) => r.topic_id))];
     const topicMeta =
@@ -248,6 +251,13 @@ export class BiService {
         alerts: opsSummary.alerts,
         outbox: opsSummary.outbox,
         crawl: opsSummary.crawl,
+      },
+      trends: {
+        status: trendScan.status,
+        alerts: trendScan.anomalies.slice(0, 20),
+        anomalyCount: trendScan.anomalies.length,
+        scannedAnalyses: trendScan.scannedAnalyses,
+        thresholds: trendScan.thresholds,
       },
       crawlGlobal: {
         ...(opsSummary.crawl as object),

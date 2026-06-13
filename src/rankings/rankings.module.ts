@@ -15,6 +15,8 @@ import { RankingsController } from './rankings.controller';
 import { RankingsService } from './rankings.service';
 import { EntityMetricsController } from './entity-metrics.controller';
 import { EntityMetricsService } from './entity-metrics.service';
+import { TrendAnomalyAlertCronService } from './trend-anomaly-alert-cron.service';
+import { TrendAnomalyService } from './trend-anomaly.service';
 
 @Module({
   imports: [
@@ -34,10 +36,16 @@ import { EntityMetricsService } from './entity-metrics.service';
   providers: [
     RankingsService,
     EntityMetricsService,
+    TrendAnomalyService,
     ...(runsRankingWorkers()
-      ? [RankingProcessor, RankingFollowupProcessor, TrendAnalysisSchedulerService]
+      ? [
+          RankingProcessor,
+          RankingFollowupProcessor,
+          TrendAnalysisSchedulerService,
+          TrendAnomalyAlertCronService,
+        ]
       : []),
   ],
-  exports: [RankingsService, EntityMetricsService],
+  exports: [RankingsService, EntityMetricsService, TrendAnomalyService],
 })
 export class RankingsModule {}

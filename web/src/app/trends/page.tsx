@@ -19,7 +19,7 @@ import {
 } from "@/lib/admin-web-paths";
 import { useAdminAppUrl } from "@/hooks/use-admin-app-url";
 import { NEST_V1_DOC } from "@/lib/nest-api-paths";
-import { nestTrendsHotUrl } from "@/lib/nest-api-urls";
+import { nestTrendsAnomaliesUrl, nestTrendsHotUrl } from "@/lib/nest-api-urls";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
@@ -30,6 +30,14 @@ type HotItem = {
   totalRankGain: number;
   mentions: number;
   topicSlugs: string[];
+};
+
+type AnomalyItem = {
+  code: string;
+  severity: "warn" | "critical";
+  message: string;
+  topicSlug?: string;
+  entityName?: string;
 };
 
 function TrendsPageInner() {
@@ -44,6 +52,9 @@ function TrendsPageInner() {
   const [err, setErr] = useState("");
   const [items, setItems] = useState<HotItem[]>([]);
   const [sourceNote, setSourceNote] = useState("");
+  const [anomalies, setAnomalies] = useState<AnomalyItem[]>([]);
+  const [anomalyStatus, setAnomalyStatus] = useState("");
+  const [anomalyErr, setAnomalyErr] = useState("");
 
   const apiUrl = useMemo(() => {
     const q = new URLSearchParams();
@@ -97,6 +108,34 @@ function TrendsPageInner() {
         if (!cancelled) setLoading(false);
       }
     })();
+    (async () => {
+      try {
+        const q = new URLSearchParams({ hours: "48", limit: "20" });
+        if (tw) q.set("timeWindow", tw);
+        const res = await fetch(nestTrendsAnomaliesUrl(q), { cache: "no-store" });
+        const text = await res.text();
+        if (cancelled) return;
+        if (!res.ok) {
+          setAnomalyErr(`HTTP ${res.status}\n${text}`);
+          setAnomalies([]);
+          setAnomalyStatus("");
+          return;
+        }
+        const j = JSON.parse(text) as {
+          status?: string;
+          anomalies?: AnomalyItem[];
+        };
+        setAnomalyStatus(j.status ?? "");
+        setAnomalies(Array.isArray(j.anomalies) ? j.anomalies : []);
+        setAnomalyErr("");
+      } catch (e) {
+        if (!cancelled) {
+          setAnomalyErr(e instanceof Error ? e.message : String(e));
+          setAnomalies([]);
+          setAnomalyStatus("");
+        }
+      }
+    })();
     return () => {
       cancelled = true;
     };
@@ -119,7 +158,9 @@ function TrendsPageInner() {
         <p className="mt-1 text-sm text-muted-foreground">
           <code className="rounded bg-muted px-1">GET {NEST_V1_DOC.trendsHot}</code>
           — 自近期快照级 <code className="text-xs">TrendAnalysis</code> 的{" "}
-          <code className="text-xs">topRankGainers</code> 聚合涨名次
+          <code className="text-xs">topRankGainers</code> 聚合涨名次 ·{" "}
+          <code className="rounded bg-muted px-1">GET {NEST_V1_DOC.trendsAnomalies}</code>{" "}
+          趋势异常扫描
         </p>
       </div>
 
@@ -186,6 +227,43 @@ function TrendsPageInner() {
       {sourceNote ? (
         <p className="text-xs text-muted-foreground">{sourceNote}</p>
       ) : null}
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">趋势异常告警</CardTitle>
+          <CardDescription>
+            近 48h 快照摘要 + 连续升降 streak；状态{" "}
+            <span className="font-mono">{anomalyStatus || "—"}</span>
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {anomalyErr ? (
+            <pre className="text-xs whitespace-pre-wrap text-destructive">{anomalyErr}</pre>
+          ) : anomalies.length === 0 ? (
+            <p className="text-sm text-muted-foreground">暂无异常（或尚未物化快照）。</p>
+          ) : (
+            <ul className="space-y-2 text-sm">
+              {anomalies.map((a, i) => (
+                <li key={`${a.code}-${i}`} className="rounded border border-border px-2 py-1.5">
+                  <span
+                    className={
+                      a.severity === "critical"
+                        ? "font-medium text-destructive"
+                        : "font-medium text-amber-700 dark:text-amber-400"
+                    }
+                  >
+                    [{a.severity}]
+                  </span>{" "}
+                  {a.message}
+                  {a.topicSlug ? (
+                    <span className="ml-2 text-xs text-muted-foreground">@{a.topicSlug}</span>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
 
       {err ? (
         <pre className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs whitespace-pre-wrap">

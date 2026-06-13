@@ -6,6 +6,19 @@ export type OpsAlert = {
   threshold?: number;
 };
 
+export type TrendAlert = {
+  code: string;
+  severity: "warn" | "critical";
+  message: string;
+  topicId?: string;
+  topicSlug?: string;
+  entityId?: string;
+  entityName?: string;
+  value?: number;
+  threshold?: number;
+  detectedAt?: string;
+};
+
 export type BiOverview = {
   generatedAt: string;
   observability?: {
@@ -13,6 +26,13 @@ export type BiOverview = {
     alerts: OpsAlert[];
     outbox?: unknown;
     crawl?: unknown;
+  };
+  trends?: {
+    status: "ok" | "warn" | "critical";
+    alerts: TrendAlert[];
+    anomalyCount: number;
+    scannedAnalyses: number;
+    thresholds?: Record<string, number>;
   };
   kpis: {
     topics: number;

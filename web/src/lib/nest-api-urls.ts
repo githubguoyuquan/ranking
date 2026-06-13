@@ -13,6 +13,7 @@ import {
   nestV1TopicVersionSignalPreviewPath,
   nestV1TopicVersionPolicyPath,
   nestV1TrendsHotPath,
+  nestV1TrendsAnomaliesPath,
   nestV1RankingJobPath,
   nestV1RankingStatusPath,
   nestV1SnapshotAnalysesPath,
@@ -142,6 +143,10 @@ export function nestTopicVersionPolicyUrl(topicVersionId: string): string {
 
 export function nestTrendsHotUrl(query?: URLSearchParams): string {
   return nestAbs(nestV1TrendsHotPath(query));
+}
+
+export function nestTrendsAnomaliesUrl(query?: URLSearchParams): string {
+  return nestAbs(nestV1TrendsAnomaliesPath(query));
 }
 
 export function nestCrawlSourcesListUrl(limit: number): string {

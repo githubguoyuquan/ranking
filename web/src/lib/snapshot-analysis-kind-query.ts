@@ -1,4 +1,13 @@
-const ALLOWED = new Set(["followup", "trend", "credibility", "default"]);
+const ALLOWED = new Set([
+  "followup",
+  "trend",
+  "credibility",
+  "factcheck",
+  "trend_analysis",
+  "timeseries",
+  "ranking",
+  "default",
+]);
 
 /** 与 `GET /v1/snapshots/:id/analyses?agentKind=` 对应；管理台 query 用 `analysisKind` */
 export type SnapshotPageAnalysisKind =
@@ -6,6 +15,10 @@ export type SnapshotPageAnalysisKind =
   | "followup"
   | "trend"
   | "credibility"
+  | "factcheck"
+  | "trend_analysis"
+  | "timeseries"
+  | "ranking"
   | "default";
 
 export function parseSnapshotPageAnalysisKind(

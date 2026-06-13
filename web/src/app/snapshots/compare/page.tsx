@@ -29,6 +29,8 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 
+import { compareSnapshotBriefKinds } from "@/lib/snapshot-ai-brief-stats";
+
 function snapshotIdsFromInput(input: string): string[] {
   return input.split(",").map((s) => s.trim()).filter(Boolean);
 }
@@ -45,6 +47,10 @@ type CompareResponse = {
     hasFollowupBrief?: boolean;
     hasTrendBrief?: boolean;
     hasCredibilityBrief?: boolean;
+    hasFactCheckBrief?: boolean;
+    hasTrendAnalysisBrief?: boolean;
+    hasTimeSeriesBrief?: boolean;
+    hasRankingBrief?: boolean;
   }>;
   rowCount?: number;
   rows?: Array<{
@@ -72,10 +78,7 @@ function formatShortTime(iso: string) {
 
 function snapshotAiBriefCaption(s: NonNullable<CompareResponse["snapshots"]>[number]) {
   if (typeof s.aiAnalysisCount !== "number") return null;
-  const kinds: string[] = [];
-  if (s.hasFollowupBrief) kinds.push("跟进");
-  if (s.hasTrendBrief) kinds.push("趋势");
-  if (s.hasCredibilityBrief) kinds.push("可信度");
+  const kinds = compareSnapshotBriefKinds(s);
   return (
     <div className="text-[10px] font-normal normal-case leading-snug opacity-90">
       Ai 简报 {s.aiAnalysisCount}

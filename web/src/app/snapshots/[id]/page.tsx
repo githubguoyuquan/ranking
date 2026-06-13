@@ -36,6 +36,10 @@ import { compareIdsFromRankingSnapshots } from "@/lib/snapshot-compare-pair";
 import { parseSnapshotAnalysesApiResponse } from "@/lib/snapshot-analyses-api";
 import { parseSnapshotPageAnalysisKind } from "@/lib/snapshot-analysis-kind-query";
 import {
+  formatSnapshotBriefSummary,
+  type SnapshotAiBriefStats,
+} from "@/lib/snapshot-ai-brief-stats";
+import {
   SNAPSHOT_DETAIL_QS,
   buildSnapshotDetailAdminQuery,
   pickFirstSearchParam,
@@ -251,10 +255,8 @@ export default async function SnapshotPage({
           </p>
           {data.aiAnalysisCount != null ? (
             <p className="mt-1 text-xs text-muted-foreground">
-              AiAnalysis 共 {data.aiAnalysisCount} 条 · 跟进{" "}
-              {data.hasFollowupBrief === true ? "是" : "否"} · 趋势{" "}
-              {data.hasTrendBrief === true ? "是" : "否"} · 可信{" "}
-              {data.hasCredibilityBrief === true ? "是" : "否"}
+              AiAnalysis 共 {data.aiAnalysisCount} 条 ·{" "}
+              {formatSnapshotBriefSummary(data as SnapshotAiBriefStats)}
               <span className="ml-1 text-muted-foreground/70">
                 （<code className="rounded bg-muted/80 px-1">includeAiStats</code>）
               </span>

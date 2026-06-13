@@ -60,9 +60,8 @@ import type { AuthenticatedRequestContext } from '../compliance/compliance-auth.
 import { assertTopicAccessible, topicWhereForAuth } from '../compliance/tenant-scope';
 import { AgentOrchestrationService } from '../agent-orchestration/agent-orchestration.service';
 import {
-  AI_AGENT_CREDIBILITY_V1,
-  AI_AGENT_POST_SNAPSHOT_SUMMARY_V1,
-  AI_AGENT_TREND_V1,
+  AI_ANALYSIS_BRIEF_SPECS,
+  type AiAnalysisBriefField,
 } from '../agent/ai-agent.constants';
 import {
   parseScoreBreakdownJson,
@@ -1717,35 +1716,59 @@ export class RankingsService {
 
   private async aiAnalysisQuickStatsForSnapshot(snapshotId: bigint): Promise<{
     aiAnalysisCount: number;
-    hasFollowupBrief: boolean;
-    hasTrendBrief: boolean;
-    hasCredibilityBrief: boolean;
-  }> {
+  } & Record<AiAnalysisBriefField, boolean>> {
     const sid = snapshotId.toString();
-    const [aiAnalysisCount, fu, tr, cr] = await Promise.all([
+    const [aiAnalysisCount, ...briefSets] = await Promise.all([
       this.prisma.aiAnalysis.count({ where: { snapshotId } }),
-      this.distinctSnapshotIdsMatchingAnalysis(
-        [snapshotId],
-        AI_AGENT_POST_SNAPSHOT_SUMMARY_V1,
-        'followup',
-      ),
-      this.distinctSnapshotIdsMatchingAnalysis(
-        [snapshotId],
-        AI_AGENT_TREND_V1,
-        'trend',
-      ),
-      this.distinctSnapshotIdsMatchingAnalysis(
-        [snapshotId],
-        AI_AGENT_CREDIBILITY_V1,
-        'credibility',
+      ...AI_ANALYSIS_BRIEF_SPECS.map((spec) =>
+        this.distinctSnapshotIdsMatchingAnalysis(
+          [snapshotId],
+          spec.agent,
+          spec.agentKind,
+        ),
       ),
     ]);
-    return {
-      aiAnalysisCount,
-      hasFollowupBrief: fu.has(sid),
-      hasTrendBrief: tr.has(sid),
-      hasCredibilityBrief: cr.has(sid),
-    };
+    const briefs = {} as Record<AiAnalysisBriefField, boolean>;
+    for (let i = 0; i < AI_ANALYSIS_BRIEF_SPECS.length; i++) {
+      briefs[AI_ANALYSIS_BRIEF_SPECS[i].field] = briefSets[i].has(sid);
+    }
+    return { aiAnalysisCount, ...briefs };
+  }
+
+  private async loadBriefFlagsForSnapshots(
+    snapshotIds: bigint[],
+  ): Promise<Record<AiAnalysisBriefField, Set<string>>> {
+    const out = {} as Record<AiAnalysisBriefField, Set<string>>;
+    if (snapshotIds.length === 0) {
+      for (const spec of AI_ANALYSIS_BRIEF_SPECS) {
+        out[spec.field] = new Set();
+      }
+      return out;
+    }
+    const sets = await Promise.all(
+      AI_ANALYSIS_BRIEF_SPECS.map((spec) =>
+        this.distinctSnapshotIdsMatchingAnalysis(
+          snapshotIds,
+          spec.agent,
+          spec.agentKind,
+        ),
+      ),
+    );
+    for (let i = 0; i < AI_ANALYSIS_BRIEF_SPECS.length; i++) {
+      out[AI_ANALYSIS_BRIEF_SPECS[i].field] = sets[i];
+    }
+    return out;
+  }
+
+  private aiBriefStatsForSnapshot(
+    sid: string,
+    briefFlags: Record<AiAnalysisBriefField, Set<string>>,
+  ): Record<AiAnalysisBriefField, boolean> {
+    const out = {} as Record<AiAnalysisBriefField, boolean>;
+    for (const spec of AI_ANALYSIS_BRIEF_SPECS) {
+      out[spec.field] = briefFlags[spec.field].has(sid);
+    }
+    return out;
   }
 
   /**
@@ -1800,9 +1823,7 @@ export class RankingsService {
 
     const snapshotIds = rows.map((r) => r.id);
     const analysisCountBySnapshot = new Map<string, number>();
-    let followupSnapshotIds = new Set<string>();
-    let trendSnapshotIds = new Set<string>();
-    let credibilitySnapshotIds = new Set<string>();
+    let briefFlags = {} as Record<AiAnalysisBriefField, Set<string>>;
 
     if (snapshotIds.length > 0) {
       const countAgg = await this.prisma.aiAnalysis.groupBy({
@@ -1814,22 +1835,7 @@ export class RankingsService {
         analysisCountBySnapshot.set(c.snapshotId.toString(), c._count._all);
       }
 
-      const [fu, tr, cr] = await Promise.all([
-        this.distinctSnapshotIdsMatchingAnalysis(
-          snapshotIds,
-          AI_AGENT_POST_SNAPSHOT_SUMMARY_V1,
-          'followup',
-        ),
-        this.distinctSnapshotIdsMatchingAnalysis(snapshotIds, AI_AGENT_TREND_V1, 'trend'),
-        this.distinctSnapshotIdsMatchingAnalysis(
-          snapshotIds,
-          AI_AGENT_CREDIBILITY_V1,
-          'credibility',
-        ),
-      ]);
-      followupSnapshotIds = fu;
-      trendSnapshotIds = tr;
-      credibilitySnapshotIds = cr;
+      briefFlags = await this.loadBriefFlagsForSnapshots(snapshotIds);
     }
 
     return toPlainJson({
@@ -1850,9 +1856,7 @@ export class RankingsService {
           generatedByAi: r.generatedByAi,
           topicRankingId: r.topicRankingId.toString(),
           aiAnalysisCount: analysisCountBySnapshot.get(sid) ?? 0,
-          hasFollowupBrief: followupSnapshotIds.has(sid),
-          hasTrendBrief: trendSnapshotIds.has(sid),
-          hasCredibilityBrief: credibilitySnapshotIds.has(sid),
+          ...this.aiBriefStatsForSnapshot(sid, briefFlags),
           hasScoreModel: r.scoreModelId != null,
           topicRanking: {
             id: r.topicRanking.id.toString(),

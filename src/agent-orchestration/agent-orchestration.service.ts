@@ -21,6 +21,7 @@ import {
   AI_AGENT_TOPIC_MERGE_V1,
   AI_AGENT_TREND_ANALYSIS_V1,
   AI_AGENT_TREND_V1,
+  AI_ANALYSIS_PERSIST_AGENTS,
   SNAPSHOT_BRIEF_AGENTS,
   parseOrchestrationPipeline,
   parseSnapshotPostProcessPipeline,
@@ -447,6 +448,17 @@ export class AgentOrchestrationService {
     agent: string,
     input: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
+    const snapshotIdRaw = input.snapshotId;
+    if (
+      snapshotIdRaw != null &&
+      String(snapshotIdRaw).trim() !== '' &&
+      AI_ANALYSIS_PERSIST_AGENTS.has(agent)
+    ) {
+      await this.snapshotAnalyze.assertAnalysisQuota(
+        BigInt(String(snapshotIdRaw).trim()),
+      );
+    }
+
     switch (agent) {
       case AI_AGENT_TOPIC_DISCOVERY_V1:
         return (await this.topicDiscovery.run({

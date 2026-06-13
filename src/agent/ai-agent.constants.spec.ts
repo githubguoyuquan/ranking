@@ -5,6 +5,7 @@ import {
   AI_AGENT_RANKING_V1,
   AI_AGENT_RULES_V1,
   AI_AGENT_TREND_ANALYSIS_V1,
+  AI_AGENT_TIME_SERIES_V1,
   AI_AGENT_TREND_V1,
   AI_AGENT_TOPIC_DISCOVERY_V1,
   parseFollowupAnalyzePipeline,
@@ -22,6 +23,7 @@ describe('resolveAiAnalysisAgentKind', () => {
     expect(resolveAiAnalysisAgentKind(AI_AGENT_TREND_V1)).toBe('trend');
     expect(resolveAiAnalysisAgentKind(AI_AGENT_CREDIBILITY_V1)).toBe('credibility');
     expect(resolveAiAnalysisAgentKind(AI_AGENT_TREND_ANALYSIS_V1)).toBe('trend_analysis');
+    expect(resolveAiAnalysisAgentKind(AI_AGENT_TIME_SERIES_V1)).toBe('timeseries');
     expect(resolveAiAnalysisAgentKind(AI_AGENT_RANKING_V1)).toBe('ranking');
   });
 

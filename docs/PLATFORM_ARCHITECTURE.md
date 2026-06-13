@@ -22,7 +22,7 @@
 | Schema Registry | 中心化契约 | Redpanda SR + `KAFKA_SCHEMA_REGISTRY_URL` REST 注册 | 消息仍为 JSON 封套（非 Avro wire） |
 | 微服务拆分 | 多进程/多服务 | `PROCESS_ROLE` + `platform-worker` / `crawl-worker` + Helm 多 Deployment | 未拆独立仓库 |
 | 多 AZ 运维 | K8s 生产 | `values-production.yaml` PDB + topologySpread + `docs/ops/PRODUCTION.md` | 托管服务与 DR 演练待落地 |
-| AI Agent 体系 | 多 Agent | `POST /admin/snapshots/:id/analyze` + `AiAnalysis` | **单点分析**；缺 Topic Discovery / Merge / Dedup / FactCheck 等待办服务 |
+| AI Agent 体系 | 多 Agent | **BullMQ `ai-agent`** + **`AgentRun`** + 7 类快照/生命周期 agent；`RANKING_FOLLOWUP_AGENT_PIPELINE` | Temporal / Kafka `ai.analysis.requested`；更细粒度配额 |
 | 搜索与推荐 | 语义、时间、趋势检索 + 推荐 | **Qdrant/ES/PG** 统一搜索；kNN + `similar-entities` / `similar-topics` | 时间范围 DSL、Hybrid RRF、更大规模话题向量 |
 | 生产可观测 | Outbox/爬虫/BI | `observability` 模块 + `/bi` 告警 + Grafana 骨架 | 告警路由生产化 |
 | 规模验证 | 压测与 ILM | `POST /admin/scale/validate`、ES ILM、Qdrant benchmark、CH MV + BI 钻取 | 托管集群常态化压测 |
@@ -242,16 +242,22 @@ Wire：**Envelope v1** + AJV（`src/kafka/schemas/`）；路由 **`src/kafka/eve
 | Agent | 职责 | 现状 |
 |-------|------|------|
 | Topic Discovery | 从新内容聚类发现可排话题 | **`topic-discovery-v1`**：`TopicProposal` + 管理台批准 |
-| Ranking Agent | 权重推理、缺数据补全 | 部分在 `scoreEntity`/人工 policy |
-| Trend Analysis Agent | 解读斜率/异常 | 算法有，LLM 未接 |
+| Ranking Agent | 权重推理、缺数据补全 | **`ranking-agent-v1`**：`EntityMetric` 覆盖率 → `AiAnalysis` |
+| Trend Analysis Agent | 解读斜率/异常 | **`trend-analysis-v1`**：读 `TrendAnalysis.payload` + 可选 LLM |
 | Fact Check | 冲突信源仲裁 | **`fact-check-v1`**：跨信源指标冲突 → `AiAnalysis` |
 | Duplicate Detection | URL+内容+语义去重 | 抓取去重 + **`duplicate-detection-v1`** 报告 |
 | Topic Merge | 同义话题合并 | **`topic-merge-v1`**：`TopicMergeAudit` + 迁移 `Source` |
-| Time Series Agent | CH+PG 联合结论 | 无 |
-| Summary Agent | 榜单演化叙述 | **部分**：`AiAnalysis` 存快照级摘要 |
-| Credibility Evaluation | 输出可信度 | `confidenceScore` 字段有，**自动化弱** |
+| Time Series Agent | CH+PG 联合结论 | **`time-series-v1`**：`metric_timeseries` + 快照元数据 |
+| Summary Agent | 榜单演化叙述 | **`post-snapshot-summary-v1`** / **`trend-v1`** / **`credibility-v1`** |
+| Credibility Evaluation | 输出可信度 | **`credibility-v1`** + 快照 `confidenceScore`（启发式） |
 
-**演进**：已实现 **BullMQ `ai-agent` 队列** + **`AgentRun`** 表 + 管理台 **`/agents`**；后续可迁 Temporal / Kafka `ai.analysis.requested`。
+**接线（2026-06）**：
+- 物化后流水线：**`RANKING_FOLLOWUP_AGENT_PIPELINE`**（`AgentOrchestrationService` + `AgentRun`）
+- 分析列表筛选：**`GET /v1/snapshots/:id/analyses?agentKind=`** 支持 `followup` / `trend` / `credibility` / `factcheck` / `trend_analysis` / `timeseries` / `ranking` / `default`
+- 快照统计：**`includeAiStats=1`** 返回七类 **`has*Brief`**（与 `AI_ANALYSIS_BRIEF_SPECS` 一致）
+- 配额：写入 **`AiAnalysis`** 的编排 agent 与 **`POST …/analyze`** 共用 **`AI_ANALYSIS_DAILY_CAP`**（`assertAnalysisQuota`）
+
+**演进**：后续可迁 Temporal / Kafka `ai.analysis.requested`；按模型配额仍待办。
 
 ---
 
@@ -289,7 +295,7 @@ Wire：**Envelope v1** + AJV（`src/kafka/schemas/`）；路由 **`src/kafka/eve
 - `GET /v1/entities/:id/rank-history?topicSlug=&timeWindow=&limit=` — **`RankingItemHistory` 时间序列** + 历史最好/最差名次 + 末端连续升降步数（**已实现**）
 - `GET /v1/topics/:slug/leaderboard?version=&timeWindow=&windowStart=&includeAiStats=` — **`{ resolved, snapshot }`**（**已实现**；**`resolved.hasScoreModel`**；嵌套 **`snapshot`** 与 **`GET /v1/snapshots/:id`** 同形）
 - `GET /v1/topics/:slug/trend-analyses?limit=&timeWindow=` — **快照级 `TrendAnalysis` 列表**（**已实现**；管理台 **话题版本** 页展示摘要表）  
-- `GET /v1/topics/:slug/snapshots?timeWindow=&limit=` — **`TopicRankSnapshot` 列表**（**已实现**；管理台 **话题版本** 页「近期快照」表；每条含 **`aiAnalysisCount`**、**`hasFollowupBrief`**、**`hasTrendBrief`**、**`hasCredibilityBrief`**、**`hasScoreModel`**）  
+- `GET /v1/topics/:slug/snapshots?timeWindow=&limit=` — **`TopicRankSnapshot` 列表**（**已实现**；管理台 **话题版本** 页「近期快照」表；每条含 **`aiAnalysisCount`**、七类 **`has*Brief`**、**`hasScoreModel`**）  
 - `PATCH /v1/topic-versions/:id/policy` — 更新 **`policyJson`**（**已实现**；`src/domain/policy-json.ts` 校验；**`frozen`** 不可改；管理台话题页 **policy** 编辑器）  
 - `GET /v1/trends/hot?timeWindow=&limit=` — **快照级涨榜聚合**（**已实现（演示）**；由近期 `TrendAnalysis` 的 `topRankGainers` 汇总；管理台 **`/trends`**）  
 - `POST /v1/snapshots/compare` — **已有**（多快照对比）；`snapshots[]` 含 **`hasScoreModel`**；`rows[].bySnapshot[id]` 含可选 **`scoreBreakdown`**  

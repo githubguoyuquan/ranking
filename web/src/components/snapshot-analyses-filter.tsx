@@ -18,6 +18,10 @@ const LINKS: { kind: SnapshotPageAnalysisKind; label: string }[] = [
   { kind: "followup", label: "跟进" },
   { kind: "trend", label: "趋势" },
   { kind: "credibility", label: "可信" },
+  { kind: "factcheck", label: "核查" },
+  { kind: "trend_analysis", label: "涨榜" },
+  { kind: "timeseries", label: "时序" },
+  { kind: "ranking", label: "排行" },
   { kind: "default", label: "默认" },
 ];
 

@@ -135,4 +135,82 @@ export const SNAPSHOT_BRIEF_AGENTS = new Set([
   AI_AGENT_POST_SNAPSHOT_SUMMARY_V1,
   AI_AGENT_TREND_V1,
   AI_AGENT_CREDIBILITY_V1,
+  AI_AGENT_FACT_CHECK_V1,
+  AI_AGENT_TREND_ANALYSIS_V1,
+  AI_AGENT_TIME_SERIES_V1,
+  AI_AGENT_RANKING_V1,
+]);
+
+/** `GET /v1/snapshots/:id/analyses?agentKind=` 合法取值 */
+export const LIST_ANALYSES_AGENT_KINDS = [
+  'followup',
+  'trend',
+  'credibility',
+  'factcheck',
+  'trend_analysis',
+  'timeseries',
+  'ranking',
+  'default',
+] as const;
+
+export type ListAnalysesAgentKind = (typeof LIST_ANALYSES_AGENT_KINDS)[number];
+
+export type AiAnalysisBriefField =
+  | 'hasFollowupBrief'
+  | 'hasTrendBrief'
+  | 'hasCredibilityBrief'
+  | 'hasFactCheckBrief'
+  | 'hasTrendAnalysisBrief'
+  | 'hasTimeSeriesBrief'
+  | 'hasRankingBrief';
+
+/** 快照 API `includeAiStats` 与各 `has*Brief` 字段定义 */
+export const AI_ANALYSIS_BRIEF_SPECS: ReadonlyArray<{
+  field: AiAnalysisBriefField;
+  agent: string;
+  agentKind: AiAnalysisAgentKind;
+}> = [
+  {
+    field: 'hasFollowupBrief',
+    agent: AI_AGENT_POST_SNAPSHOT_SUMMARY_V1,
+    agentKind: 'followup',
+  },
+  { field: 'hasTrendBrief', agent: AI_AGENT_TREND_V1, agentKind: 'trend' },
+  {
+    field: 'hasCredibilityBrief',
+    agent: AI_AGENT_CREDIBILITY_V1,
+    agentKind: 'credibility',
+  },
+  {
+    field: 'hasFactCheckBrief',
+    agent: AI_AGENT_FACT_CHECK_V1,
+    agentKind: 'factcheck',
+  },
+  {
+    field: 'hasTrendAnalysisBrief',
+    agent: AI_AGENT_TREND_ANALYSIS_V1,
+    agentKind: 'trend_analysis',
+  },
+  {
+    field: 'hasTimeSeriesBrief',
+    agent: AI_AGENT_TIME_SERIES_V1,
+    agentKind: 'timeseries',
+  },
+  {
+    field: 'hasRankingBrief',
+    agent: AI_AGENT_RANKING_V1,
+    agentKind: 'ranking',
+  },
+];
+
+/** 写入 `AiAnalysis` 且应计入日配额的 agent */
+export const AI_ANALYSIS_PERSIST_AGENTS = new Set([
+  AI_AGENT_RULES_V1,
+  AI_AGENT_POST_SNAPSHOT_SUMMARY_V1,
+  AI_AGENT_TREND_V1,
+  AI_AGENT_CREDIBILITY_V1,
+  AI_AGENT_FACT_CHECK_V1,
+  AI_AGENT_TREND_ANALYSIS_V1,
+  AI_AGENT_TIME_SERIES_V1,
+  AI_AGENT_RANKING_V1,
 ]);

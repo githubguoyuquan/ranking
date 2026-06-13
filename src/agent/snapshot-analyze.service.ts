@@ -9,12 +9,14 @@ import { parseTenantSettings } from '../compliance/tenant-settings';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   AI_AGENT_CREDIBILITY_V1,
-  AI_AGENT_FACT_CHECK_V1,
   AI_AGENT_POST_SNAPSHOT_SUMMARY_V1,
   AI_AGENT_RULES_V1,
   AI_AGENT_TREND_V1,
+  LIST_ANALYSES_AGENT_KINDS,
   resolveAiAnalysisAgentKind,
+  type ListAnalysesAgentKind,
 } from './ai-agent.constants';
+import { buildAiAnalysisAgentKindFilter } from './ai-analysis-kind-filter';
 
 type LlmSummaryResult = {
   text: string;
@@ -75,41 +77,26 @@ export class SnapshotAnalyzeService {
       where.agent = agentQ.slice(0, 120);
     }
     const k = filters?.agentKind?.trim();
-    if (k === 'followup') {
-      where.OR = [
-        { agent: AI_AGENT_POST_SNAPSHOT_SUMMARY_V1 },
-        { detailJson: { path: ['agentKind'], equals: 'followup' } },
-      ];
-    } else if (k === 'trend') {
-      where.OR = [
-        { agent: AI_AGENT_TREND_V1 },
-        { detailJson: { path: ['agentKind'], equals: 'trend' } },
-      ];
-    } else if (k === 'credibility') {
-      where.OR = [
-        { agent: AI_AGENT_CREDIBILITY_V1 },
-        { detailJson: { path: ['agentKind'], equals: 'credibility' } },
-      ];
-    } else if (k === 'factcheck') {
-      where.OR = [
-        { agent: AI_AGENT_FACT_CHECK_V1 },
-        { detailJson: { path: ['agentKind'], equals: 'factcheck' } },
-      ];
-    } else if (k === 'default') {
-      where.NOT = {
-        OR: [
-          { agent: AI_AGENT_POST_SNAPSHOT_SUMMARY_V1 },
-          { agent: AI_AGENT_TREND_V1 },
-          { agent: AI_AGENT_CREDIBILITY_V1 },
-          { agent: AI_AGENT_FACT_CHECK_V1 },
-          { detailJson: { path: ['agentKind'], equals: 'followup' } },
-          { detailJson: { path: ['agentKind'], equals: 'trend' } },
-          { detailJson: { path: ['agentKind'], equals: 'credibility' } },
-          { detailJson: { path: ['agentKind'], equals: 'factcheck' } },
-        ],
-      };
+    if (
+      k &&
+      (LIST_ANALYSES_AGENT_KINDS as readonly string[]).includes(k)
+    ) {
+      Object.assign(where, buildAiAnalysisAgentKindFilter(k as ListAnalysesAgentKind));
     }
     return where;
+  }
+
+  /** UTC 日 `AiAnalysis` 配额预检（编排 agent 与 `analyzeSnapshot` 共用） */
+  async assertAnalysisQuota(snapshotId: bigint): Promise<void> {
+    const cap = await this.resolveAnalysisDailyCap(snapshotId);
+    if (cap === null) return;
+    const { start: dayStart } = this.audit.utcDayBounds();
+    const preCount = await this.countAnalysesForQuota(snapshotId, dayStart);
+    if (preCount >= cap) {
+      throw new BadRequestException(
+        `AiAnalysis quota: daily cap ${cap} (UTC) reached`,
+      );
+    }
   }
 
   /**

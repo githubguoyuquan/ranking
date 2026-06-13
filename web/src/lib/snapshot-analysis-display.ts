@@ -12,10 +12,18 @@ export function formatAgentKind(detailJson: unknown, agent: string): string {
   if (kind === "followup") return "物化跟进";
   if (kind === "trend") return "趋势解读";
   if (kind === "credibility") return "可信度";
+  if (kind === "factcheck") return "事实核查";
+  if (kind === "trend_analysis") return "涨榜分析";
+  if (kind === "timeseries") return "时序";
+  if (kind === "ranking") return "排行策略";
   if (kind === "default") return "默认";
   if (agent === "post-snapshot-summary-v1") return "物化跟进";
   if (agent === "trend-v1") return "趋势解读";
   if (agent === "credibility-v1") return "可信度";
+  if (agent === "fact-check-v1") return "事实核查";
+  if (agent === "trend-analysis-v1") return "涨榜分析";
+  if (agent === "time-series-v1") return "时序";
+  if (agent === "ranking-agent-v1") return "排行策略";
   return "其他/历史";
 }
 

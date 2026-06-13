@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, Get, Param, Post, Query } from '
 import { Type } from 'class-transformer';
 import { IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 import { toPlainJson } from '../lib/json';
+import { LIST_ANALYSES_AGENT_KINDS } from './ai-agent.constants';
 import { SnapshotAnalyzeService } from './snapshot-analyze.service';
 
 class AnalyzeSnapshotDto {
@@ -24,19 +25,13 @@ class AnalyzeSnapshotDto {
   chainContext?: string;
 }
 
-const LIST_ANALYSES_AGENT_KINDS = [
-  'followup',
-  'trend',
-  'credibility',
-  'factcheck',
-  'default',
-] as const;
+const LIST_ANALYSES_AGENT_KINDS_DTO = LIST_ANALYSES_AGENT_KINDS;
 
 class ListAnalysesQueryDto {
   @IsOptional()
   @IsString()
-  @IsIn(LIST_ANALYSES_AGENT_KINDS)
-  agentKind?: (typeof LIST_ANALYSES_AGENT_KINDS)[number];
+  @IsIn(LIST_ANALYSES_AGENT_KINDS_DTO)
+  agentKind?: (typeof LIST_ANALYSES_AGENT_KINDS_DTO)[number];
 
   /** 精确匹配 `AiAnalysis.agent`（与 POST body 一致 ≤120） */
   @IsOptional()

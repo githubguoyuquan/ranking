@@ -18,6 +18,7 @@ import {
   TIME_WINDOW_INPUT_MAX_LEN,
   TOPIC_SLUG_MAX_LEN,
 } from "@/lib/admin-input-limits";
+import { briefCell } from "@/lib/snapshot-ai-brief-stats";
 import {
   ADMIN_HREF,
   rankingsRunAdminPath,
@@ -297,7 +298,10 @@ type TopicSnapshotListItem = {
   hasTrendBrief?: boolean;
   /** credibility-v1 / agentKind=credibility */
   hasCredibilityBrief?: boolean;
-  /** 物化时是否写入 `ScoreModel`（新快照）；`GET …/score-breakdowns` 是否可能有行 */
+  hasFactCheckBrief?: boolean;
+  hasTrendAnalysisBrief?: boolean;
+  hasTimeSeriesBrief?: boolean;
+  hasRankingBrief?: boolean;
   hasScoreModel?: boolean;
   topicRanking: {
     id: string;
@@ -1571,6 +1575,7 @@ function TopicsPageInner() {
             <code className="text-xs">hasFollowupBrief</code>、
             <code className="text-xs">hasTrendBrief</code>、
             <code className="text-xs">hasCredibilityBrief</code>、
+            <code className="text-xs">hasFactCheckBrief</code> 等七类简报标记、
             <code className="text-xs">hasScoreModel</code>
             （新物化快照已接 <code className="text-xs">ScoreModel</code>）。可选 query：
             <code className="text-xs">timeWindow</code>、<code className="text-xs">limit</code>（1–100）。
@@ -1626,6 +1631,18 @@ function TopicsPageInner() {
                       可信
                     </th>
                     <th scope="col" className="px-3 py-2 font-medium">
+                      核查
+                    </th>
+                    <th scope="col" className="px-3 py-2 font-medium">
+                      涨榜
+                    </th>
+                    <th scope="col" className="px-3 py-2 font-medium">
+                      时序
+                    </th>
+                    <th scope="col" className="px-3 py-2 font-medium">
+                      排行
+                    </th>
+                    <th scope="col" className="px-3 py-2 font-medium">
                       模型
                     </th>
                     <th scope="col" className="px-3 py-2 font-medium">
@@ -1656,13 +1673,25 @@ function TopicsPageInner() {
                         {row.aiAnalysisCount ?? 0}
                       </td>
                       <td className="px-3 py-2 text-muted-foreground">
-                        {row.hasFollowupBrief === true ? "是" : "—"}
+                        {briefCell(row.hasFollowupBrief)}
                       </td>
                       <td className="px-3 py-2 text-muted-foreground">
-                        {row.hasTrendBrief === true ? "是" : "—"}
+                        {briefCell(row.hasTrendBrief)}
                       </td>
                       <td className="px-3 py-2 text-muted-foreground">
-                        {row.hasCredibilityBrief === true ? "是" : "—"}
+                        {briefCell(row.hasCredibilityBrief)}
+                      </td>
+                      <td className="px-3 py-2 text-muted-foreground">
+                        {briefCell(row.hasFactCheckBrief)}
+                      </td>
+                      <td className="px-3 py-2 text-muted-foreground">
+                        {briefCell(row.hasTrendAnalysisBrief)}
+                      </td>
+                      <td className="px-3 py-2 text-muted-foreground">
+                        {briefCell(row.hasTimeSeriesBrief)}
+                      </td>
+                      <td className="px-3 py-2 text-muted-foreground">
+                        {briefCell(row.hasRankingBrief)}
                       </td>
                       <td className="px-3 py-2 text-muted-foreground">
                         {row.hasScoreModel === true ? "是" : "—"}

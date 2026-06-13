@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { adminEntitiesUrl, adminEntityByIdUrl } from "@/lib/backend-api-urls";
+import { adminEntitiesUrl, adminEntityByIdUrl, adminEntityMetricsUrl } from "@/lib/backend-api-urls";
 import {
   BACKEND_ADMIN,
   BACKEND_ADMIN_DOC,
@@ -35,7 +35,7 @@ import {
   entityRankHistoryAdminPath,
 } from "@/lib/admin-web-paths";
 import { NEST_V1_DOC } from "@/lib/nest-api-paths";
-import { nestEntityRankHistoryUrl } from "@/lib/nest-api-urls";
+import { nestEntityMetricsUrl, nestEntityRankHistoryUrl } from "@/lib/nest-api-urls";
 import { unifiedSearchAdminPathFromQuery } from "@/lib/unified-search-admin-path";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -109,6 +109,9 @@ function EntitiesPageInner() {
   const [editType, setEditType] = useState("");
   const [editAliases, setEditAliases] = useState("");
   const [editMsg, setEditMsg] = useState("");
+  const [metricsOut, setMetricsOut] = useState("");
+  const [metricKey, setMetricKey] = useState("streams");
+  const [metricValue, setMetricValue] = useState("100");
   const [entityRankTopicSlug, setEntityRankTopicSlug] = useState(
     ENTITY_RANK_TOPIC_SLUG_PLACEHOLDER,
   );
@@ -173,7 +176,52 @@ function EntitiesPageInner() {
     setEditName(edit.canonicalName);
     setEditType(edit.type);
     setEditAliases(aliasesLabel(edit.aliases).replace(/^—$/, ""));
+    setMetricsOut("");
   }, [edit]);
+
+  async function loadEntityMetrics(entityId: string) {
+    setMetricsOut("");
+    try {
+      const res = await fetch(
+        nestEntityMetricsUrl(entityId, new URLSearchParams({ latestOnly: "true", limit: "20" })),
+        { cache: "no-store" },
+      );
+      setMetricsOut(`${res.status}\n${await res.text()}`);
+    } catch (e) {
+      setMetricsOut(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function ingestEntityMetric(entityId: string) {
+    setMetricsOut("");
+    const key = metricKey.trim();
+    const val = Number(metricValue);
+    if (!key || !Number.isFinite(val)) {
+      setMetricsOut("请填写有效 metricKey 与 value。");
+      return;
+    }
+    try {
+      const res = await fetch(adminEntityMetricsUrl(entityId), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          metrics: [
+            {
+              metricKey: key,
+              value: val,
+              observedAt: new Date().toISOString(),
+              sourceTier: 2,
+            },
+          ],
+        }),
+      });
+      const text = await res.text();
+      setMetricsOut(`POST ${res.status}\n${text}`);
+      if (res.ok) void loadEntityMetrics(entityId);
+    } catch (e) {
+      setMetricsOut(e instanceof Error ? e.message : String(e));
+    }
+  }
 
   async function createEntity() {
     setCreateOut("");
@@ -556,6 +604,35 @@ function EntitiesPageInner() {
                   void saveEdit();
                 }}
               />
+            </div>
+            <div className="space-y-2 sm:col-span-2">
+              <Label>排行信号 EntityMetric</Label>
+              <p className="text-xs text-muted-foreground">
+                GET {NEST_V1_DOC.entityMetrics} · POST {BACKEND_ADMIN_DOC.entityMetrics}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Input
+                  className="max-w-[140px]"
+                  value={metricKey}
+                  onChange={(e) => setMetricKey(e.target.value)}
+                  placeholder="metricKey"
+                />
+                <Input
+                  className="max-w-[120px]"
+                  value={metricValue}
+                  onChange={(e) => setMetricValue(e.target.value)}
+                  placeholder="value"
+                />
+                <Button type="button" variant="outline" onClick={() => void loadEntityMetrics(edit.id)}>
+                  读最新信号
+                </Button>
+                <Button type="button" onClick={() => void ingestEntityMetric(edit.id)}>
+                  POST 补数
+                </Button>
+              </div>
+              {metricsOut ? (
+                <pre className="max-h-40 overflow-auto text-xs whitespace-pre-wrap">{metricsOut}</pre>
+              ) : null}
             </div>
             <div className="flex flex-wrap gap-2 sm:col-span-2">
               <Button

@@ -16,6 +16,7 @@ export const BACKEND_ADMIN = {
   seedDemo: "/admin/seed-demo",
   outbox: "/admin/outbox",
   entities: "/admin/entities",
+  entityMetrics: "/admin/entities/:id/metrics",
   biOverview: "/admin/bi/overview",
   biDrillEntity: "/admin/bi/drill/entity",
   biDrillTopic: "/admin/bi/drill/topic",
@@ -49,6 +50,10 @@ export function backendAdminEntityByIdPath(entityId: string): string {
   return `${BACKEND_ADMIN.entities}/${encodeURIComponent(entityId)}`;
 }
 
+export function backendAdminEntityMetricsPath(entityId: string): string {
+  return `${BACKEND_ADMIN.entities}/${encodeURIComponent(entityId)}/metrics`;
+}
+
 export function backendAdminBiDrillEntityPath(entityId: string, days = 30): string {
   return `${BACKEND_ADMIN.biDrillEntity}/${encodeURIComponent(entityId)}?days=${days}`;
 }
@@ -60,6 +65,7 @@ export function backendAdminBiDrillTopicPath(topicId: string, days = 14): string
 /** 文档 / 界面展示用（含 `:id` 占位），勿用于实际请求 path。 */
 export const BACKEND_ADMIN_DOC = {
   entitiesId: "/admin/entities/:id",
+  entityMetrics: "/admin/entities/:id/metrics",
   snapshotAnalyze: "/admin/snapshots/:id/analyze",
 } as const;
 

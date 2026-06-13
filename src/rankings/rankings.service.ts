@@ -3,7 +3,6 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import {
   Entity,
-  EntityMetric,
   Prisma,
   TopicKind,
   TimeWindow,
@@ -50,6 +49,10 @@ import { upsertEntityTopicStatsBatch } from '../domain/entity-topic-stats';
 import { parseRankingPolicyJson, type RankingPolicyJson } from '../domain/policy-json';
 import {
   entityHasRequiredSignals,
+  indexEntitySignals,
+  signalCoverage,
+} from '../domain/entity-signals';
+import {
   mergePolicyWithTopicKind,
   topicKindPreset,
   topicKindStrategyPublic,
@@ -1118,24 +1121,13 @@ export class RankingsService {
         entityId: { in: entityIds },
         observedAt: { lte: snapshotTime },
       },
-      select: { entityId: true, metricKey: true, observedAt: true },
     });
-    const metricsByEntity = new Map<string, { metricKey: string; observedAt: Date }[]>();
-    for (const m of metricsForFilter) {
-      const k = m.entityId.toString();
-      if (!metricsByEntity.has(k)) metricsByEntity.set(k, []);
-      metricsByEntity.get(k)!.push({
-        metricKey: m.metricKey,
-        observedAt: m.observedAt,
-      });
-    }
-    const eligibleIds = entityIds.filter((eid) =>
-      entityHasRequiredSignals(
-        metricsByEntity.get(eid.toString()) ?? [],
-        [...required],
-        snapshotTime,
-      ),
-    );
+    const indexedForFilter = indexEntitySignals(metricsForFilter, entityIds, snapshotTime);
+    const eligibleIds = indexedForFilter
+      .filter((idx) =>
+        entityHasRequiredSignals(idx.signalRows, [...required], snapshotTime),
+      )
+      .map((idx) => idx.entityId);
     const excludedBySignals = entityIds.length - eligibleIds.length;
     if (eligibleIds.length > 0) entityIds = eligibleIds;
 
@@ -1184,12 +1176,7 @@ export class RankingsService {
       },
     });
 
-    const byEntity = new Map<string, EntityMetric[]>();
-    for (const m of metrics) {
-      const k = m.entityId.toString();
-      if (!byEntity.has(k)) byEntity.set(k, []);
-      byEntity.get(k)!.push(m);
-    }
+    const indexed = indexEntitySignals(metrics, entityIds, snapshotTime);
 
     type Scored = {
       entityId: bigint;
@@ -1203,26 +1190,12 @@ export class RankingsService {
 
     const scored: Scored[] = [];
 
-    for (const entityId of entityIds) {
-      const list = byEntity.get(entityId.toString()) ?? [];
-      const latestByKey = new Map<string, EntityMetric>();
-      for (const row of list) {
-        const cur = latestByKey.get(row.metricKey);
-        if (!cur || row.observedAt > cur.observedAt) latestByKey.set(row.metricKey, row);
-      }
-
-      const signals = [...latestByKey.entries()].map(([key, row]) => ({
-        key,
-        raw: row.value,
-        observedAt: row.observedAt,
-        tier: row.sourceTier,
-      }));
-
-      const presentKeys = new Set(signals.map((s) => s.key));
+    for (const idx of indexed) {
+      const { entityId, signals, presentKeys } = idx;
       const coverage =
         required.size === 0
           ? 1
-          : [...required].filter((k) => presentKeys.has(k)).length / required.size;
+          : signalCoverage(presentKeys, [...required]);
 
       if (coverage < minCoverage) continue;
 

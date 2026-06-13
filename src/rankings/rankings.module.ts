@@ -13,6 +13,8 @@ import { RANKING_QUEUE } from './ranking-job';
 import { RankingProcessor } from './ranking.processor';
 import { RankingsController } from './rankings.controller';
 import { RankingsService } from './rankings.service';
+import { EntityMetricsController } from './entity-metrics.controller';
+import { EntityMetricsService } from './entity-metrics.service';
 
 @Module({
   imports: [
@@ -28,13 +30,14 @@ import { RankingsService } from './rankings.service';
       name: RANKING_FOLLOWUP_QUEUE,
     }),
   ],
-  controllers: [RankingsController],
+  controllers: [RankingsController, EntityMetricsController],
   providers: [
     RankingsService,
+    EntityMetricsService,
     ...(runsRankingWorkers()
       ? [RankingProcessor, RankingFollowupProcessor, TrendAnalysisSchedulerService]
       : []),
   ],
-  exports: [RankingsService],
+  exports: [RankingsService, EntityMetricsService],
 })
 export class RankingsModule {}

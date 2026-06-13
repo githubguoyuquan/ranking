@@ -9,12 +9,12 @@
 
 | 需求域 | 愿景要求 | 当前仓库状态 | 差距 / 下一步 |
 |--------|----------|--------------|----------------|
-| 三种排行（客观/半客观/主观趋势） | TopicKind 区分策略与展示 | **`TopicKind` 预设** + `mergePolicyWithTopicKind`；物化按 kind **必填信号/覆盖率**过滤；`GET /v1/topics/:slug` 返回 `kindStrategy`；管理台 `/topics` | 外部信源按 kind 差异化权重仍待接 |
+| 三种排行（客观/半客观/主观趋势） | TopicKind 区分策略与展示 | **`TopicKind` 预设** + `mergePolicyWithTopicKind`；物化按 kind **必填信号/覆盖率**过滤；`GET /v1/topics/:slug` 返回 `kindStrategy`；**`GET /v1/topic-versions/:id/signal-preview`** 物化前覆盖率 | 外部信源按 kind 差异化权重仍待接 |
 | 时间维度（日/周/月/年/实时/CUSTOM） | 多窗口排行与快照 | `TimeWindow` 枚举 + `TopicRanking` 唯一键 `(topicVersionId, timeWindow, windowStart)` | REALTIME 语义、滑动窗口、多 TZ 策略需产品化 |
 | 不可变快照 + 版本 | 每次排行完整快照 | `TopicRankSnapshot`：`snapshotVersion`、`rankingJson`、`tTrendSummary`、`confidenceScore`、`generatedByAi` | 已满足核心模型；缺**自动 trendSummary 生成任务链** |
 | 单条目排名演化 | previousRank、rankChange、趋势 | `RankingItem`：`previousRank`、`rankChange`、`TrendType`、多维度 score | 快照内已满足；**历史极值与末端连续升降步数**在 `GET /v1/entities/:id/rank-history` 的 `summary` 中计算；**按实体物化统计表**见 §5.1（未建） |
 | 历史时间线 | `RankingItemHistory` + 分析 | `RankingItemHistory` + **`GET /v1/entities/:id/rank-history`**；话题侧 **`GET /v1/topics/:slug/snapshots`** / **`trend-analyses`** | 缺 **CH↔PG 运营报表**、§13 曲线可视化与实时推送 |
-| 时间衰减 / 权重 | 指数/分段/可配置 | `src/domain/scoring.ts`：`timeWeight`、`blendedObservation`、`scoreEntity` | 算法已有；**物化排行时未保证全链路使用该套权重**（需接 EntityMetric/外部信号） |
+| 时间衰减 / 权重 | 指数/分段/可配置 | `scoring.ts` + **`EntityMetric` 全链路**：`POST /admin/entities/:id/metrics` 写入 → 物化 `scoreEntity`；可选 CH `metric_timeseries`（`SYNC_RANKING_TO_CLICKHOUSE`） | 自动从抓取页抽取结构化信号仍待接 |
 | 趋势分析 | 环比/同比/MA/异常 | 物化成功写入**快照级** `TrendAnalysis`（`entityId` 空）+ **`GET /v1/topics/:slug/trend-analyses`**；`scoring` 含 EWMA/斜率/波动分类 | 缺**独立周期作业**（回填/同比）、**异常阈值**与告警配置 |
 | 抓取：增量、断点、去重 | checkpoint、fingerprint | `CrawlCheckpoint`、`CrawledUrl`；**全球调度** `CrawlSchedulerService` + `CrawlScheduleRun` + 管理台 `/crawl` | 多区域 K8s 生产落地、调度 SLA 与配额 |
 | 向量语义 / 亿级 ES | Qdrant/Milvus + ES | **Qdrant 主检索**（`SEARCH_PRIMARY`）+ ES **ILM/rollover** + 规模验证 API | 跨集群 DR、crawl 语义 ANN 全量 |

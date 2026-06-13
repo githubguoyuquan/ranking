@@ -6,6 +6,7 @@ import {
   backendAdminBiDrillTopicPath,
   backendAdminEntitiesPath,
   backendAdminEntityByIdPath,
+  backendAdminEntityMetricsPath,
   backendAdminOutboxPath,
   backendAdminSnapshotAnalyzePath,
 } from "@/lib/backend-api-paths";
@@ -64,6 +65,10 @@ export function adminEntitiesUrl(params?: URLSearchParams): string {
 
 export function adminEntityByIdUrl(entityId: string): string {
   return backendAbs(backendAdminEntityByIdPath(entityId));
+}
+
+export function adminEntityMetricsUrl(entityId: string): string {
+  return backendAbs(backendAdminEntityMetricsPath(entityId));
 }
 
 export function adminBiDrillEntityUrl(entityId: string, days = 30): string {

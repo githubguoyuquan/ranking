@@ -133,6 +133,24 @@ export function nestV1CrawlCheckpointPath(crawlerName: string): string {
   return `${V1}/crawl/checkpoints/${encodeURIComponent(crawlerName)}`;
 }
 
+export function nestV1EntityMetricsPath(
+  entityId: string,
+  query?: URLSearchParams,
+): string {
+  const path = `${V1}/entities/${encodeURIComponent(entityId)}/metrics`;
+  if (!query || query.toString() === "") return path;
+  return nestV1PathWithQuery(path, query);
+}
+
+export function nestV1TopicVersionSignalPreviewPath(
+  topicVersionId: string,
+  query?: URLSearchParams,
+): string {
+  const path = `${V1}/topic-versions/${encodeURIComponent(topicVersionId)}/signal-preview`;
+  if (!query || query.toString() === "") return path;
+  return nestV1PathWithQuery(path, query);
+}
+
 /** `'path' + 可选 ?query`（不含 origin）。 */
 export function nestV1PathWithQuery(
   path: string,
@@ -158,6 +176,8 @@ export const NEST_V1_DOC = {
   topicVersionPolicy: "/v1/topic-versions/:id/policy",
   trendsHot: "/v1/trends/hot",
   entityRankHistory: "/v1/entities/:id/rank-history",
+  entityMetrics: "/v1/entities/:id/metrics",
+  topicVersionSignalPreview: "/v1/topic-versions/:id/signal-preview",
   rankingsStatus: "/v1/rankings/:topicRankingId/status",
   jobRanking: "/v1/jobs/ranking/:jobId",
   crawlTask: "/v1/crawl/tasks/:id",

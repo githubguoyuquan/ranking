@@ -9,6 +9,8 @@ import {
   nestV1CrawlTaskPath,
   nestV1PathWithQuery,
   nestV1EntityRankHistoryPath,
+  nestV1EntityMetricsPath,
+  nestV1TopicVersionSignalPreviewPath,
   nestV1TopicVersionPolicyPath,
   nestV1TrendsHotPath,
   nestV1RankingJobPath,
@@ -118,6 +120,20 @@ export function nestEntityRankHistoryUrl(
   query: URLSearchParams,
 ): string {
   return nestAbs(nestV1EntityRankHistoryPath(entityId, query));
+}
+
+export function nestEntityMetricsUrl(
+  entityId: string,
+  query?: URLSearchParams,
+): string {
+  return nestAbs(nestV1EntityMetricsPath(entityId, query));
+}
+
+export function nestTopicVersionSignalPreviewUrl(
+  topicVersionId: string,
+  query?: URLSearchParams,
+): string {
+  return nestAbs(nestV1TopicVersionSignalPreviewPath(topicVersionId, query));
 }
 
 export function nestTopicVersionPolicyUrl(topicVersionId: string): string {

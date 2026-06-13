@@ -131,6 +131,42 @@ export class ClickhouseService implements OnModuleDestroy {
     );
   }
 
+  /** 外部 EntityMetric 写入 OLAP（snapshot_id=0，time_window=POINT） */
+  async ingestEntityMetrics(params: {
+    topicId: bigint;
+    entityId: bigint;
+    metrics: Array<{
+      metricKey: string;
+      value: number;
+      sourceTier: number;
+      observedAt: Date;
+    }>;
+  }): Promise<void> {
+    if (!this.client || params.metrics.length === 0) return;
+
+    const ingestedAt = chDateTime64(new Date());
+    const tid = Number(params.topicId);
+    const eid = Number(params.entityId);
+
+    const rows: MetricTimeseriesRow[] = params.metrics.map((m) => ({
+      ts: chDateTime64(m.observedAt),
+      topic_id: tid,
+      entity_id: eid,
+      metric_key: m.metricKey,
+      value: m.value,
+      source_tier: m.sourceTier,
+      ingested_at: ingestedAt,
+      evidence_id: randomUUID(),
+      snapshot_id: 0,
+      time_window: 'POINT',
+    }));
+
+    await this.insertMetricTimeseries(rows);
+    this.logger.log(
+      `ClickHouse: wrote ${rows.length} entity metric rows for entity ${params.entityId}`,
+    );
+  }
+
   /** CH↔PG 运营：按 snapshot_id 读取 metric_timeseries（Phase A 报表） */
   async querySnapshotMetrics(snapshotId: bigint): Promise<{
     ok: boolean;

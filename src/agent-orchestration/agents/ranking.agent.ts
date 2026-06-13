@@ -5,6 +5,7 @@ import {
   resolveAiAnalysisAgentKind,
 } from '../../agent/ai-agent.constants';
 import { optionalAgentLlm } from '../../agent/agent-llm.helper';
+import { pickLatestMetricsByKey } from '../../domain/entity-signals';
 import { parseRankingPolicyJson } from '../../domain/policy-json';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -67,16 +68,17 @@ export class RankingAgent {
     const entityIds = snap.items.map((i) => i.entityId);
 
     const metrics = await this.prisma.entityMetric.findMany({
-      where: { entityId: { in: entityIds } },
-      select: { entityId: true, metricKey: true },
+      where: {
+        entityId: { in: entityIds },
+        observedAt: { lte: snap.snapshotTime },
+      },
     });
 
     const keysByEntity = new Map<string, Set<string>>();
-    for (const m of metrics) {
-      const id = m.entityId.toString();
-      const set = keysByEntity.get(id) ?? new Set<string>();
-      set.add(m.metricKey);
-      keysByEntity.set(id, set);
+    for (const eid of entityIds) {
+      const entityMetrics = metrics.filter((m) => m.entityId === eid);
+      const latest = pickLatestMetricsByKey(entityMetrics, snap.snapshotTime);
+      keysByEntity.set(eid.toString(), new Set([...latest.keys()]));
     }
 
     const gaps: SignalGap[] = [];

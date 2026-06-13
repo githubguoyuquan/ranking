@@ -7,6 +7,7 @@ describe('RankingAgent', () => {
       topicRankSnapshot: {
         findUnique: vi.fn().mockResolvedValue({
           id: 1n,
+          snapshotTime: new Date('2026-05-17T12:00:00.000Z'),
           items: [
             {
               entityId: 100n,
@@ -26,7 +27,13 @@ describe('RankingAgent', () => {
       },
       entityMetric: {
         findMany: vi.fn().mockResolvedValue([
-          { entityId: 100n, metricKey: 'streams' },
+          {
+            entityId: 100n,
+            metricKey: 'streams',
+            value: 10,
+            sourceTier: 2,
+            observedAt: new Date('2026-05-16T00:00:00.000Z'),
+          },
         ]),
       },
       aiAnalysis: {

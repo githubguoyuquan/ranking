@@ -1,19 +1,24 @@
 import { AdminFooterNav } from "@/components/admin-footer-nav";
 import { CopyAdminPageUrlButton } from "@/components/copy-admin-page-url-button";
 import { ADMIN_HREF } from "@/lib/admin-web-paths";
+import { SITE_HREF } from "@/lib/site-web-paths";
 import Link from "next/link";
 
 export default function NotFound() {
   return (
-    <div className="mx-auto max-w-md space-y-6 pt-12 text-center">
+    <div className="mx-auto max-w-md space-y-6 px-4 pt-12 text-center">
       <div className="space-y-4">
         <h1 className="text-xl font-semibold">页面不存在</h1>
         <p className="text-sm text-muted-foreground">
-          路径无效或资源已迁移。可从概览进入各管理页。
+          路径无效或资源已迁移。
         </p>
         <p className="flex flex-wrap items-center justify-center gap-x-2 gap-y-2 text-sm">
+          <Link href={SITE_HREF.home} className="text-primary underline-offset-4 hover:underline">
+            用户首页
+          </Link>
+          <span className="text-muted-foreground">·</span>
           <Link href={ADMIN_HREF.home} className="text-primary underline-offset-4 hover:underline">
-            概览
+            运营概览
           </Link>
           <CopyAdminPageUrlButton
             path={ADMIN_HREF.home}

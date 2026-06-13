@@ -1,4 +1,5 @@
 import { ADMIN_HREF, ADMIN_SNAPSHOTS_ROUTE_PREFIX } from "@/lib/admin-web-paths";
+import { SITE_HREF } from "@/lib/site-web-paths";
 
 export type AdminNavItem = {
   href: string;
@@ -30,6 +31,7 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   { href: ADMIN_HREF.compliance, label: "合规导出" },
   { href: ADMIN_HREF.scale, label: "规模运维" },
   { href: ADMIN_HREF.ops, label: "DR / K8s" },
+  { href: SITE_HREF.home, label: "用户站点 ↗" },
 ];
 
 export function isAdminNavActive(pathname: string, item: AdminNavItem): boolean {

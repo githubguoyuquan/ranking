@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { AdminShell } from "@/components/admin-shell";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -19,8 +18,11 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "Ranking 管理台",
-  description: "AI 动态排行榜 — 演示数据、运行任务、快照与图表",
+  title: {
+    default: "Ranking — 动态排行榜",
+    template: "%s · Ranking",
+  },
+  description: "AI 驱动的全球动态排行榜与热点趋势",
 };
 
 export default function RootLayout({
@@ -29,11 +31,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="zh-CN" className="dark" suppressHydrationWarning>
+    <html lang="zh-CN" suppressHydrationWarning>
       <body
         className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased`}
       >
-        <AdminShell>{children}</AdminShell>
+        {children}
       </body>
     </html>
   );

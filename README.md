@@ -102,13 +102,37 @@ DATABASE_URL='postgresql://...' npm run prisma:deploy
 | **3** | Elasticsearch | ✅ 骨架 + Outbox + **检索高亮**；跨集群属运维/配置（多节点 `ELASTICSEARCH_NODE` 或 SLM 不在本仓库展开） |
 | **4** | 真爬取 | ✅ HTTP GET + **Playwright** + 摘要入 PG/ES；⏳ 更细 DOM 特征与反爬策略需按业务继续加 |
 
-## Web 管理端 (`web/`)
+## Web（C 端 + 管理台 `web/`）
+
+**用户站点（C 端）** — 根路径 `/`：
+
+| 路径 | 说明 |
+|------|------|
+| `/` | 首页：演示热榜 TOP10 + 热点涨榜 |
+| `/topics/:slug` | 话题排行榜、得分图、近期快照 |
+| `/entities/:id` | 实体详情、名次曲线、相似推荐 |
+| `/search` | 实体搜索 |
+| `/trends` | 热点涨榜 |
+| `/snapshots/:id` | 快照只读详情 + AI 简报 |
+
+**运营台** — 前缀 `/console`（原管理路径已迁移）：
 
 ```bash
 cd web
 cp .env.example .env.local   # NEXT_PUBLIC_API_URL=http://localhost:3000
 npm install
-npm run dev   # 默认 http://localhost:3001
+npm run dev   # http://localhost:3001
+```
+
+生产若 `API_AUTH_REQUIRED=true`，C 端需配置 `NEXT_PUBLIC_READ_API_KEY`（read 作用域）。
+
+## Web 管理端（历史说明）
+
+```bash
+cd web
+cp .env.example .env.local   # NEXT_PUBLIC_API_URL=http://localhost:3000
+npm install
+npm run dev   # 默认 http://localhost:3001 — C 端 `/`，管理台 `/console`
 ```
 
 根布局导出 **`viewport`**（`width=device-width`）以移动端缩放一致。

@@ -310,7 +310,11 @@ Wire：**Envelope v1** + AJV（`src/kafka/schemas/`）；路由 **`src/kafka/eve
 
 ## 13. 前端（Next.js）
 
-**已有**：管理台多页、**`/bi` 大屏**（observability 告警、CH MV、**实体/话题钻取侧栏**）、**`/scale`**（ILM/压测）、**`/crawl` 调度**、**`/topics` kindStrategy**、**Outbox** 快捷筛选、ES/Qdrant 健康等；**话题版本** 页含 **`TrendAnalysis` 快照摘要**、**近期快照**（含 **`hasScoreModel`** / 分解 API）、**热榜预览**（**`resolved.hasScoreModel`**、**score-breakdowns** 链）、**policyJson 编辑（PATCH）**；**热榜 SSE**：`GET /v1/realtime/stream`（Redis Pub/Sub，快照 **`snapshot_ready`** / **`ranking_failed`**）；**实体** 页 **rank-history** JSON + **`/entities/rank-history`** 折线图；**`/trends`** 热点表（`GET /v1/trends/hot`）。**快照详情** `/snapshots/:id` 展示 **ScoreModel / `scoreBreakdown`**，**`AI 简报` 工具条**可打开 **`GET …/score-breakdowns`**，支持 **`?analysisKind=`** / **`?analysisPage=`** / **`?analysisLimit=`**，与 **`GET /v1/snapshots/:id/analyses`** 分页对齐。**快照对比** 说明中提及单元格 **`scoreBreakdown`** 与按列拉取关系表 JSON。
+**C 端用户站点（根路径）**：`/` 首页、`/topics/:slug` 热榜、`/entities/:id` 实体曲线与相似推荐、`/search`、`/trends`、`/snapshots/:id` 只读快照；`SiteShell` 导航；`site-api.ts` + 可选 `NEXT_PUBLIC_READ_API_KEY`。
+
+**运营台（`/console`）**：原管理台全部页面；`AdminShell` 侧栏含「用户站点 ↗」链回 C 端。
+
+**已有（运营台）**：多页、**`/console/bi` 大屏**、**`/console/scale`**、爬虫调度、Outbox、Agent 等；**话题版本** 页含 policy 编辑；**热榜 SSE** 等。
 
 **缺口（产品级）**：
 

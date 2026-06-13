@@ -24,6 +24,8 @@ import {
   nestV1TopicSnapshotsPath,
   nestV1TopicTrendAnalysesPath,
   nestV1TopicVersionsPath,
+  nestV1RecommendationsSimilarEntitiesPath,
+  nestV1RecommendationsSimilarTopicsPath,
 } from "@/lib/nest-api-paths";
 
 const nestAbs = apiUrl;
@@ -185,4 +187,16 @@ export function nestCrawlCheckpointUrl(crawlerName: string): string {
 /** `POST` **`NEST_V1.crawlUrls`**（注册 seed URL 等） */
 export function nestCrawlUrlsRegisterUrl(): string {
   return nestAbs(NEST_V1.crawlUrls);
+}
+
+export function nestSimilarTopicsUrl(topicId: string, limit = 8): string {
+  const q = new URLSearchParams();
+  q.set("limit", String(limit));
+  return nestAbs(nestV1RecommendationsSimilarTopicsPath(topicId, q));
+}
+
+export function nestSimilarEntitiesUrl(entityId: string, limit = 8): string {
+  const q = new URLSearchParams();
+  q.set("limit", String(limit));
+  return nestAbs(nestV1RecommendationsSimilarEntitiesPath(entityId, q));
 }

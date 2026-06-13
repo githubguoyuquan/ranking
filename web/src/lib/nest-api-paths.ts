@@ -157,6 +157,26 @@ export function nestV1TopicVersionSignalPreviewPath(
   return nestV1PathWithQuery(path, query);
 }
 
+export function nestV1RecommendationsSimilarTopicsPath(
+  topicId: string,
+  query?: URLSearchParams,
+): string {
+  const path = `${V1}/recommendations/similar-topics?topicId=${encodeURIComponent(topicId)}`;
+  if (!query || query.toString() === "") return path;
+  const extra = query.toString();
+  return `${path}&${extra}`;
+}
+
+export function nestV1RecommendationsSimilarEntitiesPath(
+  entityId: string,
+  query?: URLSearchParams,
+): string {
+  const path = `${V1}/recommendations/similar-entities?entityId=${encodeURIComponent(entityId)}`;
+  if (!query || query.toString() === "") return path;
+  const extra = query.toString();
+  return `${path}&${extra}`;
+}
+
 /** `'path' + 可选 ?query`（不含 origin）。 */
 export function nestV1PathWithQuery(
   path: string,

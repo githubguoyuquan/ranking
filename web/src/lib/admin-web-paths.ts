@@ -1,29 +1,32 @@
 import { TOPIC_SLUG_MAX_LEN } from "@/lib/admin-input-limits";
 
-/** 快照详情、对比等共用 URL 前缀（侧栏高亮子路由） */
-export const ADMIN_SNAPSHOTS_ROUTE_PREFIX = "/snapshots/";
+/** 管理台 URL 前缀（与 `src/app/console` 路由一致） */
+export const CONSOLE_PREFIX = "/console";
 
-/** 管理台固定路径（与 `src/app` 下路由一致；无 query） */
+/** 快照详情、对比等共用 URL 前缀（侧栏高亮子路由） */
+export const ADMIN_SNAPSHOTS_ROUTE_PREFIX = `${CONSOLE_PREFIX}/snapshots/`;
+
+/** 管理台固定路径（与 `src/app/console` 下路由一致；无 query） */
 export const ADMIN_HREF = {
-  home: "/",
-  topics: "/topics",
-  entities: "/entities",
-  entityRankHistory: "/entities/rank-history",
-  trends: "/trends",
-  search: "/search",
-  rankingsRun: "/rankings/run",
-  snapshots: "/snapshots",
-  snapshotsCompare: "/snapshots/compare",
-  crawl: "/crawl",
-  crawlMonitor: "/crawl/monitor",
-  seed: "/seed",
-  reindex: "/reindex",
-  outbox: "/outbox",
-  compliance: "/compliance",
-  scale: "/scale",
-  ops: "/ops",
-  bi: "/bi",
-  agents: "/agents",
+  home: CONSOLE_PREFIX,
+  topics: `${CONSOLE_PREFIX}/topics`,
+  entities: `${CONSOLE_PREFIX}/entities`,
+  entityRankHistory: `${CONSOLE_PREFIX}/entities/rank-history`,
+  trends: `${CONSOLE_PREFIX}/trends`,
+  search: `${CONSOLE_PREFIX}/search`,
+  rankingsRun: `${CONSOLE_PREFIX}/rankings/run`,
+  snapshots: `${CONSOLE_PREFIX}/snapshots`,
+  snapshotsCompare: `${CONSOLE_PREFIX}/snapshots/compare`,
+  crawl: `${CONSOLE_PREFIX}/crawl`,
+  crawlMonitor: `${CONSOLE_PREFIX}/crawl/monitor`,
+  seed: `${CONSOLE_PREFIX}/seed`,
+  reindex: `${CONSOLE_PREFIX}/reindex`,
+  outbox: `${CONSOLE_PREFIX}/outbox`,
+  compliance: `${CONSOLE_PREFIX}/compliance`,
+  scale: `${CONSOLE_PREFIX}/scale`,
+  ops: `${CONSOLE_PREFIX}/ops`,
+  bi: `${CONSOLE_PREFIX}/bi`,
+  agents: `${CONSOLE_PREFIX}/agents`,
 } as const;
 
 /** `/topics` 管理页；`slug` 与演示 seed / 热榜页一致，上限见 `TOPIC_SLUG_MAX_LEN` */

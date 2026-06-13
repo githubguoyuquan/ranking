@@ -21,10 +21,7 @@ export class RankingCacheService implements OnModuleDestroy {
     const dbRaw = process.env.RANKING_CACHE_REDIS_DB;
     const db = dbRaw !== undefined && dbRaw !== '' ? Number(dbRaw) : 0;
     this.redis = new Redis({
-      host: conn.host,
-      port: conn.port,
-      password: conn.password,
-      username: conn.username,
+      ...conn,
       db: Number.isFinite(db) ? db : 0,
       maxRetriesPerRequest: 2,
       retryStrategy(times: number) {

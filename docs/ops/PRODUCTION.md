@@ -14,12 +14,25 @@
 
 ## Helm 部署
 
+详见 **[AWS_PRODUCTION_WIRING.md](./AWS_PRODUCTION_WIRING.md)**（RDS Multi-AZ + `DATABASE_READ_URL`、ElastiCache `rediss://`、MSK、External Secrets）。
+
 ```bash
 docker build -t ranking-platform:0.1.0 .
 helm upgrade --install ranking deploy/helm/ranking \
   -f deploy/helm/ranking/values-production.yaml \
+  -f deploy/helm/ranking/values-aws-production.yaml \
+  --set externalSecrets.enabled=true \
+  --set migrateJob.enabled=true
+```
+
+本地 / 非 AWS 最小部署：
+
+```bash
+helm upgrade --install ranking deploy/helm/ranking \
+  -f deploy/helm/ranking/values-production.yaml \
   --set migrateJob.enabled=true \
   --set env.DATABASE_URL='...' \
+  --set env.DATABASE_READ_URL='...' \
   --set env.REDIS_URL='...' \
   --set env.KAFKA_BROKERS='broker1:9092,broker2:9092'
 ```
@@ -67,7 +80,8 @@ Helm 模板含 **live/ready/startup** 探针、**HPA**、**Ingress**、**Service
 - 爬虫：`CrawlCheckpoint` + 任务状态可续跑
 - 事件网：Kafka 保留期 ≥ 业务重放窗口
 - **演练 runbook**： [DR_RUNBOOK.md](./DR_RUNBOOK.md)
-- CI/on-call：`scripts/dr-readiness.sh`（exit 2 = critical）
+- CI/on-call：`scripts/dr-readiness.sh`（exit 2 = critical）；PR 流水线 `scripts/ci-dr-readiness.sh`
+- GitHub Actions：`.github/workflows/ci.yml`、定时 `dr-readiness-scheduled.yml`（需 secrets）
 
 ## 环境变量清单
 

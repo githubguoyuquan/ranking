@@ -13,10 +13,7 @@ export class RedisHealthService {
     const cacheReadsEnabled = process.env.RANKING_CACHE_ENABLED !== 'false';
     const conn = bullMqConnectionFromEnv();
     const redis = new Redis({
-      host: conn.host,
-      port: conn.port,
-      password: conn.password,
-      username: conn.username,
+      ...conn,
       maxRetriesPerRequest: 1,
       connectTimeout: 3000,
       enableOfflineQueue: false,

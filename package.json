@@ -16,7 +16,9 @@
     "lint:web": "npm run lint --prefix web",
     "lint:all": "npm run lint && npm run lint:web && npm run typecheck --prefix web",
     "test": "vitest run",
-    "scale:validate": "bash scripts/scale-validate.sh"
+    "scale:validate": "bash scripts/scale-validate.sh",
+    "dr:readiness": "bash scripts/dr-readiness.sh",
+    "dr:readiness:ci": "bash scripts/ci-dr-readiness.sh"
   },
   "dependencies": {
     "@clickhouse/client": "^1.18.5",

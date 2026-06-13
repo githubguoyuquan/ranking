@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main, feat/**]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install and test
+        run: |
+          npm ci
+          npm test
+          npm run lint:all
+
+  dr-readiness:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: DR readiness smoke (compose)
+        run: |
+          chmod +x scripts/*.sh
+          bash scripts/ci-dr-readiness.sh

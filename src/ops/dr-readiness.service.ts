@@ -1,6 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { ClickhouseService } from '../analytics/clickhouse.service';
 import { RedisHealthService } from '../cache/redis-health.service';
+import {
+  evaluateProductionWiring,
+  mergeDrChecks,
+  productionWiringEnvFromProcess,
+  worstDrStatus,
+} from './production-wiring';
 import { KafkaProducerService } from '../kafka/kafka-producer.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { PrismaReadService } from '../scale/prisma-read.service';
@@ -9,16 +15,9 @@ import { QdrantSearchService } from '../search/qdrant-search.service';
 import { CrawlOpsService } from '../observability/crawl-ops.service';
 import { OutboxLagService } from '../observability/outbox-lag.service';
 import { listKafkaPublishOutboxTypes } from '../kafka/event-registry';
+import type { DrCheckItem, DrCheckSeverity } from './dr-readiness.types';
 
-export type DrCheckSeverity = 'ok' | 'warn' | 'critical';
-
-export type DrCheckItem = {
-  code: string;
-  severity: DrCheckSeverity;
-  message: string;
-  value?: number | string | boolean;
-  hint?: string;
-};
+export type { DrCheckItem, DrCheckSeverity } from './dr-readiness.types';
 
 @Injectable()
 export class DrReadinessService {
@@ -91,11 +90,12 @@ export class DrReadinessService {
           : 'Read replica configured but unreachable',
       });
     } else {
+      const wiring = productionWiringEnvFromProcess();
       checks.push({
         code: 'postgres_read_replica',
-        severity: 'warn',
+        severity: wiring.productionWiringRequired ? 'critical' : 'warn',
         message: 'DATABASE_READ_URL not set — reads use primary',
-        hint: 'Configure read replica URL for DR read scaling',
+        hint: 'Configure RDS reader endpoint for DATABASE_READ_URL',
       });
     }
 
@@ -114,11 +114,12 @@ export class DrReadinessService {
           : `Kafka unreachable: ${kafkaPing.detail ?? 'unknown'}`,
       });
     } else {
+      const wiring = productionWiringEnvFromProcess();
       checks.push({
         code: 'kafka',
-        severity: 'warn',
+        severity: wiring.productionWiringRequired ? 'critical' : 'warn',
         message: 'KAFKA_BROKERS not configured',
-        hint: 'Event mesh DR requires cross-AZ Kafka cluster',
+        hint: 'MSK bootstrap brokers (3 AZ)',
       });
     }
 
@@ -181,7 +182,9 @@ export class DrReadinessService {
       value: checkpointCount,
     });
 
-    const status = worstDrStatus(checks);
+    const wiringChecks = evaluateProductionWiring(productionWiringEnvFromProcess());
+    const allChecks = mergeDrChecks(checks, wiringChecks);
+    const status = worstDrStatus(allChecks);
     return {
       status,
       generatedAt: new Date().toISOString(),
@@ -191,7 +194,7 @@ export class DrReadinessService {
         cluster: process.env.DR_CLUSTER?.trim() || null,
         k8sNamespace: process.env.K8S_NAMESPACE?.trim() || null,
       },
-      checks,
+      checks: allChecks,
       outbox,
       crawl: {
         scheduler: crawl.scheduler,
@@ -278,10 +281,4 @@ export class DrReadinessService {
       };
     }
   }
-}
-
-function worstDrStatus(checks: DrCheckItem[]): DrCheckSeverity {
-  if (checks.some((c) => c.severity === 'critical')) return 'critical';
-  if (checks.some((c) => c.severity === 'warn')) return 'warn';
-  return 'ok';
 }

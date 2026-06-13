@@ -53,6 +53,10 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 - name: DR_CLUSTER
   value: {{ .Values.dr.cluster | quote }}
 {{- end }}
+{{- if .Values.productionWiring.required }}
+- name: PRODUCTION_WIRING_REQUIRED
+  value: "true"
+{{- end }}
 - name: K8S_NAMESPACE
   valueFrom:
     fieldRef:

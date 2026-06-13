@@ -24,10 +24,7 @@ export class CrawlHostThrottleService implements OnModuleDestroy {
     try {
       const o = bullMqConnectionFromEnv();
       this.redis = new Redis({
-        host: o.host,
-        port: o.port,
-        password: o.password,
-        username: o.username,
+        ...o,
         maxRetriesPerRequest: null,
         lazyConnect: true,
       });

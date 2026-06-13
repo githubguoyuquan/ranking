@@ -1,0 +1,23 @@
+name: DR readiness (scheduled)
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 每 6 小时（UTC）
+    - cron: "0 */6 * * *"
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    if: ${{ vars.RANKING_DR_READINESS_ENABLED == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Probe staging/production API
+        env:
+          RANKING_API_BASE: ${{ secrets.RANKING_DR_API_BASE }}
+          RANKING_API_KEY: ${{ secrets.RANKING_DR_API_KEY }}
+          DR_READINESS_MIN_STATUS: ${{ vars.RANKING_DR_MIN_STATUS || 'warn' }}
+        run: |
+          chmod +x scripts/dr-readiness.sh
+          bash scripts/dr-readiness.sh

@@ -23,7 +23,7 @@
 | 微服务拆分 | 多进程/多服务 | `PROCESS_ROLE` + `platform-worker` / `crawl-worker` + Helm 多 Deployment | 未拆独立仓库 |
 | 多 AZ 运维 | K8s 生产 | `values-production.yaml` PDB + topologySpread + `docs/ops/PRODUCTION.md` | 托管服务与 DR 演练待落地 |
 | AI Agent 体系 | 多 Agent | **BullMQ `ai-agent`** + **`AgentRun`** + 7 类快照/生命周期 agent；`RANKING_FOLLOWUP_AGENT_PIPELINE` | Temporal / Kafka `ai.analysis.requested`；更细粒度配额 |
-| 搜索与推荐 | 语义、时间、趋势检索 + 推荐 | **Qdrant/ES/PG** 统一搜索；kNN + `similar-entities` / `similar-topics` | 时间范围 DSL、Hybrid RRF、更大规模话题向量 |
+| 搜索与推荐 | 语义、时间、趋势检索 + 推荐 | **Qdrant/ES/PG** + **DSL/RRF hybrid** + `similar-entities` / `similar-topics` | 协同过滤、更大规模话题向量 |
 | 生产可观测 | Outbox/爬虫/BI | `observability` 模块 + `/bi` 告警 + Grafana 骨架 | 告警路由生产化 |
 | 规模验证 | 压测与 ILM | `POST /admin/scale/validate`、ES ILM、Qdrant benchmark、CH MV + BI 钻取 | 托管集群常态化压测 |
 | 微服务 | DDD+拆服务 | **单体 Nest** | 按限界上下文拆分为独立服务（可选） |
@@ -263,9 +263,9 @@ Wire：**Envelope v1** + AJV（`src/kafka/schemas/`）；路由 **`src/kafka/eve
 
 ## 10. 搜索与推荐
 
-**已有**：`SEARCH_PRIMARY=auto|qdrant|es|pg`；**`QdrantSearchService`** 双 collection（全文 `searchText` + 向量 kNN）；ES/PG 回退；Outbox 与 ES/Qdrant **并行双写**；**`GET /v1/search/health`**；**`POST /admin/reindex-*`**；**`GET /v1/recommendations/similar-*`**；管理台高亮。
+**已有**：`SEARCH_PRIMARY=auto|qdrant|es|pg`；Qdrant/ES/PG 回退；**内联 DSL**（`type:` / `since:` / `topic:` / `source:` / `status:`）+ 显式 query 参数；**Hybrid RRF**（`hybrid=1` 融合全文+kNN，`SEARCH_RRF_K`）；Outbox 双写；**`GET /v1/recommendations/similar-*`**。
 
-**缺口**：时间范围 DSL、Hybrid RRF、协同过滤推荐。
+**缺口**：协同过滤推荐、更大规模话题向量。
 
 ---
 

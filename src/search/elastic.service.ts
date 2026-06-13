@@ -61,8 +61,10 @@ export type EntitySearchHit = {
   score: number;
   canonicalName: string;
   type: string;
-  /** 命中方式：全文或 kNN 向量 */
-  match?: 'lexical' | 'vector';
+  /** 命中方式：全文、kNN 或 RRF 融合 */
+  match?: 'lexical' | 'vector' | 'hybrid';
+  rrfScore?: number;
+  rankContributions?: Record<string, number>;
   /** Elasticsearch `highlight` 字段：含 `<em>...</em>`，便于前端展示 */
   highlights?: Record<string, string[]>;
 };
@@ -76,6 +78,7 @@ export type CrawledUrlSearchHit = {
   status: string;
   pageTitle: string | null;
   snippet: string;
+  fetchedAt?: string | null;
   highlights?: Record<string, string[]>;
 };
 
@@ -845,7 +848,12 @@ export class ElasticService implements OnModuleDestroy {
   async searchCrawledUrlDocs(
     q: string,
     limit: number,
-    filters?: { sourceId?: bigint; status?: string },
+    filters?: {
+      sourceId?: bigint;
+      status?: string;
+      fetchedSince?: Date;
+      fetchedUntil?: Date;
+    },
   ): Promise<CrawledUrlSearchHit[]> {
     if (!this.client) {
       throw new ServiceUnavailableException('Elasticsearch not configured (ELASTICSEARCH_NODE)');
@@ -860,6 +868,24 @@ export class ElasticService implements OnModuleDestroy {
     if (filters?.status !== undefined && filters.status.length > 0) {
       filter.push({ term: { status: filters.status } });
     }
+    if (filters?.fetchedSince) {
+      filter.push({ range: { fetchedAt: { gte: filters.fetchedSince.toISOString() } } });
+    }
+    if (filters?.fetchedUntil) {
+      filter.push({ range: { fetchedAt: { lte: filters.fetchedUntil.toISOString() } } });
+    }
+
+    const mustQuery =
+      q === '*' || q.trim() === ''
+        ? { match_all: {} }
+        : {
+            multi_match: {
+              query: q,
+              fields: ['url^2', 'pageTitle^1.5', 'textPreview'],
+              type: 'best_fields' as const,
+              fuzziness: 'AUTO' as const,
+            },
+          };
 
     let res;
     try {
@@ -867,16 +893,7 @@ export class ElasticService implements OnModuleDestroy {
         index: this.resolveSearchIndex(ELASTIC_INDEX_CRAWLED_URLS),
         query: {
           bool: {
-            must: [
-              {
-                multi_match: {
-                  query: q,
-                  fields: ['url^2', 'pageTitle^1.5', 'textPreview'],
-                  type: 'best_fields',
-                  fuzziness: 'AUTO',
-                },
-              },
-            ],
+            must: [mustQuery],
             filter: filter.length ? filter : undefined,
           },
         },

@@ -39,9 +39,41 @@ import { elasticEntitySyncOutboxCreate } from './elastic-entity-outbox';
 import { ElasticService } from './elastic.service';
 import { EmbeddingService } from './embedding.service';
 import { QdrantSearchService } from './qdrant-search.service';
+import { HybridSearchService, type SearchEngine } from './hybrid-search.service';
 import { resolveSearchPrimary } from './search-primary';
 
-class SearchEntitiesQueryDto {
+class SearchDslQueryDto {
+  /** 内联 DSL 示例：`type:PERSON since:7d keyword`；亦可用下列显式参数 */
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  type?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  topic?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  since?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  until?: string;
+
+  /** 全文 + 向量 RRF 融合（需 OPENAI_API_KEY + qdrant/es） */
+  @IsOptional()
+  @Transform(
+    ({ value }) => value === true || value === 'true' || value === '1' || value === 1,
+  )
+  @IsBoolean()
+  hybrid?: boolean;
+}
+
+class SearchEntitiesQueryDto extends SearchDslQueryDto {
   @IsString()
   @MinLength(1)
   @MaxLength(200)
@@ -71,7 +103,7 @@ class SearchEntitiesQueryDto {
   semantic?: boolean;
 }
 
-class SearchCrawledUrlsQueryDto {
+class SearchCrawledUrlsQueryDto extends SearchDslQueryDto {
   @IsString()
   @MinLength(2)
   @MaxLength(200)
@@ -96,7 +128,7 @@ class SearchCrawledUrlsQueryDto {
   limit?: number;
 }
 
-class UnifiedSearchQueryDto {
+class UnifiedSearchQueryDto extends SearchDslQueryDto {
   @IsString()
   @MinLength(1)
   @MaxLength(200)
@@ -203,6 +235,7 @@ export class SearchController {
     private readonly qdrant: QdrantSearchService,
     private readonly prisma: PrismaService,
     private readonly embedding: EmbeddingService,
+    private readonly hybrid: HybridSearchService,
   ) {}
 
   private searchIndexEnabled(): boolean {
@@ -233,34 +266,85 @@ export class SearchController {
    */
   @Get('v1/search')
   async unifiedSearch(@Query() query: UnifiedSearchQueryDto) {
-    const q = query.q.trim();
+    const rawQ = query.q.trim();
     const lim = Math.min(Math.max(query.limit ?? 12, 1), 30);
-    const crawlPref = query.crawlIndex ?? 'auto';
-    const crawlSourceId = parseOptionalSourceId(query.sourceId);
-    const crawlStatus = query.status?.trim();
-
-    const entityPref = query.entityIndex ?? 'auto';
+    const parsed = this.hybrid.parseQuery(rawQ, {
+      type: query.type,
+      topic: query.topic,
+      since: query.since,
+      until: query.until,
+      sourceId: query.sourceId,
+      status: query.status,
+    });
 
     const [entities, crawledUrls] = await Promise.all([
-      this.unifiedEntitiesPart(q, lim, entityPref, query.entitySemantic === true),
-      this.unifiedCrawledPart(q, lim, crawlPref, crawlSourceId, crawlStatus),
+      this.unifiedEntitiesPart(
+        parsed,
+        lim,
+        query.entityIndex ?? 'auto',
+        query.entitySemantic === true,
+        query.hybrid === true,
+      ),
+      this.unifiedCrawledPart(
+        parsed,
+        lim,
+        query.crawlIndex ?? 'auto',
+        parseOptionalSourceId(query.sourceId),
+        query.status?.trim(),
+        query.hybrid === true,
+      ),
     ]);
 
-    return toPlainJson({ query: q, entities, crawledUrls });
+    return toPlainJson({
+      query: rawQ,
+      dsl: {
+        text: parsed.text,
+        filters: {
+          ...(parsed.filters.type ? { type: parsed.filters.type } : {}),
+          ...(parsed.filters.topic ? { topic: parsed.filters.topic } : {}),
+          ...(parsed.filters.sourceId ? { sourceId: parsed.filters.sourceId } : {}),
+          ...(parsed.filters.status ? { status: parsed.filters.status } : {}),
+          ...(parsed.filters.since
+            ? { since: parsed.filters.since.toISOString() }
+            : {}),
+          ...(parsed.filters.until
+            ? { until: parsed.filters.until.toISOString() }
+            : {}),
+        },
+      },
+      entities,
+      crawledUrls,
+    });
   }
 
   @Get('v1/search/entities')
   async searchEntities(@Query() query: SearchEntitiesQueryDto) {
-    const q = query.q.trim();
+    const rawQ = query.q.trim();
     const lim = query.limit ?? 20;
-    const engine =
-      query.engine === 'auto' || !query.engine
-        ? this.primaryEngine()
-        : query.engine === 'es'
-          ? 'elasticsearch'
-          : query.engine === 'qdrant'
-            ? 'qdrant'
-            : 'postgresql';
+    const engine = this.resolveEnginePref(query.engine);
+    const parsed = this.hybrid.parseQuery(rawQ, {
+      type: query.type,
+      topic: query.topic,
+      since: query.since,
+      until: query.until,
+    });
+
+    if (query.hybrid === true) {
+      const result = await this.hybrid.searchEntities({
+        parsed,
+        limit: lim,
+        engine,
+        hybrid: true,
+      });
+      return toPlainJson({
+        query: rawQ,
+        dsl: parsed,
+        engine: result.engine,
+        mode: result.mode,
+        count: result.hits.length,
+        hits: result.hits,
+      });
+    }
 
     if (query.semantic) {
       if (engine === 'postgresql') {
@@ -273,7 +357,7 @@ export class SearchController {
           'semantic search requires OPENAI_API_KEY',
         );
       }
-      const vec = await this.embedding.embedText(q, {
+      const vec = await this.embedding.embedText(parsed.text || rawQ, {
         source: AI_AUDIT_SOURCE_EMBEDDING_SEARCH,
         operation: 'v1_entity_semantic',
       });
@@ -282,7 +366,8 @@ export class SearchController {
           ? await this.qdrant.searchEntitiesByVector(vec, lim)
           : await this.elastic.searchEntitiesByVector(vec, lim);
       return toPlainJson({
-        query: q,
+        query: rawQ,
+        dsl: parsed,
         engine,
         mode: 'vector',
         count: hits.length,
@@ -290,41 +375,20 @@ export class SearchController {
       });
     }
 
-    if (engine === 'postgresql') {
-      const hits = await this.searchEntitiesPostgres(q, lim);
-      return toPlainJson({
-        query: q,
-        engine: 'postgresql',
-        count: hits.length,
-        hits,
-      });
-    }
-
-    if (engine === 'qdrant') {
-      if (!this.qdrant.isEnabled()) {
-        throw new ServiceUnavailableException('Qdrant not configured (QDRANT_URL)');
-      }
-      const hits = await this.qdrant.searchEntities(q, lim);
-      return toPlainJson({
-        query: q,
-        engine: 'qdrant',
-        count: hits.length,
-        hits,
-      });
-    }
-
-    if (!this.elastic.isEnabled()) {
-      throw new ServiceUnavailableException(
-        'Elasticsearch not configured (ELASTICSEARCH_NODE)',
-      );
-    }
-
-    const hits = await this.elastic.searchEntities(q, lim);
+    const result = await this.hybrid.searchEntities({
+      parsed,
+      limit: lim,
+      engine,
+      hybrid: false,
+    });
     return toPlainJson({
-      query: q,
-      engine: 'elasticsearch',
-      count: hits.length,
-      hits,
+      query: rawQ,
+      dsl: parsed,
+      engine: result.engine,
+      mode: result.mode,
+      count: result.hits.length,
+      hits: result.hits,
+      ...(result.detail ? { detail: result.detail } : {}),
     });
   }
 
@@ -332,35 +396,29 @@ export class SearchController {
   @Get('v1/search/crawled-urls')
   async searchCrawledUrls(@Query() query: SearchCrawledUrlsQueryDto) {
     const take = query.limit ?? 20;
-    const sourceId = parseOptionalSourceId(query.sourceId);
-    const status = query.status?.trim();
-    const needle = query.q.trim();
-
-    const rows = await this.prisma.crawledUrl.findMany({
-      where: {
-        AND: [
-          {
-            OR: [
-              { url: { contains: needle, mode: 'insensitive' } },
-              { textPreview: { contains: needle, mode: 'insensitive' } },
-              { pageTitle: { contains: needle, mode: 'insensitive' } },
-            ],
-          },
-          ...(sourceId !== undefined ? [{ sourceId }] : []),
-          ...(status ? [{ status }] : []),
-        ],
-      },
-      orderBy: { id: 'desc' },
-      take,
-      include: {
-        source: { select: { id: true, name: true, baseUrl: true, kind: true } },
-      },
+    const parsed = this.hybrid.parseQuery(query.q.trim(), {
+      type: query.type,
+      topic: query.topic,
+      since: query.since,
+      until: query.until,
+      sourceId: query.sourceId,
+      status: query.status,
     });
-
+    const result = await this.hybrid.searchCrawledUrls({
+      parsed,
+      limit: take,
+      engine: 'postgresql',
+      hybrid: query.hybrid === true,
+      explicitSourceId: parseOptionalSourceId(query.sourceId),
+      explicitStatus: query.status?.trim(),
+    });
     return toPlainJson({
-      query: needle,
-      count: rows.length,
-      hits: rows,
+      query: query.q.trim(),
+      dsl: parsed,
+      engine: result.engine,
+      mode: result.mode,
+      count: Array.isArray(result.hits) ? result.hits.length : 0,
+      hits: result.hits,
     });
   }
 
@@ -372,36 +430,29 @@ export class SearchController {
   async searchCrawledUrlsEs(@Query() query: SearchCrawledUrlsQueryDto) {
     const primary = this.primaryEngine();
     const take = query.limit ?? 20;
-    const sourceId = parseOptionalSourceId(query.sourceId);
-    const status = query.status?.trim();
-    const needle = query.q.trim();
-    if (primary === 'qdrant') {
-      if (!this.qdrant.isEnabled()) {
-        throw new ServiceUnavailableException('Qdrant not configured (QDRANT_URL)');
-      }
-      const hits = await this.qdrant.searchCrawledUrlDocs(needle, take, {
-        sourceId,
-        status: status || undefined,
-      });
-      return toPlainJson({
-        query: needle,
-        engine: 'qdrant',
-        count: hits.length,
-        hits,
-      });
-    }
-    if (!this.elastic.isEnabled()) {
-      throw new ServiceUnavailableException('Elasticsearch not configured (ELASTICSEARCH_NODE)');
-    }
-    const hits = await this.elastic.searchCrawledUrlDocs(needle, take, {
-      sourceId,
-      status: status || undefined,
+    const parsed = this.hybrid.parseQuery(query.q.trim(), {
+      since: query.since,
+      until: query.until,
+      sourceId: query.sourceId,
+      status: query.status,
+    });
+    const engine: SearchEngine =
+      primary === 'qdrant' ? 'qdrant' : primary === 'elasticsearch' ? 'elasticsearch' : 'postgresql';
+    const result = await this.hybrid.searchCrawledUrls({
+      parsed,
+      limit: take,
+      engine,
+      hybrid: query.hybrid === true,
+      explicitSourceId: parseOptionalSourceId(query.sourceId),
+      explicitStatus: query.status?.trim(),
     });
     return toPlainJson({
-      query: needle,
-      engine: 'elasticsearch',
-      count: hits.length,
-      hits,
+      query: query.q.trim(),
+      dsl: parsed,
+      engine: result.engine,
+      mode: result.mode,
+      count: Array.isArray(result.hits) ? result.hits.length : 0,
+      hits: result.hits,
     });
   }
 
@@ -534,39 +585,16 @@ export class SearchController {
     return toPlainJson({ ok: true, engine: 'elasticsearch', indexed });
   }
 
-  private async searchEntitiesPostgres(
-    q: string,
-    lim: number,
-  ): Promise<Array<{ entityId: string; score: number; canonicalName: string; type: string }>> {
-    const pattern = `%${q.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_')}%`;
-    type Row = { id: bigint; type: string; canonicalName: string };
-    const rows = await this.prisma.$queryRaw<Row[]>(
-      Prisma.sql`
-        SELECT id, type, "canonicalName"
-        FROM "Entity"
-        WHERE
-          "canonicalName" ILIKE ${pattern} ESCAPE '\\'
-          OR EXISTS (
-            SELECT 1
-            FROM jsonb_array_elements_text(
-              CASE
-                WHEN aliases IS NULL THEN '[]'::jsonb
-                WHEN jsonb_typeof(aliases::jsonb) = 'array' THEN aliases::jsonb
-                ELSE '[]'::jsonb
-              END
-            ) AS al(val)
-            WHERE al.val ILIKE ${pattern} ESCAPE '\\'
-          )
-        ORDER BY id DESC
-        LIMIT ${Number(lim)}
-      `,
-    );
-    return rows.map((r) => ({
-      entityId: r.id.toString(),
-      score: 1,
-      canonicalName: r.canonicalName,
-      type: r.type,
-    }));
+  private resolveEnginePref(
+    pref?: 'auto' | 'qdrant' | 'es' | 'pg',
+  ): SearchEngine {
+    if (pref === 'qdrant') return 'qdrant';
+    if (pref === 'es') return 'elasticsearch';
+    if (pref === 'pg') return 'postgresql';
+    const primary = this.primaryEngine();
+    if (primary === 'qdrant') return 'qdrant';
+    if (primary === 'elasticsearch') return 'elasticsearch';
+    return 'postgresql';
   }
 
   private resolveIndexPref(
@@ -579,10 +607,11 @@ export class SearchController {
   }
 
   private async unifiedEntitiesPart(
-    q: string,
+    parsed: ReturnType<HybridSearchService['parseQuery']>,
     lim: number,
     entityPref: 'auto' | 'qdrant' | 'es' | 'pg',
     entitySemantic: boolean,
+    hybrid: boolean,
   ): Promise<{
     source: 'qdrant' | 'elasticsearch' | 'postgresql' | 'off';
     hits: Array<{
@@ -590,13 +619,38 @@ export class SearchController {
       score: number;
       canonicalName: string;
       type: string;
-      match?: 'lexical' | 'vector';
+      match?: 'lexical' | 'vector' | 'hybrid';
+      rrfScore?: number;
+      rankContributions?: Record<string, number>;
       highlights?: Record<string, string[]>;
     }>;
     detail?: string;
     error?: string;
     vectorSearch?: boolean;
+    mode?: string;
   }> {
+    const engine = this.resolveIndexPref(entityPref);
+
+    if (hybrid) {
+      try {
+        const result = await this.hybrid.searchEntities({
+          parsed,
+          limit: lim,
+          engine,
+          hybrid: true,
+        });
+        return {
+          source: result.engine,
+          hits: result.hits,
+          mode: result.mode,
+          vectorSearch: true,
+        };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return { source: engine, hits: [], error: msg, vectorSearch: true, mode: 'hybrid' };
+      }
+    }
+
     if (entitySemantic) {
       if (!this.embedding.isConfigured()) {
         return {
@@ -616,7 +670,7 @@ export class SearchController {
         };
       }
       try {
-        const vec = await this.embedding.embedText(q, {
+        const vec = await this.embedding.embedText(parsed.text || 'entity', {
           source: AI_AUDIT_SOURCE_EMBEDDING_SEARCH,
           operation: 'aggregate_entity_semantic',
         });
@@ -631,57 +685,32 @@ export class SearchController {
       }
     }
 
-    const idx = this.resolveIndexPref(entityPref);
-
-    if (idx === 'qdrant') {
-      if (!this.qdrant.isEnabled()) {
-        return {
-          source: 'off',
-          hits: [],
-          detail: 'QDRANT_URL not set (entityIndex=qdrant)',
-        };
-      }
-      try {
-        const hits = await this.qdrant.searchEntities(q, lim);
-        return { source: 'qdrant', hits };
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        return { source: 'qdrant', hits: [], error: msg };
-      }
-    }
-
-    if (idx === 'elasticsearch') {
-      if (!this.elastic.isEnabled()) {
-        return {
-          source: 'off',
-          hits: [],
-          detail: 'ELASTICSEARCH_NODE not set (entityIndex=es)',
-        };
-      }
-      try {
-        const hits = await this.elastic.searchEntities(q, lim);
-        return { source: 'elasticsearch', hits };
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        return { source: 'elasticsearch', hits: [], error: msg };
-      }
-    }
-
     try {
-      const hits = await this.searchEntitiesPostgres(q, lim);
-      return { source: 'postgresql', hits };
+      const result = await this.hybrid.searchEntities({
+        parsed,
+        limit: lim,
+        engine,
+        hybrid: false,
+      });
+      return {
+        source: result.engine,
+        hits: result.hits,
+        mode: result.mode,
+        ...(result.detail ? { detail: result.detail } : {}),
+      };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      return { source: 'postgresql', hits: [], error: msg };
+      return { source: engine, hits: [], error: msg };
     }
   }
 
   private async unifiedCrawledPart(
-    q: string,
+    parsed: ReturnType<HybridSearchService['parseQuery']>,
     lim: number,
     crawlPref: 'auto' | 'qdrant' | 'es' | 'pg',
     sourceId?: bigint,
     status?: string,
+    hybrid?: boolean,
   ): Promise<{
     source: 'qdrant' | 'elasticsearch' | 'postgresql' | 'skipped' | 'off';
     hits: unknown[];
@@ -689,75 +718,39 @@ export class SearchController {
     detail?: string;
     error?: string;
   }> {
-    if (q.length < 2) {
+    if (parsed.text.length < 2 && !parsed.filters.since && !parsed.filters.until) {
       return {
         source: 'skipped',
         hits: [],
-        note: 'Crawled URL search needs q length >= 2 (substring / full-text)',
+        note: 'Crawled URL search needs q length >= 2 or since/until filter',
       };
     }
 
     const idx = this.resolveIndexPref(crawlPref);
-    if (idx === 'qdrant') {
-      if (!this.qdrant.isEnabled()) {
+    try {
+      const result = await this.hybrid.searchCrawledUrls({
+        parsed,
+        limit: lim,
+        engine: idx,
+        hybrid: hybrid === true,
+        explicitSourceId: sourceId,
+        explicitStatus: status,
+      });
+      if (result.engine === 'skipped') {
         return {
-          source: 'off',
+          source: 'skipped',
           hits: [],
-          detail: 'QDRANT_URL not set (crawlIndex=qdrant)',
+          note: 'Crawled URL search needs q length >= 2 or since/until filter',
         };
       }
-      try {
-        const hits = await this.qdrant.searchCrawledUrlDocs(q, lim, {
-          sourceId,
-          status: status || undefined,
-        });
-        return { source: 'qdrant', hits };
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        return { source: 'qdrant', hits: [], error: msg };
-      }
+      return {
+        source: result.engine,
+        hits: result.hits,
+        ...(result.mode ? { note: `mode=${result.mode}` } : {}),
+      };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { source: idx, hits: [], error: msg };
     }
-
-    if (idx === 'elasticsearch') {
-      if (!this.elastic.isEnabled()) {
-        return {
-          source: 'off',
-          hits: [],
-          detail: 'ELASTICSEARCH_NODE not set (crawlIndex=es)',
-        };
-      }
-      try {
-        const hits = await this.elastic.searchCrawledUrlDocs(q, lim, {
-          sourceId,
-          status: status || undefined,
-        });
-        return { source: 'elasticsearch', hits };
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        return { source: 'elasticsearch', hits: [], error: msg };
-      }
-    }
-
-    const rows = await this.prisma.crawledUrl.findMany({
-      where: {
-        AND: [
-          {
-            OR: [
-              { url: { contains: q, mode: 'insensitive' } },
-              { textPreview: { contains: q, mode: 'insensitive' } },
-              { pageTitle: { contains: q, mode: 'insensitive' } },
-            ],
-          },
-          ...(sourceId !== undefined ? [{ sourceId }] : []),
-          ...(status ? [{ status }] : []),
-        ],
-      },
-      orderBy: { id: 'desc' },
-      take: lim,
-      include: {
-        source: { select: { id: true, name: true, baseUrl: true, kind: true } },
-      },
-    });
-    return { source: 'postgresql', hits: rows };
   }
 }

@@ -7,6 +7,7 @@ import { ElasticEntityOutboxFlusherService } from './elastic-entity-outbox-flush
 import { ElasticService } from './elastic.service';
 import { EmbeddingService } from './embedding.service';
 import { QdrantSearchService } from './qdrant-search.service';
+import { HybridSearchService } from './hybrid-search.service';
 import { RecommendationsController } from './recommendations.controller';
 import { RecommendationsService } from './recommendations.service';
 import { SearchController } from './search.controller';
@@ -18,6 +19,7 @@ import { SearchController } from './search.controller';
     EmbeddingService,
     ElasticService,
     QdrantSearchService,
+    HybridSearchService,
     RecommendationsService,
     ...(runsOutboxSideEffectFlushers()
       ? [ElasticEntityOutboxFlusherService, ElasticCrawledUrlOutboxFlusherService]
@@ -27,6 +29,7 @@ import { SearchController } from './search.controller';
     ElasticService,
     QdrantSearchService,
     EmbeddingService,
+    HybridSearchService,
     RecommendationsService,
   ],
 })

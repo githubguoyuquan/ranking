@@ -319,16 +319,22 @@ export class QdrantSearchService implements OnModuleInit {
   async searchCrawledUrlDocs(
     q: string,
     limit: number,
-    filters?: { sourceId?: bigint; status?: string },
+    filters?: {
+      sourceId?: bigint;
+      status?: string;
+      fetchedSince?: Date;
+      fetchedUntil?: Date;
+    },
   ): Promise<CrawledUrlSearchHit[]> {
     if (!this.isEnabled()) {
       throw new ServiceUnavailableException('Qdrant not configured (QDRANT_URL)');
     }
     await this.ensureCrawledUrlCollection();
     const size = Math.min(Math.max(limit, 1), 50);
-    const must: Array<Record<string, unknown>> = [
-      { key: 'searchText', match: { text: q } },
-    ];
+    const must: Array<Record<string, unknown>> = [];
+    if (q && q !== '*' && q.trim().length >= 2) {
+      must.push({ key: 'searchText', match: { text: q } });
+    }
     if (filters?.sourceId != null) {
       must.push({
         key: 'sourceId',
@@ -345,11 +351,24 @@ export class QdrantSearchService implements OnModuleInit {
     }>('POST', `/collections/${QDRANT_COLLECTION_CRAWLED_URLS}/points/scroll`, {
       limit: size,
       with_payload: true,
-      filter: { must },
+      ...(must.length > 0 ? { filter: { must } } : {}),
     });
-    return (res.result?.points ?? []).map((p, i) =>
-      this.payloadToCrawlHit(p.payload, p.score ?? size - i),
-    );
+    return (res.result?.points ?? [])
+      .map((p, i) => this.payloadToCrawlHit(p.payload, p.score ?? size - i))
+      .filter((hit) => this.crawlHitInTimeRange(hit, filters));
+  }
+
+  private crawlHitInTimeRange(
+    hit: CrawledUrlSearchHit,
+    filters?: { fetchedSince?: Date; fetchedUntil?: Date },
+  ): boolean {
+    if (!filters?.fetchedSince && !filters?.fetchedUntil) return true;
+    const raw = hit.fetchedAt;
+    if (!raw) return true;
+    const t = new Date(raw).getTime();
+    if (filters.fetchedSince && t < filters.fetchedSince.getTime()) return false;
+    if (filters.fetchedUntil && t > filters.fetchedUntil.getTime()) return false;
+    return true;
   }
 
   async reindexAllEntitiesFromDb(): Promise<number> {
@@ -404,6 +423,7 @@ export class QdrantSearchService implements OnModuleInit {
       status: String(payload?.status ?? ''),
       pageTitle: (payload?.pageTitle as string | null) ?? null,
       snippet: preview.slice(0, 400),
+      fetchedAt: payload?.fetchedAt != null ? String(payload.fetchedAt) : null,
     };
   }
 }

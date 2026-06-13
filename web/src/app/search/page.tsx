@@ -51,6 +51,10 @@ type SearchEsHealth = {
 
 type UnifiedSearchResponse = {
   query: string;
+  dsl?: {
+    text: string;
+    filters?: Record<string, string>;
+  };
   entities: {
     source: string;
     hits: Array<{
@@ -180,6 +184,7 @@ function SearchPageInner() {
   const [entityIndex, setEntityIndex] = useState<"auto" | "es" | "pg">("auto");
   const [sourceId, setSourceId] = useState("");
   const [status, setStatus] = useState("");
+  const [hybrid, setHybrid] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<UnifiedSearchResponse | null>(null);
   const [rawError, setRawError] = useState<string>("");
@@ -224,6 +229,8 @@ function SearchPageInner() {
           : st.slice(0, SEARCH_CRAWL_STATUS_MAX_LEN),
       );
     }
+
+    setHybrid(searchParams.get("hybrid") === "1" || searchParams.get("hybrid") === "true");
   }, [searchParams]);
 
   const unifiedSearchParams = useMemo(() => {
@@ -237,8 +244,9 @@ function SearchPageInner() {
     const st = status.trim();
     if (sid) params.set("sourceId", sid);
     if (st) params.set("status", st);
+    if (hybrid) params.set("hybrid", "1");
     return params;
-  }, [q, limit, crawlIndex, entityIndex, sourceId, status]);
+  }, [q, limit, crawlIndex, entityIndex, sourceId, status, hybrid]);
 
   const searchApiUrl = useMemo(
     () => nestSearchUrl(unifiedSearchParams),
@@ -351,11 +359,9 @@ function SearchPageInner() {
           <code className="rounded bg-muted px-1">GET {NEST_V1.search}</code>
           ：实体（
           <code className="rounded bg-muted px-1">entityIndex</code>）与爬取（
-          <code className="rounded bg-muted px-1">crawlIndex</code>）；未配 ES 时
-          实体走 PostgreSQL（<code className="rounded bg-muted px-1">canonicalName</code>{" "}
-          <code className="rounded bg-muted px-1">aliases</code> 子串）。ES 命中含{" "}
-          <code className="rounded bg-muted px-1">&lt;em&gt;</code>{" "}
-          高亮片段。爬取仍按原规则。
+          <code className="rounded bg-muted px-1">crawlIndex</code>）。内联 DSL 如{" "}
+          <code className="text-xs">type:PERSON since:7d</code>；<code className="text-xs">hybrid=1</code>{" "}
+          启用全文+向量 RRF（需 OPENAI + qdrant/es）。
         </p>
         <p className="mt-2 text-xs text-muted-foreground">
           Elasticsearch{" "}
@@ -461,6 +467,18 @@ function SearchPageInner() {
                 <option value="es">es</option>
                 <option value="pg">pg</option>
               </select>
+            </div>
+            <div className="flex items-end gap-2 pb-2">
+              <input
+                id="hybrid"
+                type="checkbox"
+                checked={hybrid}
+                onChange={(e) => setHybrid(e.target.checked)}
+                className="size-4 rounded border border-input"
+              />
+              <Label htmlFor="hybrid" className="cursor-pointer">
+                hybrid（RRF 全文+向量）
+              </Label>
             </div>
             <div className="space-y-2">
               <Label htmlFor="crawlIndex">crawlIndex</Label>

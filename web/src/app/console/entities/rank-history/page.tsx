@@ -165,6 +165,10 @@ function RankHistoryPageInner() {
           <code className="rounded bg-muted px-1">
             GET {NEST_V1_DOC.entityRankHistory}
           </code>
+          {" · "}
+          <Link href={ADMIN_HREF.entityTimeline} className="text-primary underline-offset-4 hover:underline">
+            多话题时间线
+          </Link>
         </p>
       </div>
 

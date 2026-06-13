@@ -90,6 +90,17 @@ export function nestV1EntityRankHistoryPath(
   return qs ? `${base}?${qs}` : base;
 }
 
+export function nestV1EntityTimelinePath(
+  entityId: string,
+  query?: URLSearchParams,
+): string {
+  const base = `${V1}/entities/${encodeURIComponent(entityId)}/timeline`;
+  if (!query || query.toString() === "") return base;
+  return nestV1PathWithQuery(base, query);
+}
+
+export const NEST_V1_TOPIC_VERSIONS_COMPARE = `${V1}/topic-versions/compare` as const;
+
 export function nestV1TopicVersionPolicyPath(topicVersionId: string): string {
   return `${V1}/topic-versions/${encodeURIComponent(topicVersionId)}/policy`;
 }
@@ -204,7 +215,9 @@ export const NEST_V1_DOC = {
   trendsAnomalies: "/v1/trends/anomalies",
   trendsAlertsAdmin: "/admin/trends/alerts",
   entityRankHistory: "/v1/entities/:id/rank-history",
+  entityTimeline: "/v1/entities/:id/timeline",
   entityMetrics: "/v1/entities/:id/metrics",
+  topicVersionCompare: "/v1/topic-versions/compare",
   topicVersionSignalPreview: "/v1/topic-versions/:id/signal-preview",
   rankingsStatus: "/v1/rankings/:topicRankingId/status",
   jobRanking: "/v1/jobs/ranking/:jobId",

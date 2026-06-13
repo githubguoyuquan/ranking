@@ -22,6 +22,10 @@ const REQUIRED_PATHS: Record<string, string[]> = {
     '/v1/trends/anomalies',
     '/admin/trends/alerts',
   ],
+  'ops-analytics.yaml': [
+    '/v1/entities/{id}/timeline',
+    '/v1/topic-versions/compare',
+  ],
   'admin-observability.yaml': [
     '/admin/observability/summary',
     '/admin/observability/alerts/routing',
@@ -41,6 +45,7 @@ describe('docs/openapi', () => {
       'admin-ops.yaml',
       'entity-metrics.yaml',
       'trends.yaml',
+      'ops-analytics.yaml',
     ]));
   });
 

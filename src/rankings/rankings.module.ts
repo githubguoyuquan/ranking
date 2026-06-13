@@ -16,6 +16,8 @@ import { RankingsController } from './rankings.controller';
 import { RankingsService } from './rankings.service';
 import { EntityMetricsController } from './entity-metrics.controller';
 import { EntityMetricsService } from './entity-metrics.service';
+import { OpsAnalyticsController } from './ops-analytics.controller';
+import { OpsAnalyticsService } from './ops-analytics.service';
 import { TrendAnomalyAlertCronService } from './trend-anomaly-alert-cron.service';
 import { TrendAnomalyService } from './trend-anomaly.service';
 
@@ -34,10 +36,11 @@ import { TrendAnomalyService } from './trend-anomaly.service';
       name: RANKING_FOLLOWUP_QUEUE,
     }),
   ],
-  controllers: [RankingsController, EntityMetricsController],
+  controllers: [RankingsController, EntityMetricsController, OpsAnalyticsController],
   providers: [
     RankingsService,
     EntityMetricsService,
+    OpsAnalyticsService,
     TrendAnomalyService,
     ...(runsRankingWorkers()
       ? [

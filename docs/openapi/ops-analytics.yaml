@@ -1,0 +1,168 @@
+openapi: 3.0.3
+info:
+  title: Ranking platform — Ops analytics (fragment)
+  description: |
+    运营分析：实体多话题时间线、TopicVersion 策略 diff 与榜位预览。
+    实现：`src/rankings/ops-analytics.controller.ts`。
+  version: 0.1.0
+
+servers:
+  - url: http://localhost:3000
+
+tags:
+  - name: OpsAnalytics
+  - name: Rankings
+
+paths:
+  /v1/entities/{id}/timeline:
+    get:
+      tags: [OpsAnalytics, Rankings]
+      summary: 实体运营时间线（多话题名次 + 信号事件）
+      operationId: entityTimeline
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[0-9]+$"
+        - name: topicSlugs
+          in: query
+          required: false
+          description: 逗号分隔话题 slug 过滤
+          schema:
+            type: string
+        - name: timeWindow
+          in: query
+          schema:
+            $ref: "#/components/schemas/TimeWindow"
+        - name: topicsLimit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 10
+            default: 5
+        - name: pointsLimit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 40
+        - name: metricsLimit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 30
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EntityTimelineResponse"
+        "404":
+          description: entity not found
+
+  /v1/topic-versions/compare:
+    post:
+      tags: [OpsAnalytics, Rankings]
+      summary: 对比两个 TopicVersion（policy diff + 可选榜位预览）
+      operationId: compareTopicVersions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompareTopicVersionsRequest"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TopicVersionCompareResponse"
+        "400":
+          description: 校验失败或版本不属于同一话题
+
+components:
+  schemas:
+    TimeWindow:
+      type: string
+      enum: [REALTIME, DAY, WEEK, MONTH, YEAR, CUSTOM]
+
+    EntityTimelineResponse:
+      type: object
+      properties:
+        entity:
+          type: object
+        generatedAt:
+          type: string
+          format: date-time
+        filter:
+          type: object
+        topicSeries:
+          type: array
+          items:
+            type: object
+        metrics:
+          type: array
+          items:
+            type: object
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/TimelineEvent"
+        eventCount:
+          type: integer
+
+    TimelineEvent:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [rank, metric]
+        at:
+          type: string
+          format: date-time
+        topicSlug:
+          type: string
+        label:
+          type: string
+        meta:
+          type: object
+
+    CompareTopicVersionsRequest:
+      type: object
+      required: [fromTopicVersionId, toTopicVersionId]
+      properties:
+        fromTopicVersionId:
+          type: string
+        toTopicVersionId:
+          type: string
+        timeWindow:
+          $ref: "#/components/schemas/TimeWindow"
+        includeRankPreview:
+          type: boolean
+          default: true
+
+    TopicVersionCompareResponse:
+      type: object
+      properties:
+        topic:
+          type: object
+        from:
+          type: object
+        to:
+          type: object
+        policyDiff:
+          type: object
+        rankPreview:
+          nullable: true
+          type: object
+        generatedAt:
+          type: string
+          format: date-time

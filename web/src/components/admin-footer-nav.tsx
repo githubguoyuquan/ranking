@@ -51,11 +51,20 @@ export function AdminFooterNav({
       <Link href={ADMIN_HREF.entities} className={linkCls}>
         实体
       </Link>
+      <Link href={ADMIN_HREF.entityRankHistory} className={linkCls}>
+        名次曲线
+      </Link>
+      <Link href={ADMIN_HREF.entityTimeline} className={linkCls}>
+        实体时间线
+      </Link>
       <Link href={ADMIN_HREF.trends} className={linkCls}>
         热点趋势
       </Link>
       <Link href={ADMIN_HREF.topics} className={linkCls}>
         话题版本
+      </Link>
+      <Link href={ADMIN_HREF.topicsVersionDiff} className={linkCls}>
+        版本 diff
       </Link>
       <Link href={ADMIN_HREF.snapshotsCompare} className={linkCls}>
         快照对比

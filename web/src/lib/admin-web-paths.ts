@@ -12,6 +12,8 @@ export const ADMIN_HREF = {
   topics: `${CONSOLE_PREFIX}/topics`,
   entities: `${CONSOLE_PREFIX}/entities`,
   entityRankHistory: `${CONSOLE_PREFIX}/entities/rank-history`,
+  entityTimeline: `${CONSOLE_PREFIX}/entities/timeline`,
+  topicsVersionDiff: `${CONSOLE_PREFIX}/topics/version-diff`,
   trends: `${CONSOLE_PREFIX}/trends`,
   search: `${CONSOLE_PREFIX}/search`,
   rankingsRun: `${CONSOLE_PREFIX}/rankings/run`,

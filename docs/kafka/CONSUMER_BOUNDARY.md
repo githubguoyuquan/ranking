@@ -5,7 +5,7 @@
 | 角色 | 本仓库 | 外部系统 |
 |------|--------|----------|
 | **Kafka Producer** | ✅ `OutboxPublisherService` → `KafkaProducerService` | — |
-| **Kafka Consumer** | ❌ **无** consumer group / `@MessagePattern` | ✅ 由下游服务订阅 topic |
+| **Kafka Consumer** | ❌ **无** consumer group / `@MessagePattern` | ✅ 下游 **`consumers/snapshot-notify`**（MVP）及外部队列 |
 | **索引 / OLAP 写入** | ✅ **进程内 Outbox Flusher**（`publishedAt`） | 可选：订阅 Kafka 镜像自行写入 |
 
 本 monorepo 将 Kafka 定位为 **外部队列（integration bus）**：契约、Schema、topic 路由在 `src/kafka/`，**不在此进程内消费**。
@@ -37,14 +37,18 @@
 
 ## 外部消费方（规划）
 
-以下由**独立部署**的服务实现（不在本仓库）：
+以下由**独立部署**的服务实现（不在 ranking-platform **进程内**）：
+
+| 服务 | 路径 | Topic | 说明 |
+|------|------|-------|------|
+| **Snapshot Notify**（MVP ✅） | `consumers/snapshot-notify/` | `ranking.snapshot.completed` | 校验 Envelope v1、幂等、`/metrics`、可选 Webhook |
 
 - **搜索索引管道**：订阅 `elasticsearch.*` 或 `ranking.snapshot.completed`（若拆服务）
 - **分析 / 数仓**：订阅 `clickhouse.ranking.snapshot.ingest`、`ranking.snapshot.completed`
 - **风控 / 计费 / 对账**：按 topic 独立 consumer group
-- **实时通知**：订阅 `ranking.snapshot.completed`、`ai.agent.run.completed`
+- **实时通知**：`consumers/snapshot-notify` 或自建订阅方
 
-消费契约：Envelope v1 + JSON Schema（`docs/kafka/EVENT_CATALOG.md`）。
+消费契约：Envelope v1 + JSON Schema（`docs/kafka/EVENT_CATALOG.md`）。本地：`docker compose up -d snapshot-notify`。
 
 ## 与 BullMQ 的边界
 

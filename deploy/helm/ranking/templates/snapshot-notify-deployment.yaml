@@ -1,0 +1,77 @@
+{{- if .Values.snapshotNotify.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ranking.fullname" . }}-snapshot-notify
+  labels:
+    {{- include "ranking.labels" . | nindent 4 }}
+    app.kubernetes.io/component: snapshot-notify
+spec:
+  replicas: {{ .Values.snapshotNotify.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "ranking.labels" . | nindent 6 }}
+      app.kubernetes.io/component: snapshot-notify
+  template:
+    metadata:
+      labels:
+        {{- include "ranking.labels" . | nindent 8 }}
+        app.kubernetes.io/component: snapshot-notify
+    spec:
+      containers:
+        - name: snapshot-notify
+          image: "{{ .Values.snapshotNotify.image.repository }}:{{ .Values.snapshotNotify.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: KAFKA_BROKERS
+              value: {{ .Values.snapshotNotify.kafkaBrokers | default .Values.env.KAFKA_BROKERS | quote }}
+            - name: KAFKA_TOPIC_RANKING_SNAPSHOT_COMPLETED
+              value: {{ .Values.snapshotNotify.topic | default "ranking.snapshot.completed" | quote }}
+            - name: KAFKA_CONSUMER_GROUP
+              value: {{ .Values.snapshotNotify.consumerGroup | quote }}
+            - name: KAFKA_CLIENT_ID
+              value: {{ .Values.snapshotNotify.clientId | quote }}
+            - name: SNAPSHOT_NOTIFY_HTTP_PORT
+              value: {{ .Values.snapshotNotify.service.port | quote }}
+            {{- if .Values.snapshotNotify.webhookUrl }}
+            - name: SNAPSHOT_NOTIFY_WEBHOOK_URL
+              value: {{ .Values.snapshotNotify.webhookUrl | quote }}
+            {{- end }}
+          {{- $envFrom := include "ranking.envFrom" . | trim }}
+          {{- if $envFrom }}
+          envFrom:
+            {{- include "ranking.envFrom" . | nindent 12 }}
+          {{- end }}
+          ports:
+            - containerPort: {{ .Values.snapshotNotify.service.port }}
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: {{ .Values.snapshotNotify.service.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.snapshotNotify.service.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            {{- toYaml (.Values.snapshotNotify.resources | default .Values.resources) | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ranking.fullname" . }}-snapshot-notify
+  labels:
+    {{- include "ranking.labels" . | nindent 4 }}
+    app.kubernetes.io/component: snapshot-notify
+spec:
+  selector:
+    {{- include "ranking.labels" . | nindent 4 }}
+    app.kubernetes.io/component: snapshot-notify
+  ports:
+    - name: http
+      port: {{ .Values.snapshotNotify.service.port }}
+      targetPort: {{ .Values.snapshotNotify.service.port }}
+{{- end }}

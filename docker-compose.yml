@@ -113,6 +113,20 @@ services:
     depends_on:
       - prometheus
 
+  snapshot-notify:
+    build:
+      context: ./consumers/snapshot-notify
+      dockerfile: Dockerfile
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+      KAFKA_TOPIC_RANKING_SNAPSHOT_COMPLETED: ranking.snapshot.completed
+      KAFKA_CONSUMER_GROUP: ranking-snapshot-notify
+      SNAPSHOT_NOTIFY_HTTP_PORT: "3010"
+    ports:
+      - "3010:3010"
+    depends_on:
+      - redpanda
+
 volumes:
   pgdata:
   chdata:

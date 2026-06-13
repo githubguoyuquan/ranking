@@ -2,7 +2,7 @@
 
 Outbox → Kafka 外发契约。实现：`src/kafka/`（注册表、AJV、Schema Registry REST）。
 
-**消费边界**：本仓库 **不运行 Kafka Consumer**；外部队列说明见 **[CONSUMER_BOUNDARY.md](./CONSUMER_BOUNDARY.md)**。
+**消费边界**：本仓库 **platform 进程不运行 Kafka Consumer**；外部队列说明见 **[CONSUMER_BOUNDARY.md](./CONSUMER_BOUNDARY.md)**。MVP 下游：`consumers/snapshot-notify/`（`ranking.snapshot.completed`）。
 
 ## 封套（Envelope）v1
 

@@ -59,7 +59,7 @@ DATABASE_URL='postgresql://...' npm run prisma:deploy
 ## 微服务进程 / Kafka 事件网 / 多 AZ（已实现骨架）
 
 - **进程拆分**：`PROCESS_ROLE=api|worker|crawl|all`；`npm run start:platform-worker`、`start:crawl-worker`；见 `docs/architecture/SERVICE_BOUNDARIES.md`
-- **Kafka（仅生产者）**：6 类外发 + `ranking.followup.requested` 仅登记；**本仓库无 Kafka Consumer**；`kafkaPublishedAt` 与 Flusher `publishedAt` 双轨；`GET /admin/kafka/events`；`docs/kafka/CONSUMER_BOUNDARY.md`
+- **Kafka（仅生产者）**：6 类外发 + `ranking.followup.requested` 仅登记；**platform 进程内无 Consumer**；下游 MVP：**`consumers/snapshot-notify`** 订阅 `ranking.snapshot.completed`；`kafkaPublishedAt` 与 Flusher `publishedAt` 双轨；`GET /admin/kafka/events`；`docs/kafka/CONSUMER_BOUNDARY.md`
 - **Schema Registry**：`KAFKA_SCHEMA_REGISTRY_URL`（Redpanda `18081` / Confluent 兼容 REST）
 - **生产 Helm**：`deploy/helm/ranking/` 多 Deployment + PDB + topologySpread；`docs/ops/PRODUCTION.md`
 - **Dockerfile**：同镜像 `ranking-platform`，按 command 区分 API/Worker

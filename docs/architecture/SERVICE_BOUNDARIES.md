@@ -30,6 +30,8 @@ Helm：`deploy/helm/ranking/` 下 `api` / `platformWorker` / `crawlWorker` 三�
 2. 抽出 **Rank** — 物化与快照 API；Kafka `ranking.*` 主题。  
 3. **Crawl** 独立扩缩；`crawl.url.fetched` 已是跨服务契约。  
 
+**MVP 下游**：`consumers/snapshot-notify/` 消费 `ranking.snapshot.completed`（见 `CONSUMER_BOUNDARY.md`）。
+
 ## 事件契约
 
 - **跨服务**：Outbox → **Kafka**（本仓库只发布；消费方在外部部署）→ 见 `docs/kafka/CONSUMER_BOUNDARY.md`  

@@ -33,6 +33,20 @@ drReadinessCron:
   minStatus: warn
   apiKeySecretKey: RANKING_ADMIN_API_KEY
 
+snapshotNotify:
+  enabled: false
+  replicaCount: 1
+  image:
+    repository: ranking-snapshot-notify
+    tag: "0.1.0"
+  consumerGroup: ranking-snapshot-notify
+  clientId: ranking-snapshot-notify
+  topic: ranking.snapshot.completed
+  kafkaBrokers: ""
+  webhookUrl: ""
+  service:
+    port: 3010
+
 probes:
   livenessPath: /health
   readinessPath: /health/ready

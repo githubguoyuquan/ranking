@@ -22,6 +22,7 @@ jobs:
           npm ci
           npm test
           npm run lint:all
+          cd consumers/snapshot-notify && npm install && npm test
 
   dr-readiness:
     runs-on: ubuntu-latest

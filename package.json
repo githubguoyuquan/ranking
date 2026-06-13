@@ -18,7 +18,9 @@
     "test": "vitest run",
     "scale:validate": "bash scripts/scale-validate.sh",
     "dr:readiness": "bash scripts/dr-readiness.sh",
-    "dr:readiness:ci": "bash scripts/ci-dr-readiness.sh"
+    "dr:readiness:ci": "bash scripts/ci-dr-readiness.sh",
+    "start:snapshot-notify": "npm run start:dev --prefix consumers/snapshot-notify",
+    "test:snapshot-notify": "npm test --prefix consumers/snapshot-notify"
   },
   "dependencies": {
     "@clickhouse/client": "^1.18.5",

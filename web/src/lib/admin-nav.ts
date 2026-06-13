@@ -29,6 +29,7 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   { href: ADMIN_HREF.seed, label: "演示数据" },
   { href: ADMIN_HREF.compliance, label: "合规导出" },
   { href: ADMIN_HREF.scale, label: "规模运维" },
+  { href: ADMIN_HREF.ops, label: "DR / K8s" },
 ];
 
 export function isAdminNavActive(pathname: string, item: AdminNavItem): boolean {

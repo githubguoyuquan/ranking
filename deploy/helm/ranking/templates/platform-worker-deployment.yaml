@@ -33,16 +33,13 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["node", "dist/platform-worker.main.js"]
           env:
-            - name: PROCESS_ROLE
-              value: {{ .Values.platformWorker.processRole | quote }}
-            - name: DATABASE_URL
-              value: {{ .Values.env.DATABASE_URL | quote }}
-            - name: REDIS_URL
-              value: {{ .Values.env.REDIS_URL | quote }}
-            - name: KAFKA_BROKERS
-              value: {{ .Values.env.KAFKA_BROKERS | quote }}
-            - name: KAFKA_SCHEMA_REGISTRY_URL
-              value: {{ .Values.env.KAFKA_SCHEMA_REGISTRY_URL | quote }}
+            {{- $ctx := dict "Values" .Values "processRole" .Values.platformWorker.processRole }}
+            {{- include "ranking.coreEnv" $ctx | nindent 12 }}
+          {{- $envFrom := include "ranking.envFrom" . | trim }}
+          {{- if $envFrom }}
+          envFrom:
+            {{- include "ranking.envFrom" . | nindent 12 }}
+          {{- end }}
           resources:
-            {{- toYaml .Values.resources | nindent 12 }}
+            {{- toYaml (.Values.platformWorker.resources | default .Values.resources) | nindent 12 }}
 {{- end }}

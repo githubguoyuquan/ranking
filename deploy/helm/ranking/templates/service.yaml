@@ -10,6 +10,7 @@ spec:
     {{- include "ranking.labels" . | nindent 4 }}
     app.kubernetes.io/component: api
   ports:
-    - port: {{ .Values.api.service.port }}
+    - name: http
+      port: {{ .Values.api.service.port }}
       targetPort: {{ .Values.api.service.port }}
 {{- end }}

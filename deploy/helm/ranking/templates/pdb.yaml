@@ -23,5 +23,18 @@ spec:
     matchLabels:
       {{- include "ranking.labels" . | nindent 6 }}
       app.kubernetes.io/component: platform-worker
+---
+{{- end }}
+{{- if .Values.crawlWorker.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "ranking.fullname" . }}-crawl-worker
+spec:
+  minAvailable: {{ .Values.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "ranking.labels" . | nindent 6 }}
+      app.kubernetes.io/component: crawl-worker
 {{- end }}
 {{- end }}

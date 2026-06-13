@@ -31,6 +31,45 @@ crawlWorker:
 web:
   enabled: true
   replicaCount: 2
+  apiBaseUrl: "https://api.ranking.example.com"
+
+hpa:
+  api:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 12
+    targetCPUUtilizationPercentage: 65
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: ranking.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+          service: web
+        - path: /v1
+          pathType: Prefix
+          service: api
+        - path: /admin
+          pathType: Prefix
+          service: api
+        - path: /health
+          pathType: Prefix
+          service: api
+
+monitoring:
+  prometheusScrape: true
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    labels:
+      release: prometheus
+
+dr:
+  region: "ap-southeast-1"
+  cluster: "prod-eks"
 
 pdb:
   enabled: true
@@ -41,4 +80,5 @@ env:
   KAFKA_BROKERS: ""
   KAFKA_SCHEMA_REGISTRY_URL: ""
   DATABASE_URL: ""
+  DATABASE_READ_URL: ""
   REDIS_URL: ""

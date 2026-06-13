@@ -18,22 +18,32 @@ spec:
         {{- include "ranking.labels" . | nindent 8 }}
         app.kubernetes.io/component: crawl-worker
     spec:
+      {{- if .Values.global.topologySpread.enabled }}
+      topologySpreadConstraints:
+        - maxSkew: {{ .Values.global.topologySpread.maxSkew }}
+          topologyKey: {{ .Values.global.topologySpread.topologyKey }}
+          whenUnsatisfiable: {{ .Values.global.topologySpread.whenUnsatisfiable }}
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/component: crawl-worker
+      {{- end }}
       containers:
         - name: crawl-worker
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["node", "dist/crawl-worker.main.js"]
           env:
-            - name: PROCESS_ROLE
-              value: {{ .Values.crawlWorker.processRole | quote }}
-            - name: DATABASE_URL
-              value: {{ .Values.env.DATABASE_URL | quote }}
-            - name: REDIS_URL
-              value: {{ .Values.env.REDIS_URL | quote }}
+            {{- $ctx := dict "Values" .Values "processRole" .Values.crawlWorker.processRole }}
+            {{- include "ranking.coreEnv" $ctx | nindent 12 }}
             {{- range $k, $v := .Values.crawlWorker.extraEnv }}
             - name: {{ $k }}
               value: {{ $v | quote }}
             {{- end }}
+          {{- $envFrom := include "ranking.envFrom" . | trim }}
+          {{- if $envFrom }}
+          envFrom:
+            {{- include "ranking.envFrom" . | nindent 12 }}
+          {{- end }}
           resources:
-            {{- toYaml .Values.resources | nindent 12 }}
+            {{- toYaml (.Values.crawlWorker.resources | default .Values.resources) | nindent 12 }}
 {{- end }}

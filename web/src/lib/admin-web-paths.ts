@@ -21,6 +21,7 @@ export const ADMIN_HREF = {
   outbox: "/outbox",
   compliance: "/compliance",
   scale: "/scale",
+  ops: "/ops",
   bi: "/bi",
   agents: "/agents",
 } as const;

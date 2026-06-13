@@ -28,9 +28,10 @@ helm upgrade --install ranking deploy/helm/ranking \
 
 | Deployment | 副本（参考） | 说明 |
 |------------|-------------|------|
-| `*-api` | 3 | `PROCESS_ROLE=api`，`/health/ready` |
+| `*-api` | 3 | `PROCESS_ROLE=api`，live/ready/startup 探针 |
 | `*-platform-worker` | 2 | Outbox Kafka + 排行 Worker |
-| `*-crawl-worker` | 2+ | 抓取水平扩展 |
+| `*-crawl-worker` | 2+ | 抓取水平扩展 + PDB |
+| `*-web` | 2 | Next.js 管理台（独立 `web/Dockerfile`） |
 
 ## Outbox 双轨
 
@@ -52,15 +53,21 @@ WHERE type = 'ranking.snapshot.completed' AND id BETWEEN 1 AND 1000;
 | 路径 | 用途 |
 |------|------|
 | `GET /health/ready` | K8s readiness（PG+Redis） |
-| `GET /health/kafka` | Broker + Schema Registry |
-| `GET /admin/kafka/status` | 运维聚合 |
+| `GET /health` | K8s liveness |
+| `GET /admin/ops/dr/readiness` | DR 演练检查清单 |
+| `GET /admin/ops/k8s/probes` | 探针聚合 |
+| `GET /admin/ops/dr/outbox-replay-plan` | Outbox Kafka 重放统计 |
 
-## 备份与 DR（摘要）
+Helm 模板含 **live/ready/startup** 探针、**HPA**、**Ingress**、**ServiceMonitor**、**web Deployment**、**crawl-worker PDB**。见 `values-production.yaml`。
+
+## 备份与 DR
 
 - Postgres PITR；定期验证恢复
 - ClickHouse / ES 按厂商快照
 - 爬虫：`CrawlCheckpoint` + 任务状态可续跑
 - 事件网：Kafka 保留期 ≥ 业务重放窗口
+- **演练 runbook**： [DR_RUNBOOK.md](./DR_RUNBOOK.md)
+- CI/on-call：`scripts/dr-readiness.sh`（exit 2 = critical）
 
 ## 环境变量清单
 

@@ -9,6 +9,7 @@ import { AgentModule } from './agent/agent.module';
 import { AgentOrchestrationModule } from './agent-orchestration/agent-orchestration.module';
 import { BiModule } from './bi/bi.module';
 import { ObservabilityModule } from './observability/observability.module';
+import { OpsModule } from './ops/ops.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { CacheModule } from './cache/cache.module';
 import { HealthController } from './health.controller';
@@ -40,6 +41,7 @@ import { SearchModule } from './search/search.module';
     ComplianceModule,
     BiModule,
     ObservabilityModule,
+    OpsModule,
   ],
   controllers: [HealthController],
 })

@@ -17,6 +17,12 @@ spec:
       labels:
         {{- include "ranking.labels" . | nindent 8 }}
         app.kubernetes.io/component: api
+      {{- if .Values.monitoring.prometheusScrape }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ .Values.api.service.port | quote }}
+        prometheus.io/path: "/admin/observability/prometheus"
+      {{- end }}
     spec:
       {{- if .Values.global.topologySpread.enabled }}
       topologySpreadConstraints:
@@ -33,26 +39,17 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["node", "dist/main.js"]
           env:
-            - name: PROCESS_ROLE
-              value: {{ .Values.api.processRole | quote }}
-            - name: DATABASE_URL
-              value: {{ .Values.env.DATABASE_URL | quote }}
-            - name: REDIS_URL
-              value: {{ .Values.env.REDIS_URL | quote }}
-            - name: API_AUTH_REQUIRED
-              value: {{ .Values.env.API_AUTH_REQUIRED | quote }}
-            - name: KAFKA_BROKERS
-              value: {{ .Values.env.KAFKA_BROKERS | quote }}
-            - name: KAFKA_SCHEMA_REGISTRY_URL
-              value: {{ .Values.env.KAFKA_SCHEMA_REGISTRY_URL | quote }}
+            {{- $ctx := dict "Values" .Values "processRole" .Values.api.processRole }}
+            {{- include "ranking.coreEnv" $ctx | nindent 12 }}
+          {{- $envFrom := include "ranking.envFrom" . | trim }}
+          {{- if $envFrom }}
+          envFrom:
+            {{- include "ranking.envFrom" . | nindent 12 }}
+          {{- end }}
           ports:
             - containerPort: {{ .Values.api.service.port }}
-          readinessProbe:
-            httpGet:
-              path: /health/ready
-              port: {{ .Values.api.service.port }}
-            initialDelaySeconds: 10
-            periodSeconds: 10
+          {{- $probeCtx := dict "Values" .Values "port" .Values.api.service.port }}
+          {{- include "ranking.httpProbes" $probeCtx | nindent 10 }}
           resources:
-            {{- toYaml .Values.resources | nindent 12 }}
+            {{- toYaml (.Values.api.resources | default .Values.resources) | nindent 12 }}
 {{- end }}

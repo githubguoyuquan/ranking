@@ -28,6 +28,12 @@ export const BACKEND_ADMIN = {
   crawlOverview: "/admin/crawl/overview",
 } as const;
 
+export const BACKEND_ADMIN_OPS = {
+  drReadiness: "/admin/ops/dr/readiness",
+  k8sProbes: "/admin/ops/k8s/probes",
+  outboxReplayPlan: "/admin/ops/dr/outbox-replay-plan",
+} as const;
+
 export function backendAdminSnapshotAnalyzePath(snapshotId: string): string {
   return `/admin/snapshots/${encodeURIComponent(snapshotId)}/analyze`;
 }

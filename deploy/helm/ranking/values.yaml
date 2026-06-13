@@ -10,6 +10,21 @@ image:
   tag: "0.1.0"
   pullPolicy: IfNotPresent
 
+dr:
+  region: ""
+  cluster: ""
+
+probes:
+  livenessPath: /health
+  readinessPath: /health/ready
+  startupPath: /health/ready
+  readinessInitialDelaySeconds: 10
+  readinessPeriodSeconds: 10
+  livenessInitialDelaySeconds: 30
+  livenessPeriodSeconds: 15
+  startupFailureThreshold: 30
+  startupPeriodSeconds: 5
+
 api:
   enabled: true
   replicaCount: 2
@@ -26,21 +41,9 @@ crawlWorker:
   enabled: false
   replicaCount: 1
   processRole: crawl
-  # 区域队列 / 代理池（如 CRAWL_QUEUE_SHARD=ap-east）
   extraEnv: {}
 
-# 多区域 crawl 副本（每项生成独立 Deployment + `CRAWL_QUEUE_SHARD=<name>`）
 crawlWorkerRegions: []
-# 示例（生产 uncomment 并按区域配置代理）：
-# crawlWorkerRegions:
-#   - name: eu-west
-#     replicaCount: 2
-#     extraEnv:
-#       CRAWL_HTTP_PROXY: http://proxy-eu:3128
-#   - name: ap-east
-#     replicaCount: 1
-#     extraEnv:
-#       CRAWL_HTTP_PROXY: http://proxy-ap:3128
 
 migrateJob:
   enabled: false
@@ -49,8 +52,57 @@ migrateJob:
 web:
   enabled: false
   replicaCount: 1
+  apiBaseUrl: "http://ranking-api:3000"
+  image:
+    repository: ranking-web
+    tag: "0.1.0"
   service:
     port: 3001
+  extraEnv: {}
+
+hpa:
+  api:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+
+ingress:
+  enabled: false
+  className: nginx
+  annotations: {}
+  tls: []
+  hosts:
+    - host: ranking.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+          service: web
+        - path: /v1
+          pathType: Prefix
+          service: api
+        - path: /admin
+          pathType: Prefix
+          service: api
+        - path: /health
+          pathType: Prefix
+          service: api
+
+monitoring:
+  prometheusScrape: false
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}
+
+config:
+  enabled: false
+  data: {}
+
+secret:
+  enabled: false
+  name: ranking-env
 
 pdb:
   enabled: true
@@ -58,10 +110,12 @@ pdb:
 
 env:
   DATABASE_URL: ""
+  DATABASE_READ_URL: ""
   REDIS_URL: ""
   API_AUTH_REQUIRED: "true"
   KAFKA_BROKERS: ""
   KAFKA_SCHEMA_REGISTRY_URL: ""
+  extra: {}
 
 resources:
   requests:

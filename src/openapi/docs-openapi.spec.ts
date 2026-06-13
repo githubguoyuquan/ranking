@@ -26,6 +26,7 @@ const REQUIRED_PATHS: Record<string, string[]> = {
     '/v1/entities/{id}/timeline',
     '/v1/topic-versions/compare',
   ],
+  'v1-hot-boards.yaml': ['/v1/hot-boards'],
   'admin-observability.yaml': [
     '/admin/observability/summary',
     '/admin/observability/alerts/routing',
@@ -46,6 +47,7 @@ describe('docs/openapi', () => {
       'entity-metrics.yaml',
       'trends.yaml',
       'ops-analytics.yaml',
+      'v1-hot-boards.yaml',
     ]));
   });
 

@@ -202,6 +202,26 @@ export class TrendsAnomaliesQueryDto {
   limit?: number;
 }
 
+export class HotBoardsQueryDto {
+  @IsOptional()
+  @IsEnum(TimeWindow)
+  timeWindow?: TimeWindow;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(30)
+  topicsLimit?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(20)
+  previewLimit?: number;
+}
+
 @Controller()
 export class RankingsController {
   constructor(
@@ -399,6 +419,19 @@ export class RankingsController {
   @Get('v1/trends/hot')
   async trendsHot(@Query() query: TrendsHotQueryDto) {
     return await this.rankings.listHotTrends(query.timeWindow, query.limit);
+  }
+
+  /** C 端只读热榜索引：各话题最新榜 TOP 预览。OpenAPI：`docs/openapi/v1-hot-boards.yaml` */
+  @Get('v1/hot-boards')
+  async hotBoards(@Query() query: HotBoardsQueryDto, @Req() req: Request) {
+    return this.rankings.listHotBoards(
+      {
+        timeWindow: query.timeWindow,
+        topicsLimit: query.topicsLimit,
+        previewLimit: query.previewLimit,
+      },
+      getAuthFromRequest(req),
+    );
   }
 
   /** 扫描近期快照趋势异常。OpenAPI：`docs/openapi/trends.yaml` */

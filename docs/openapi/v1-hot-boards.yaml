@@ -1,0 +1,118 @@
+openapi: 3.0.3
+info:
+  title: Ranking platform — C-end hot boards (fragment)
+  description: |
+    只读热榜索引：返回有快照的话题及最新榜 TOP 预览。
+    实现：`src/rankings/rankings.controller.ts` → `listHotBoards`。
+  version: 0.1.0
+
+servers:
+  - url: http://localhost:3000
+
+tags:
+  - name: HotBoards
+  - name: Public
+
+paths:
+  /v1/hot-boards:
+    get:
+      tags: [HotBoards, Public]
+      summary: 热榜索引（各话题最新榜预览）
+      operationId: listHotBoards
+      parameters:
+        - name: timeWindow
+          in: query
+          schema:
+            $ref: "#/components/schemas/TimeWindow"
+        - name: topicsLimit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 30
+            default: 12
+        - name: previewLimit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 20
+            default: 5
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HotBoardsResponse"
+
+components:
+  schemas:
+    TimeWindow:
+      type: string
+      enum: [REALTIME, DAY, WEEK, MONTH, YEAR, CUSTOM]
+
+    HotBoardPreviewItem:
+      type: object
+      properties:
+        rank:
+          type: integer
+        rankChange:
+          type: integer
+          nullable: true
+        popularityScore:
+          type: number
+        entity:
+          type: object
+          properties:
+            id:
+              type: string
+            canonicalName:
+              type: string
+
+    HotBoardEntry:
+      type: object
+      properties:
+        topic:
+          type: object
+          properties:
+            id:
+              type: string
+            slug:
+              type: string
+            title:
+              type: string
+            kind:
+              type: string
+        resolved:
+          type: object
+          nullable: true
+        snapshot:
+          type: object
+          properties:
+            id:
+              type: string
+            snapshotTime:
+              type: string
+              format: date-time
+            itemCount:
+              type: integer
+            preview:
+              type: array
+              items:
+                $ref: "#/components/schemas/HotBoardPreviewItem"
+
+    HotBoardsResponse:
+      type: object
+      properties:
+        filter:
+          type: object
+        count:
+          type: integer
+        boards:
+          type: array
+          items:
+            $ref: "#/components/schemas/HotBoardEntry"
+        generatedAt:
+          type: string
+          format: date-time

@@ -111,6 +111,12 @@ export function nestV1TrendsHotPath(query?: URLSearchParams): string {
   return qs ? `${base}?${qs}` : base;
 }
 
+export function nestV1HotBoardsPath(query?: URLSearchParams): string {
+  const base = `${V1}/hot-boards`;
+  if (!query || query.toString() === "") return base;
+  return nestV1PathWithQuery(base, query);
+}
+
 export function nestV1TrendsAnomaliesPath(query?: URLSearchParams): string {
   const base = `${V1}/trends/anomalies`;
   const qs = query?.toString() ?? "";

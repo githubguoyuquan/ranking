@@ -70,10 +70,13 @@ export default async function HomePage() {
         </p>
         <div className="flex flex-wrap gap-2">
           <Button asChild>
-            <Link href={siteTopicPath(DEFAULT_TOPIC_SLUG)}>查看 {topicTitle}</Link>
+            <Link href={SITE_HREF.hot}>浏览热榜</Link>
           </Button>
           <Button asChild variant="secondary">
-            <Link href={SITE_HREF.trends}>热点涨榜</Link>
+            <Link href={siteTopicPath(DEFAULT_TOPIC_SLUG)}>查看 {topicTitle}</Link>
+          </Button>
+          <Button asChild variant="outline">
+            <Link href={SITE_HREF.trends}>涨榜速递</Link>
           </Button>
           <Button asChild variant="outline">
             <Link href={SITE_HREF.search}>搜索实体</Link>
@@ -154,10 +157,17 @@ export default async function HomePage() {
             <CardDescription>
               近期待势实体 ·{" "}
               <Link
+                href={SITE_HREF.hot}
+                className="text-primary underline-offset-4 hover:underline"
+              >
+                热榜
+              </Link>
+              {" · "}
+              <Link
                 href={SITE_HREF.trends}
                 className="text-primary underline-offset-4 hover:underline"
               >
-                更多
+                涨榜
               </Link>
             </CardDescription>
           </CardHeader>

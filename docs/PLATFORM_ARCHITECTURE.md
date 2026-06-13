@@ -290,14 +290,15 @@ Wire：**Envelope v1** + AJV（`src/kafka/schemas/`）；路由 **`src/kafka/eve
 
 ## 12. API 设计原则（面向愿景查询）
 
-建议在现有 REST 基础上扩展（**尚未全部存在**）。**OpenAPI 3 片段**（`docs/openapi/`）：`admin-outbox.yaml`、`admin-entities.yaml`、**`admin-ops.yaml`**、**`entity-metrics.yaml`**、**`trends.yaml`**、**`admin-observability.yaml`** 等；**`src/openapi/docs-openapi.spec.ts`**（**`npm test`**）做可解析性与关键 **`paths`** 断言。详情见 **`README`** Kafka/Outbox 与 OpenAPI 小节。
+建议在现有 REST 基础上扩展（**尚未全部存在**）。**OpenAPI 3 片段**（`docs/openapi/`）：`admin-outbox.yaml`、`admin-entities.yaml`、**`admin-ops.yaml`**、**`entity-metrics.yaml`**、**`trends.yaml`**、**`v1-hot-boards.yaml`**、**`admin-observability.yaml`** 等；**`src/openapi/docs-openapi.spec.ts`**（**`npm test`**）做可解析性与关键 **`paths`** 断言。详情见 **`README`** Kafka/Outbox 与 OpenAPI 小节。
 
 - `GET /v1/entities/:id/rank-history?topicSlug=&timeWindow=&limit=` — **`RankingItemHistory` 时间序列** + 历史最好/最差名次 + 末端连续升降步数（**已实现**）
 - `GET /v1/topics/:slug/leaderboard?version=&timeWindow=&windowStart=&includeAiStats=` — **`{ resolved, snapshot }`**（**已实现**；**`resolved.hasScoreModel`**；嵌套 **`snapshot`** 与 **`GET /v1/snapshots/:id`** 同形）
 - `GET /v1/topics/:slug/trend-analyses?limit=&timeWindow=` — **快照级 `TrendAnalysis` 列表**（**已实现**；管理台 **话题版本** 页展示摘要表）  
 - `GET /v1/topics/:slug/snapshots?timeWindow=&limit=` — **`TopicRankSnapshot` 列表**（**已实现**；管理台 **话题版本** 页「近期快照」表；每条含 **`aiAnalysisCount`**、七类 **`has*Brief`**、**`hasScoreModel`**）  
 - `PATCH /v1/topic-versions/:id/policy` — 更新 **`policyJson`**（**已实现**；`src/domain/policy-json.ts` 校验；**`frozen`** 不可改；管理台话题页 **policy** 编辑器）  
-- `GET /v1/trends/hot?timeWindow=&limit=` — **快照级涨榜聚合**（**已实现（演示）**；由近期 `TrendAnalysis` 的 `topRankGainers` 汇总；管理台 **`/trends`**）  
+- `GET /v1/trends/hot?timeWindow=&limit=` — **快照级涨榜聚合**（**已实现（演示）**；由近期 `TrendAnalysis` 的 `topRankGainers` 汇总；C 端 **`/trends`**、管理台 **`/console/trends`**）  
+- `GET /v1/hot-boards?timeWindow=&topicsLimit=&previewLimit=` — **C 端热榜索引**（**已实现**；有快照的话题及其最新榜 TOP 预览；C 端 **`/hot`**）  
 - `POST /v1/snapshots/compare` — **已有**（多快照对比）；`snapshots[]` 含 **`hasScoreModel`**；`rows[].bySnapshot[id]` 含可选 **`scoreBreakdown`**  
 - `GET /v1/snapshots/:id/score-breakdowns` — **`ScoreBreakdown` 关系表扁平导出**（**已实现**；`rows` 含 rank、实体、component、value、weight；旧快照无物化行时 `rowCount` 为 0）
 - `GET /v1/snapshots/:id?includeAiStats=` — **快照 JSON**（含 **`items[].scoreBreakdown`**、**`scoreModel`** 及嵌套 **`topicRanking`**）+ 可选当前 `AiAnalysis` 计数与三类简报标记（**已实现**；`true`/`1` 时跳过快照 Redis 读且不回写缓存）  
@@ -310,7 +311,7 @@ Wire：**Envelope v1** + AJV（`src/kafka/schemas/`）；路由 **`src/kafka/eve
 
 ## 13. 前端（Next.js）
 
-**C 端用户站点（根路径）**：`/` 首页、`/topics/:slug` 热榜、`/entities/:id` 实体曲线与相似推荐、`/search`、`/trends`、`/snapshots/:id` 只读快照；`SiteShell` 导航；`site-api.ts` + 可选 `NEXT_PUBLIC_READ_API_KEY`。
+**C 端用户站点（根路径）**：`/` 首页、**`/hot` 多话题热榜索引**、`/topics/:slug` 单话题完整榜（日/周/月窗口）、`/entities/:id` 实体曲线与相似推荐、`/search`、`/trends` 涨榜、`/snapshots/:id` 只读快照；`SiteShell` 导航（首页 / 热榜 / 涨榜 / 搜索）；`site-api.ts` + 可选 `NEXT_PUBLIC_READ_API_KEY`。
 
 **运营台（`/console`）**：原管理台全部页面；`AdminShell` 侧栏含「用户站点 ↗」链回 C 端。
 

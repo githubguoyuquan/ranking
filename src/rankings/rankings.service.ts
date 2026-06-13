@@ -1942,6 +1942,128 @@ export class RankingsService {
   }
 
   /**
+   * C 端只读热榜索引：返回有快照的话题及其最新榜 TOP N 预览。
+   */
+  async listHotBoards(
+    opts: {
+      topicsLimit?: number;
+      previewLimit?: number;
+      timeWindow?: TimeWindow;
+    } = {},
+    auth?: AuthenticatedRequestContext,
+  ) {
+    const topicsLimit = Math.min(Math.max(opts.topicsLimit ?? 12, 1), 30);
+    const previewLimit = Math.min(Math.max(opts.previewLimit ?? 5, 1), 20);
+
+    const topics = await this.readPrisma.topic.findMany({
+      where: {
+        ...topicWhereForAuth(auth),
+        versions: {
+          some: {
+            rankings: {
+              some: {
+                status: 'completed',
+                snapshots: { some: {} },
+                ...(opts.timeWindow ? { timeWindow: opts.timeWindow } : {}),
+              },
+            },
+          },
+        },
+      },
+      orderBy: { updatedAt: 'desc' },
+      take: topicsLimit + 8,
+      select: { id: true, slug: true, title: true, kind: true, tenantId: true },
+    });
+
+    type PreviewItem = {
+      rank: number;
+      rankChange: number | null;
+      popularityScore: number;
+      entity: { id: string; canonicalName: string };
+    };
+
+    const boards: Array<{
+      topic: { id: string; slug: string; title: string; kind: string };
+      resolved: Record<string, unknown> | null;
+      snapshot: {
+        id: string;
+        snapshotTime: string;
+        itemCount: number;
+        preview: PreviewItem[];
+      };
+    }> = [];
+
+    for (const topic of topics) {
+      if (boards.length >= topicsLimit) break;
+      try {
+        await assertTopicAccessible(topic, auth);
+      } catch {
+        continue;
+      }
+
+      const lb = (await this.getLeaderboardForApi(
+        topic.slug,
+        { timeWindow: opts.timeWindow, includeAiStats: false },
+        auth,
+      )) as {
+        resolved?: Record<string, unknown>;
+        snapshot?: {
+          id?: string | bigint;
+          snapshotTime?: string | Date;
+          items?: Array<{
+            rank: number;
+            rankChange?: number | null;
+            popularityScore?: number;
+            entity?: { id?: string | bigint; canonicalName?: string | null };
+          }>;
+        };
+      } | null;
+
+      const snap = lb?.snapshot;
+      const items = snap?.items ?? [];
+      if (!snap?.id || items.length === 0) continue;
+
+      boards.push({
+        topic: {
+          id: topic.id.toString(),
+          slug: topic.slug,
+          title: topic.title,
+          kind: topic.kind,
+        },
+        resolved: lb?.resolved ?? null,
+        snapshot: {
+          id: String(snap.id),
+          snapshotTime:
+            snap.snapshotTime instanceof Date
+              ? snap.snapshotTime.toISOString()
+              : String(snap.snapshotTime ?? ''),
+          itemCount: items.length,
+          preview: items.slice(0, previewLimit).map((row) => ({
+            rank: row.rank,
+            rankChange: row.rankChange ?? null,
+            popularityScore: row.popularityScore ?? 0,
+            entity: {
+              id: row.entity?.id != null ? String(row.entity.id) : '',
+              canonicalName: row.entity?.canonicalName ?? '',
+            },
+          })),
+        },
+      });
+    }
+
+    return toPlainJson({
+      filter: {
+        topicsLimit,
+        previewLimit,
+        timeWindow: opts.timeWindow ?? null,
+      },
+      count: boards.length,
+      boards,
+      generatedAt: new Date().toISOString(),
+    });
+  }
+
+  /**
    * 某实体在话题下的排行时间序列（`RankingItemHistory`），含历史最好/最差名次与末端连续升降步数。
    */
   async getEntityRankHistory(

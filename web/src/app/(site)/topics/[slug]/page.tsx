@@ -10,6 +10,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { SnapshotBarChart } from "@/components/snapshot-bar-chart";
+import { TopicTimeWindowTabs } from "@/components/topic-time-window-tabs";
 import {
   nestV1TopicLeaderboardPath,
   nestV1TopicPath,
@@ -83,6 +84,7 @@ export default async function TopicPage({
         {resolved?.timeWindow ? (
           <Badge variant="outline">窗口 {resolved.timeWindow}</Badge>
         ) : null}
+        <TopicTimeWindowTabs slug={slug} active={sp.timeWindow} />
       </header>
 
       {snapshot?.items && snapshot.items.length > 0 ? (

@@ -68,7 +68,7 @@ DATABASE_URL='postgresql://...' npm run prisma:deploy
 
 **规模（Phase C）**
 
-- `DATABASE_READ_URL`：只读副本；`rank-history` / `trends/hot` 走 `PrismaReadService`
+- `DATABASE_READ_URL`：只读副本；`rank-history` / `trends/hot` / `hot-boards` 走 `PrismaReadService`
 - `GET /admin/scale/status`；`POST /admin/scale/validate`；ES **ILM** + benchmark；`POST /admin/scale/qdrant/benchmark`；`POST .../ensure-ilm` / `bootstrap-ilm-indices` / `rollover-*`
 - `CRAWL_PROXY_POOL`、`CRAWL_QUEUE_SHARD`、`CRAWL_SEMANTIC_DEDUP_CROSS_SOURCE`
 - 管理台 **`/scale`**
@@ -109,7 +109,8 @@ DATABASE_URL='postgresql://...' npm run prisma:deploy
 | 路径 | 说明 |
 |------|------|
 | `/` | 首页：演示热榜 TOP10 + 热点涨榜 |
-| `/topics/:slug` | 话题排行榜、得分图、近期快照 |
+| `/hot` | 多话题热榜索引（各话题 TOP 预览 + 涨榜速递） |
+| `/topics/:slug` | 话题排行榜、得分图、近期快照（含日/周/月窗口切换） |
 | `/entities/:id` | 实体详情、名次曲线、相似推荐 |
 | `/search` | 实体搜索 |
 | `/trends` | 热点涨榜 |
@@ -284,6 +285,13 @@ curl -s 'http://localhost:3000/v1/topics/global-female-singers/snapshots?limit=2
 ```bash
 curl -s 'http://localhost:3000/v1/trends/hot?limit=12'
 # 可选 &timeWindow=WEEK
+```
+
+C 端多话题热榜索引（各话题最新榜 TOP 预览；`topicsLimit` 默认 12、`previewLimit` 默认 5）：
+
+```bash
+curl -s 'http://localhost:3000/v1/hot-boards?topicsLimit=12&previewLimit=5'
+# 可选 &timeWindow=DAY
 ```
 
 更新 **`TopicVersion.policyJson`**（`frozen=true` 时拒绝；body 须含 **`weights`**；可选 **`entityIds`**、`requiredSignalKeys`，服务端与物化路径一致）：

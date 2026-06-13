@@ -11,7 +11,8 @@ import { cn } from "@/lib/utils";
 
 const NAV = [
   { href: SITE_HREF.home, label: "首页" },
-  { href: SITE_HREF.trends, label: "热点" },
+  { href: SITE_HREF.hot, label: "热榜" },
+  { href: SITE_HREF.trends, label: "涨榜" },
   { href: SITE_HREF.search, label: "搜索" },
 ] as const;
 
@@ -74,7 +75,11 @@ export function SiteShell({ children }: { children: React.ReactNode }) {
                 href={item.href}
                 className={cn(
                   "rounded-md px-3 py-2 hover:bg-muted",
-                  pathname === item.href && "bg-muted font-medium",
+                  pathname === item.href ||
+                    (item.href === SITE_HREF.hot &&
+                      (pathname.startsWith("/topics/") || pathname === SITE_HREF.hot))
+                    ? "bg-muted font-medium"
+                    : undefined,
                 )}
                 onClick={() => setOpen(false)}
               >

@@ -35,9 +35,20 @@ OpenAPI 片段：`docs/openapi/admin-observability.yaml`、`admin-bi.yaml`、`ad
 
 ## 后台告警 Cron
 
-- **Platform Worker**（`PROCESS_ROLE=worker|all`）每 2 分钟评估，打 `WARN`/`ERROR` 日志
-- 可选 `OBSERVABILITY_ALERT_WEBHOOK_URL` POST JSON
-- 关闭：`OBSERVABILITY_ALERT_CRON_DISABLED=true`
+- **Platform Worker**（`PROCESS_ROLE=worker|all`）每 2 分钟评估 Outbox + 爬虫，打 `WARN`/`ERROR` 日志
+- **Ranking Worker** 每 10 分钟评估趋势异常（`TrendAnomalyAlertCronService`）
+- 统一 Webhook：`AlertWebhookRouterService` → `ALERT_WEBHOOK_URL`（见 [ALERT_ONCALL_RUNBOOK.md](./ALERT_ONCALL_RUNBOOK.md)）
+- 关闭：`OBSERVABILITY_ALERT_CRON_DISABLED=true` / `TREND_ANOMALY_ALERT_CRON_DISABLED=true`
+
+## 告警 API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/admin/observability/alerts/routing` | Webhook 路由配置（脱敏） |
+| GET | `/admin/observability/alerts/runbook` | 告警 code → triage 元数据 |
+| GET | `/admin/trends/alerts` | 趋势异常扫描 |
+
+值班脚本：`npm run alert:summary`（`scripts/alert-summary.sh`）。
 
 ## 本地 Grafana
 

@@ -1,11 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { runsOutboxKafkaPublisher } from '../config/process-role';
+import { AlertWebhookRouterService } from './alert-webhook-router.service';
 import { CrawlOpsService } from './crawl-ops.service';
 import { OutboxLagService } from './outbox-lag.service';
 
 /**
- * 周期性评估 Outbox / 爬虫调度告警并打日志；可选 Webhook。
+ * 周期性评估 Outbox / 爬虫调度告警并打日志；经统一 Webhook 路由外发。
  * 禁用：`OBSERVABILITY_ALERT_CRON_DISABLED=true`
  */
 @Injectable()
@@ -15,6 +16,7 @@ export class ObservabilityAlertCronService {
   constructor(
     private readonly outboxLag: OutboxLagService,
     private readonly crawlOps: CrawlOpsService,
+    private readonly alertRouter: AlertWebhookRouterService,
   ) {}
 
   @Cron('*/2 * * * *', { timeZone: 'UTC' })
@@ -38,25 +40,12 @@ export class ObservabilityAlertCronService {
       else this.logger.warn(msg);
     }
 
-    const webhook = process.env.OBSERVABILITY_ALERT_WEBHOOK_URL?.trim();
-    if (webhook) {
-      try {
-        await fetch(webhook, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            source: 'ranking-platform',
-            generatedAt: new Date().toISOString(),
-            alerts,
-            outbox,
-            crawl,
-          }),
-        });
-      } catch (e) {
-        this.logger.warn(
-          `alert webhook failed: ${e instanceof Error ? e.message : String(e)}`,
-        );
-      }
-    }
+    const unified = this.alertRouter.fromOpsAlerts(alerts);
+    await this.alertRouter.dispatch({
+      source: 'ranking-platform-ops',
+      category: 'ops',
+      alerts: unified,
+      context: { outbox, crawl },
+    });
   }
 }

@@ -1,5 +1,7 @@
 import { Controller, Get, Header } from '@nestjs/common';
 import { RequireScopes } from '../compliance/api-key.guard';
+import { ALERT_RUNBOOK } from './alert-catalog';
+import { AlertWebhookRouterService } from './alert-webhook-router.service';
 import { CrawlOpsService } from './crawl-ops.service';
 import { formatPrometheusMetrics } from './observability-prometheus';
 import { ObservabilityService } from './observability.service';
@@ -16,6 +18,7 @@ export class ObservabilityAdminController {
     private readonly observability: ObservabilityService,
     private readonly outboxLag: OutboxLagService,
     private readonly crawlOps: CrawlOpsService,
+    private readonly alertRouter: AlertWebhookRouterService,
   ) {}
 
   @Get('summary')
@@ -44,5 +47,17 @@ export class ObservabilityAdminController {
       this.crawlOps.collectMetrics(),
     ]);
     return formatPrometheusMetrics(outbox, crawl);
+  }
+
+  /** 统一 Webhook 路由配置（URL 脱敏） */
+  @Get('alerts/routing')
+  alertRouting() {
+    return this.alertRouter.getRoutingConfig();
+  }
+
+  /** 告警代码 → 值班 triage 元数据 */
+  @Get('alerts/runbook')
+  alertRunbook() {
+    return { entries: ALERT_RUNBOOK };
   }
 }

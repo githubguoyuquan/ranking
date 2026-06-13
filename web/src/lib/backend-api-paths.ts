@@ -32,6 +32,9 @@ export const BACKEND_ADMIN_OPS = {
   drReadiness: "/admin/ops/dr/readiness",
   k8sProbes: "/admin/ops/k8s/probes",
   outboxReplayPlan: "/admin/ops/dr/outbox-replay-plan",
+  observabilitySummary: "/admin/observability/summary",
+  trendsAlerts: "/admin/trends/alerts",
+  alertRouting: "/admin/observability/alerts/routing",
 } as const;
 
 export function backendAdminSnapshotAnalyzePath(snapshotId: string): string {

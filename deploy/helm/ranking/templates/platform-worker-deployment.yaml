@@ -35,6 +35,7 @@ spec:
           env:
             {{- $ctx := dict "Values" .Values "processRole" .Values.platformWorker.processRole }}
             {{- include "ranking.coreEnv" $ctx | nindent 12 }}
+            {{- include "ranking.alertEnv" . | nindent 12 }}
           {{- $envFrom := include "ranking.envFrom" . | trim }}
           {{- if $envFrom }}
           envFrom:

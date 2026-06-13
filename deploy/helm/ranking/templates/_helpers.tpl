@@ -67,6 +67,25 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 {{- end }}
 
+{{- define "ranking.alertEnv" -}}
+{{- if .Values.alerts.webhookUrl }}
+- name: ALERT_WEBHOOK_URL
+  value: {{ .Values.alerts.webhookUrl | quote }}
+{{- end }}
+{{- if .Values.alerts.webhookRoutes }}
+- name: ALERT_WEBHOOK_ROUTES
+  value: {{ .Values.alerts.webhookRoutes | quote }}
+{{- end }}
+{{- if .Values.alerts.format }}
+- name: ALERT_WEBHOOK_FORMAT
+  value: {{ .Values.alerts.format | quote }}
+{{- end }}
+{{- if .Values.alerts.cooldownSeconds }}
+- name: ALERT_WEBHOOK_COOLDOWN_SECONDS
+  value: {{ .Values.alerts.cooldownSeconds | quote }}
+{{- end }}
+{{- end }}
+
 {{- define "ranking.httpProbes" -}}
 readinessProbe:
   httpGet:

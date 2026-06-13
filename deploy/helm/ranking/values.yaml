@@ -47,6 +47,15 @@ snapshotNotify:
   service:
     port: 3010
 
+alerts:
+  webhookUrl: ""
+  # JSON string → ALERT_WEBHOOK_ROUTES
+  webhookRoutes: ""
+  format: json
+  cooldownSeconds: 300
+  # bearer token via secret key when externalSecrets enabled
+  bearerTokenSecretKey: ALERT_WEBHOOK_BEARER_TOKEN
+
 probes:
   livenessPath: /health
   readinessPath: /health/ready

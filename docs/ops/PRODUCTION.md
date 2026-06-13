@@ -81,6 +81,7 @@ Helm 模板含 **live/ready/startup** 探针、**HPA**、**Ingress**、**Service
 - 事件网：Kafka 保留期 ≥ 业务重放窗口
 - **演练 runbook**： [DR_RUNBOOK.md](./DR_RUNBOOK.md)
 - CI/on-call：`scripts/dr-readiness.sh`（exit 2 = critical）；PR 流水线 `scripts/ci-dr-readiness.sh`
+- 告警值班：`scripts/alert-summary.sh`（Outbox/爬虫/趋势）；[ALERT_ONCALL_RUNBOOK.md](./ALERT_ONCALL_RUNBOOK.md)
 - GitHub Actions：`.github/workflows/ci.yml`、定时 `dr-readiness-scheduled.yml`（需 secrets）
 
 ## 环境变量清单

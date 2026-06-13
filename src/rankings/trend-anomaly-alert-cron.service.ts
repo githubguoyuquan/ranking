@@ -1,17 +1,21 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { runsRankingWorkers } from '../config/process-role';
+import { AlertWebhookRouterService } from '../observability/alert-webhook-router.service';
 import { TrendAnomalyService } from './trend-anomaly.service';
 
 /**
- * 周期性扫描 TrendAnalysis / 连续升降 streak，打日志并可选 Webhook。
+ * 周期性扫描 TrendAnalysis / 连续升降 streak，打日志并经统一 Webhook 路由外发。
  * 禁用：`TREND_ANOMALY_ALERT_CRON_DISABLED=true`
  */
 @Injectable()
 export class TrendAnomalyAlertCronService {
   private readonly logger = new Logger(TrendAnomalyAlertCronService.name);
 
-  constructor(private readonly trendAnomaly: TrendAnomalyService) {}
+  constructor(
+    private readonly trendAnomaly: TrendAnomalyService,
+    private readonly alertRouter: AlertWebhookRouterService,
+  ) {}
 
   @Cron('*/10 * * * *', { timeZone: 'UTC' })
   async evaluateAndNotify(): Promise<void> {
@@ -33,29 +37,17 @@ export class TrendAnomalyAlertCronService {
       await this.trendAnomaly.persistAnomalyDigest(scan);
     }
 
-    const webhook =
-      process.env.TREND_ANOMALY_ALERT_WEBHOOK_URL?.trim() ??
-      process.env.OBSERVABILITY_ALERT_WEBHOOK_URL?.trim();
-    if (!webhook) return;
-
-    try {
-      await fetch(webhook, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          source: 'ranking-platform-trends',
-          generatedAt: scan.generatedAt,
-          status: scan.status,
-          alertCount: scan.anomalies.length,
-          alerts: scan.anomalies.slice(0, 50),
-          thresholds: scan.thresholds,
-          scannedAnalyses: scan.scannedAnalyses,
-        }),
-      });
-    } catch (e) {
-      this.logger.warn(
-        `trend alert webhook failed: ${e instanceof Error ? e.message : String(e)}`,
-      );
-    }
+    const unified = this.alertRouter.fromTrendAnomalies(scan.anomalies);
+    await this.alertRouter.dispatch({
+      source: 'ranking-platform-trends',
+      category: 'trends',
+      alerts: unified,
+      context: {
+        status: scan.status,
+        scannedAnalyses: scan.scannedAnalyses,
+        scannedStreakEntities: scan.scannedStreakEntities,
+        thresholds: scan.thresholds,
+      },
+    });
   }
 }

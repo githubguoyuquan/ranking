@@ -54,9 +54,37 @@ export default function OpsPage() {
   return (
     <AdminPage
       title="DR / K8s 运维"
-      description="灾备就绪检查、K8s 探针聚合与 Outbox 重放计划。详见 docs/ops/DR_RUNBOOK.md。"
+      description="灾备就绪、告警聚合与 Outbox 重放。Runbook：docs/ops/DR_RUNBOOK.md、docs/ops/ALERT_ONCALL_RUNBOOK.md。"
     >
       <Card>
+        <CardHeader>
+          <CardTitle className="text-base">告警</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            onClick={() => void load(BACKEND_ADMIN_OPS.observabilitySummary, "Observability summary")}
+          >
+            Outbox / 爬虫
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => void load(BACKEND_ADMIN_OPS.trendsAlerts, "Trend alerts")}
+          >
+            趋势异常
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => void load(BACKEND_ADMIN_OPS.alertRouting, "Alert routing")}
+          >
+            Webhook 路由
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card className="mt-4">
         <CardHeader>
           <CardTitle className="text-base">API</CardTitle>
         </CardHeader>

@@ -48,6 +48,10 @@ externalSecrets:
       remoteRef:
         key: prod/ranking/msk
         property: schema_registry_url
+    - secretKey: ALERT_WEBHOOK_BEARER_TOKEN
+      remoteRef:
+        key: prod/ranking/alerts
+        property: bearer_token
 
 drReadinessCron:
   enabled: true

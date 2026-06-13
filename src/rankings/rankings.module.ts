@@ -4,6 +4,7 @@ import { runsRankingWorkers } from '../config/process-role';
 import { TrendAnalysisSchedulerService } from './trend-analysis-scheduler.service';
 import { AnalyticsModule } from '../analytics/analytics.module';
 import { AgentOrchestrationModule } from '../agent-orchestration/agent-orchestration.module';
+import { ObservabilityModule } from '../observability/observability.module';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { ScaleModule } from '../scale/scale.module';
 import { SearchModule } from '../search/search.module';
@@ -22,6 +23,7 @@ import { TrendAnomalyService } from './trend-anomaly.service';
   imports: [
     AnalyticsModule,
     AgentOrchestrationModule,
+    ObservabilityModule,
     RealtimeModule,
     SearchModule,
     ScaleModule,

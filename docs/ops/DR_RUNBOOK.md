@@ -69,4 +69,5 @@ Helm：`deploy/helm/ranking/templates/api-deployment.yaml` 已配置 live/ready/
 
 - [PRODUCTION.md](./PRODUCTION.md) — 拓扑与 Helm
 - [OBSERVABILITY.md](./OBSERVABILITY.md) — Prometheus / 告警
+- [ALERT_ONCALL_RUNBOOK.md](./ALERT_ONCALL_RUNBOOK.md) — 统一 Webhook 与值班 triage
 - [DATABASE_MIGRATIONS.md](./DATABASE_MIGRATIONS.md) — 迁移 Job

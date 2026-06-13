@@ -15,8 +15,8 @@
 | 单条目排名演化 | previousRank、rankChange、趋势 | `RankingItem`：`previousRank`、`rankChange`、`TrendType`、多维度 score | 快照内已满足；**历史极值与末端连续升降步数**在 `GET /v1/entities/:id/rank-history` 的 `summary` 中计算；**按实体物化统计表**见 §5.1（未建） |
 | 历史时间线 | `RankingItemHistory` + 分析 | `RankingItemHistory` + **`GET /v1/entities/:id/rank-history`**；话题侧 **`GET /v1/topics/:slug/snapshots`** / **`trend-analyses`** | 缺 **CH↔PG 运营报表**、§13 曲线可视化与实时推送 |
 | 时间衰减 / 权重 | 指数/分段/可配置 | `scoring.ts` + **`EntityMetric` 全链路**：`POST /admin/entities/:id/metrics` 写入 → 物化 `scoreEntity`；可选 CH `metric_timeseries`（`SYNC_RANKING_TO_CLICKHOUSE`） | 自动从抓取页抽取结构化信号仍待接 |
-| 趋势分析 | 环比/同比/MA/异常 | 物化写入 `TrendAnalysis` + **`GET /v1/topics/:slug/trend-analyses`**；**`GET /v1/trends/anomalies`** 异常扫描 + **`TrendAnomalyAlertCronService`** Webhook；BI `trends.alerts` | 同比回填、可配置告警路由生产化 |
-| 抓取：增量、断点、去重 | checkpoint、fingerprint | `CrawlCheckpoint`、`CrawledUrl`；**全球调度** `CrawlSchedulerService` + `CrawlScheduleRun` + 管理台 `/crawl` | 多区域 K8s 生产落地、调度 SLA 与配额 |
+| 趋势分析 | 环比/同比/MA/异常 | 物化写入 `TrendAnalysis` + **`GET /v1/topics/:slug/trend-analyses`**；**`GET /v1/trends/anomalies`** + 统一 Webhook 告警；BI `trends.alerts` | 同比回填 |
+| 抓取：增量、断点、去重 | checkpoint、fingerprint | `CrawlCheckpoint`、`CrawledUrl`；**全球调度** + overview/Prometheus | 多区域 K8s 生产落地、调度 SLA 与配额 |
 | 向量语义 / 亿级 ES | Qdrant/Milvus + ES | **Qdrant 主检索**（`SEARCH_PRIMARY`）+ ES **ILM/rollover** + 规模验证 API | 跨集群 DR、crawl 语义 ANN 全量 |
 | Kafka 事件网 | 全链路事件 | **6 类外发 Kafka** + 1 类仅登记；**本仓库无 Consumer**；双轨 `publishedAt` / `kafkaPublishedAt` | 外部消费方按 `docs/kafka/CONSUMER_BOUNDARY.md` 订阅 |
 | Schema Registry | 中心化契约 | Redpanda SR + `KAFKA_SCHEMA_REGISTRY_URL` REST 注册 | 消息仍为 JSON 封套（非 Avro wire） |
@@ -24,7 +24,7 @@
 | 多 AZ 运维 | K8s 生产 | **Helm** + **AWS 接线**（`values-aws-production.yaml`、External Secrets、DR CronJob）、`PRODUCTION_WIRING_REQUIRED`、`scripts/dr-readiness.sh` CI | 季度 DR 演练执行 |
 | AI Agent 体系 | 多 Agent | **BullMQ `ai-agent`** + **`AgentRun`** + 7 类快照/生命周期 agent；`RANKING_FOLLOWUP_AGENT_PIPELINE` | Temporal / Kafka `ai.analysis.requested`；更细粒度配额 |
 | 搜索与推荐 | 语义、时间、趋势检索 + 推荐 | **Qdrant/ES/PG** + **DSL/RRF hybrid** + `similar-entities` / `similar-topics` | 协同过滤、更大规模话题向量 |
-| 生产可观测 | Outbox/爬虫/BI | `observability` 模块 + `/bi` 告警 + Grafana 骨架 | 告警路由生产化 |
+| 生产可观测 | Outbox/爬虫/BI | `observability` + 统一 **`AlertWebhookRouterService`** + [ALERT_ONCALL_RUNBOOK.md](./docs/ops/ALERT_ONCALL_RUNBOOK.md) | 托管集群常态化压测 |
 | 规模验证 | 压测与 ILM | `POST /admin/scale/validate`、ES ILM、Qdrant benchmark、CH MV + BI 钻取 | 托管集群常态化压测 |
 | 微服务 | DDD+拆服务 | **单体 Nest** | 按限界上下文拆分为独立服务（可选） |
 | K8s / HA / 冷热分离 | 生产级 | **Helm chart** + 管理台 `/ops` + DR readiness API | Operator/多集群联邦、冷热 CH 分层待建 |

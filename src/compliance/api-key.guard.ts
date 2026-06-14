@@ -14,6 +14,10 @@ import type { ApiKeyScope } from './pii-redact';
 export const PUBLIC_ROUTE_KEY = 'rankingPublicRoute';
 export const REQUIRED_SCOPES_KEY = 'rankingRequiredScopes';
 
+/** V1 读接口最低 scope（写接口需 write/admin） */
+const V1_READ_SCOPES: ApiKeyScope[] = ['read', 'write', 'admin'];
+const V1_WRITE_SCOPES: ApiKeyScope[] = ['write', 'admin'];
+
 /** 健康检查、探活等无需密钥 */
 export const PublicRoute = () => SetMetadata(PUBLIC_ROUTE_KEY, true);
 
@@ -67,9 +71,31 @@ export class ApiKeyGuard implements CanActivate {
           );
         }
       }
+    } else if (auth && apiAuthRequired()) {
+      this.enforceV1Scopes(req, auth);
     }
 
     return true;
+  }
+
+  /** /v1 默认强制 read/write scope（鉴权开启时） */
+  private enforceV1Scopes(
+    req: Request & { [REQUEST_AUTH_CONTEXT]?: AuthenticatedRequestContext },
+    auth: AuthenticatedRequestContext,
+  ): void {
+    const path = req.path ?? req.url ?? '';
+    if (!path.startsWith('/v1/') || this.isAlwaysPublicPath(path)) return;
+
+    const method = (req.method ?? 'GET').toUpperCase();
+    const isWrite = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
+    const allowed = isWrite ? V1_WRITE_SCOPES : V1_READ_SCOPES;
+    if (!allowed.some((s) => auth.scopes.includes(s))) {
+      throw new UnauthorizedException(
+        isWrite
+          ? 'write or admin scope required for this route'
+          : 'read scope required for this route',
+      );
+    }
   }
 
   private isAlwaysPublicPath(path: string): boolean {

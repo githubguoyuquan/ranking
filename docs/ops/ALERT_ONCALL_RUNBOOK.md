@@ -29,7 +29,9 @@ OpenAPI：`docs/openapi/trends.yaml`、`admin-observability.yaml`。
 | `ALERT_WEBHOOK_URL` | **主入口**（推荐）；兼容 `OBSERVABILITY_ALERT_WEBHOOK_URL` |
 | `ALERT_WEBHOOK_ROUTES` | JSON 路由，见下 |
 | `ALERT_WEBHOOK_BEARER_TOKEN` | 可选 Bearer |
-| `ALERT_WEBHOOK_FORMAT` | `json`（默认）或 `slack` |
+| `ALERT_WEBHOOK_FORMAT` | `json`（默认）、`slack` 或 `pagerduty` |
+| `PAGERDUTY_ROUTING_KEY` | PagerDuty Events API v2 routing key（`critical` 路由到 `events.pagerduty.com` 时） |
+| `DR_ALERT_ON_FAILURE` | `true` 时 DR/scale 探测脚本失败会 POST 告警 |
 | `ALERT_WEBHOOK_COOLDOWN_SECONDS` | 同 code 冷却（默认 300s，防刷屏） |
 | `ALERT_WEBHOOK_DISABLED` | `true` 关闭全部外发 |
 | `TREND_ANOMALY_ALERT_WEBHOOK_URL` | 趋势专用覆盖（无 `categories.trends` 时生效） |

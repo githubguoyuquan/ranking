@@ -1,0 +1,22 @@
+name: Scale validate (scheduled)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 5 * * 1"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    if: ${{ vars.RANKING_SCALE_VALIDATE_ENABLED == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run scale validation gate
+        env:
+          RANKING_API_BASE: ${{ secrets.RANKING_DR_API_BASE }}
+          RANKING_API_KEY: ${{ secrets.RANKING_DR_API_KEY }}
+          SCALE_VALIDATE_MIN_STATUS: ${{ vars.RANKING_SCALE_VALIDATE_MIN_STATUS || 'warn' }}
+        run: |
+          chmod +x scripts/scale-validate.sh
+          bash scripts/scale-validate.sh

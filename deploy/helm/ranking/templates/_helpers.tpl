@@ -45,6 +45,18 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 - name: KAFKA_SCHEMA_REGISTRY_URL
   value: {{ .Values.env.KAFKA_SCHEMA_REGISTRY_URL | quote }}
 {{- end }}
+{{- if .Values.env.ELASTICSEARCH_NODE }}
+- name: ELASTICSEARCH_NODE
+  value: {{ .Values.env.ELASTICSEARCH_NODE | quote }}
+{{- end }}
+{{- if .Values.env.CLICKHOUSE_URL }}
+- name: CLICKHOUSE_URL
+  value: {{ .Values.env.CLICKHOUSE_URL | quote }}
+{{- end }}
+{{- if .Values.env.QDRANT_URL }}
+- name: QDRANT_URL
+  value: {{ .Values.env.QDRANT_URL | quote }}
+{{- end }}
 {{- if .Values.dr.region }}
 - name: DR_REGION
   value: {{ .Values.dr.region | quote }}
@@ -83,6 +95,14 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- if .Values.alerts.cooldownSeconds }}
 - name: ALERT_WEBHOOK_COOLDOWN_SECONDS
   value: {{ .Values.alerts.cooldownSeconds | quote }}
+{{- end }}
+{{- if .Values.alerts.pagerdutyRoutingKeySecretKey }}
+- name: PAGERDUTY_ROUTING_KEY
+  valueFrom:
+    secretKeyRef:
+      name: {{ .Values.secret.name }}
+      key: {{ .Values.alerts.pagerdutyRoutingKeySecretKey }}
+      optional: true
 {{- end }}
 {{- end }}
 

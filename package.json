@@ -19,6 +19,7 @@
     "scale:validate": "bash scripts/scale-validate.sh",
     "dr:readiness": "bash scripts/dr-readiness.sh",
     "dr:readiness:ci": "bash scripts/ci-dr-readiness.sh",
+    "dr:quarterly-drill": "bash scripts/dr-quarterly-drill.sh",
     "alert:summary": "bash scripts/alert-summary.sh",
     "start:snapshot-notify": "npm run start:dev --prefix consumers/snapshot-notify",
     "test:snapshot-notify": "npm test --prefix consumers/snapshot-notify"

@@ -7,6 +7,9 @@ export type ProductionWiringEnv = {
   redisUrl: string;
   kafkaBrokers: string;
   kafkaSchemaRegistryUrl: string;
+  elasticsearchNode: string;
+  clickhouseUrl: string;
+  qdrantUrl: string;
 };
 
 export function productionWiringEnvFromProcess(
@@ -19,7 +22,36 @@ export function productionWiringEnvFromProcess(
     redisUrl: env.REDIS_URL?.trim() ?? '',
     kafkaBrokers: env.KAFKA_BROKERS?.trim() ?? '',
     kafkaSchemaRegistryUrl: env.KAFKA_SCHEMA_REGISTRY_URL?.trim() ?? '',
+    elasticsearchNode: env.ELASTICSEARCH_NODE?.trim() ?? '',
+    clickhouseUrl: env.CLICKHOUSE_URL?.trim() ?? '',
+    qdrantUrl: env.QDRANT_URL?.trim() ?? '',
   };
+}
+
+function managedSearchLike(url: string): boolean {
+  return (
+    url.includes('amazonaws.com') ||
+    url.includes('elastic-cloud.com') ||
+    url.includes('opensearch') ||
+    url.includes('es.amazonaws.com')
+  );
+}
+
+function managedClickhouseLike(url: string): boolean {
+  return (
+    url.includes('clickhouse.cloud') ||
+    url.includes('amazonaws.com') ||
+    url.includes('clickhouse')
+  );
+}
+
+function managedQdrantLike(url: string): boolean {
+  return (
+    url.includes('cloud.qdrant.io') ||
+    url.includes('qdrant.io') ||
+    url.startsWith('http://qdrant') ||
+    url.startsWith('https://qdrant')
+  );
 }
 
 /** 静态配置检查（RDS Multi-AZ writer/reader、MSK、ElastiCache），不替代连通性探测。 */
@@ -134,6 +166,57 @@ export function evaluateProductionWiring(
       code: 'prod_schema_registry',
       severity: 'ok',
       message: 'KAFKA_SCHEMA_REGISTRY_URL configured',
+    });
+  }
+
+  if (!cfg.elasticsearchNode) {
+    checks.push({
+      code: 'prod_elasticsearch',
+      severity: 'warn',
+      message: 'ELASTICSEARCH_NODE not set — search falls back to Qdrant/PG only',
+      hint: 'OpenSearch Service or Elastic Cloud endpoint',
+    });
+  } else {
+    checks.push({
+      code: 'prod_elasticsearch',
+      severity: managedSearchLike(cfg.elasticsearchNode) ? 'ok' : 'warn',
+      message: managedSearchLike(cfg.elasticsearchNode)
+        ? 'ELASTICSEARCH_NODE looks like managed search'
+        : 'ELASTICSEARCH_NODE set; verify managed OpenSearch / Elastic Cloud',
+    });
+  }
+
+  if (!cfg.clickhouseUrl) {
+    checks.push({
+      code: 'prod_clickhouse',
+      severity: 'warn',
+      message: 'CLICKHOUSE_URL not set — analytics MV / BI CH paths disabled',
+      hint: 'ClickHouse Cloud or self-hosted with TLS',
+    });
+  } else {
+    checks.push({
+      code: 'prod_clickhouse',
+      severity: managedClickhouseLike(cfg.clickhouseUrl) ? 'ok' : 'warn',
+      message: managedClickhouseLike(cfg.clickhouseUrl)
+        ? 'CLICKHOUSE_URL looks like managed ClickHouse'
+        : 'CLICKHOUSE_URL set; verify ClickHouse Cloud endpoint',
+    });
+  }
+
+  if (!cfg.qdrantUrl) {
+    checks.push({
+      code: 'prod_qdrant',
+      severity: 'warn',
+      message: 'QDRANT_URL not set — primary vector search may be unavailable',
+      hint: 'Qdrant Cloud cluster URL + API key',
+    });
+  } else {
+    checks.push({
+      code: 'prod_qdrant',
+      severity: managedQdrantLike(cfg.qdrantUrl) ? 'ok' : 'warn',
+      message: managedQdrantLike(cfg.qdrantUrl)
+        ? 'QDRANT_URL configured'
+        : 'QDRANT_URL set; verify Qdrant Cloud or in-cluster service',
     });
   }
 

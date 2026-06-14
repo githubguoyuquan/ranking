@@ -15,7 +15,6 @@ dr:
   region: "ap-southeast-1"
   cluster: "prod-eks"
 
-# 敏感项由 External Secrets 注入 K8s Secret `ranking-env`
 secret:
   enabled: true
   name: ranking-env
@@ -26,7 +25,6 @@ externalSecrets:
   secretStoreRef:
     name: aws-secrets-manager
     kind: ClusterSecretStore
-  # AWS Secrets Manager JSON 键 → 应用 env
   data:
     - secretKey: DATABASE_URL
       remoteRef:
@@ -48,32 +46,73 @@ externalSecrets:
       remoteRef:
         key: prod/ranking/msk
         property: schema_registry_url
+    - secretKey: ELASTICSEARCH_NODE
+      remoteRef:
+        key: prod/ranking/search
+        property: elasticsearch_node
+    - secretKey: CLICKHOUSE_URL
+      remoteRef:
+        key: prod/ranking/clickhouse
+        property: url
+    - secretKey: QDRANT_URL
+      remoteRef:
+        key: prod/ranking/qdrant
+        property: url
+    - secretKey: ALERT_WEBHOOK_URL
+      remoteRef:
+        key: prod/ranking/alerts
+        property: webhook_url
     - secretKey: ALERT_WEBHOOK_BEARER_TOKEN
       remoteRef:
         key: prod/ranking/alerts
         property: bearer_token
+    - secretKey: PAGERDUTY_ROUTING_KEY
+      remoteRef:
+        key: prod/ranking/alerts
+        property: pagerduty_routing_key
+    - secretKey: RANKING_ADMIN_API_KEY
+      remoteRef:
+        key: prod/ranking/admin
+        property: api_key
 
 drReadinessCron:
   enabled: true
   schedule: "*/15 * * * *"
-  # 集群内探测 API Service
   apiBase: "http://ranking-ranking-api:3000"
   minStatus: warn
-  # 从同一 Secret 读取 admin key
   apiKeySecretKey: RANKING_ADMIN_API_KEY
+  alertOnFailure: true
+
+scaleValidateCron:
+  enabled: true
+  schedule: "0 4 * * 1"
+  apiBase: "http://ranking-ranking-api:3000"
+  minStatus: warn
+  alertOnFailure: true
+
+drQuarterlyDrill:
+  enabled: true
+  schedule: "0 3 1 1,4,7,10 *"
+  apiBase: "http://ranking-ranking-api:3000"
+  minStatus: warn
+
+alerts:
+  # 明文 routes 示例；生产可改由 ALERT_WEBHOOK_ROUTES secret 覆盖
+  webhookRoutes: '{"default":"https://hooks.slack.com/services/REPLACE/slack","critical":"https://events.pagerduty.com/v2/enqueue","categories":{"trends":"https://hooks.slack.com/services/REPLACE/trends"}}'
+  format: json
+  cooldownSeconds: 300
 
 env:
   API_AUTH_REQUIRED: "true"
-  # 明文 values 留空 — 由 secretRef 提供；PRODUCTION_WIRING_REQUIRED 由 productionWiring.required 注入
   DATABASE_URL: ""
   DATABASE_READ_URL: ""
   REDIS_URL: ""
   KAFKA_BROKERS: ""
   KAFKA_SCHEMA_REGISTRY_URL: ""
-  extra: {}
-
-# 生产 AWS 接线见 docs/ops/AWS_PRODUCTION_WIRING.md 与 values-aws-production.yaml
-# DATABASE_URL=postgresql://app:***@ranking.cluster-xxxx.ap-southeast-1.rds.amazonaws.com:5432/ranking?sslmode=require
-# DATABASE_READ_URL=postgresql://app:***@ranking.cluster-ro-xxxx.ap-southeast-1.rds.amazonaws.com:5432/ranking?sslmode=require
-# REDIS_URL=rediss://:auth-token@ranking.xxxxx.ng.0001.apse1.cache.amazonaws.com:6379
-# KAFKA_BROKERS=b-1.xxx.kafka.ap-southeast-1.amazonaws.com:9098,b-2.xxx.kafka.ap-southeast-1.amazonaws.com:9098
+  ELASTICSEARCH_NODE: ""
+  CLICKHOUSE_URL: ""
+  QDRANT_URL: ""
+  extra:
+    SCALE_VALIDATE_ES_P95_MS: "500"
+    SCALE_VALIDATE_QDRANT_P95_MS: "300"
+    DR_ALERT_ON_FAILURE: "true"

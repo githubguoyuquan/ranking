@@ -109,4 +109,35 @@ describe('AlertWebhookRouterService', () => {
     expect(body.text).toContain('critical');
     expect(body.blocks.length).toBeGreaterThan(0);
   });
+
+  it('formats pagerduty payload for critical route URL', async () => {
+    process.env.PAGERDUTY_ROUTING_KEY = 'pd-routing-key';
+    process.env.ALERT_WEBHOOK_ROUTES = JSON.stringify({
+      default: 'https://hooks.slack.com/default',
+      critical: 'https://events.pagerduty.com/v2/enqueue',
+    });
+
+    await svc.dispatch({
+      source: 'ranking-platform-ops',
+      category: 'ops',
+      alerts: [
+        {
+          code: 'outbox_kafka_pending_critical',
+          severity: 'critical',
+          category: 'outbox',
+          message: 'kafka backlog',
+        },
+      ],
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('https://events.pagerduty.com/v2/enqueue');
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(String(init.body)) as {
+      routing_key: string;
+      payload: { summary: string };
+    };
+    expect(body.routing_key).toBe('pd-routing-key');
+    expect(body.payload.summary).toContain('critical');
+    delete process.env.PAGERDUTY_ROUTING_KEY;
+  });
 });

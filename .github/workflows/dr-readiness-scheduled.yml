@@ -18,6 +18,9 @@ jobs:
           RANKING_API_BASE: ${{ secrets.RANKING_DR_API_BASE }}
           RANKING_API_KEY: ${{ secrets.RANKING_DR_API_KEY }}
           DR_READINESS_MIN_STATUS: ${{ vars.RANKING_DR_MIN_STATUS || 'warn' }}
+          DR_ALERT_ON_FAILURE: "true"
+          ALERT_WEBHOOK_URL: ${{ secrets.RANKING_ALERT_WEBHOOK_URL }}
+          PAGERDUTY_ROUTING_KEY: ${{ secrets.RANKING_PAGERDUTY_ROUTING_KEY }}
         run: |
-          chmod +x scripts/dr-readiness.sh
+          chmod +x scripts/dr-readiness.sh scripts/dr-alert-on-failure.sh
           bash scripts/dr-readiness.sh

@@ -2,6 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { ClickhouseService } from '../analytics/clickhouse.service';
 import { ElasticService } from '../search/elastic.service';
 import { QdrantBenchmarkService } from './qdrant-benchmark.service';
+import {
+  evaluateScaleValidationSuite,
+  scaleValidationThresholdsFromEnv,
+} from './scale-validation-result';
 
 @Injectable()
 export class ScaleValidationService {
@@ -30,8 +34,21 @@ export class ScaleValidationService {
         this.clickhouse.ping(),
       ]);
 
+    const thresholds = scaleValidationThresholdsFromEnv();
+    const evaluation = evaluateScaleValidationSuite(
+      {
+        elasticsearch: { ping: esPing, benchmark: esBench },
+        qdrant: qdrantBench,
+        clickhouse: { ping: chPing, mv: chMv },
+      },
+      thresholds,
+    );
+
     return {
-      ok: true,
+      ok: evaluation.status === 'ok',
+      status: evaluation.status,
+      checks: evaluation.checks,
+      thresholds,
       generatedAt: new Date().toISOString(),
       elasticsearch: {
         ping: esPing,

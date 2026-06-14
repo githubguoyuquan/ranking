@@ -48,6 +48,19 @@ Helm：`deploy/helm/ranking/templates/api-deployment.yaml` 已配置 live/ready/
 
 ## 备份恢复验证（季度）
 
+自动化入口：
+
+```bash
+export RANKING_API_BASE=https://api.ranking.example.com
+export RANKING_API_KEY=rk_admin_...
+bash scripts/dr-quarterly-drill.sh
+# 或 npm run dr:quarterly-drill
+```
+
+生成 `dr-drill-*.json` 报告，聚合 readiness / outbox-replay-plan / k8s-probes / scale-validate。K8s CronJob `drQuarterlyDrill` 与 GHA `dr-quarterly-drill.yml`（`RANKING_DR_QUARTERLY_DRILL_ENABLED=true`）按季度执行。
+
+人工步骤（PITR / Kafka 重放等）仍按下列清单：
+
 | 资产 | 动作 |
 |------|------|
 | Postgres | PITR 恢复到隔离实例；跑 `npm run prisma:deploy` 校验 |

@@ -10,7 +10,7 @@ import type { AuthenticatedRequestContext } from './compliance-auth.types';
 import { parseApiKeyScopes } from './pii-redact';
 
 export function apiAuthRequired(): boolean {
-  return process.env.API_AUTH_REQUIRED === 'true';
+  return process.env.API_AUTH_REQUIRED !== 'false';
 }
 
 @Injectable()

@@ -1,12 +1,12 @@
-{{- if .Values.drReadinessCron.enabled }}
+{{- if .Values.scaleValidateCron.enabled }}
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: {{ include "ranking.fullname" . }}-dr-readiness
+  name: {{ include "ranking.fullname" . }}-scale-validate
   labels:
     {{- include "ranking.labels" . | nindent 4 }}
 spec:
-  schedule: {{ .Values.drReadinessCron.schedule | quote }}
+  schedule: {{ .Values.scaleValidateCron.schedule | quote }}
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
@@ -17,22 +17,22 @@ spec:
         spec:
           restartPolicy: Never
           containers:
-            - name: dr-readiness
+            - name: scale-validate
               image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
               imagePullPolicy: {{ .Values.image.pullPolicy }}
               command:
                 - /bin/bash
-                - /app/scripts/dr-readiness.sh
-                - --min-status={{ .Values.drReadinessCron.minStatus | default "warn" }}
+                - /app/scripts/scale-validate.sh
+                - --min-status={{ .Values.scaleValidateCron.minStatus | default "warn" }}
               env:
                 - name: RANKING_API_BASE
-                  value: {{ .Values.drReadinessCron.apiBase | quote }}
+                  value: {{ .Values.scaleValidateCron.apiBase | quote }}
                 - name: RANKING_API_KEY
                   valueFrom:
                     secretKeyRef:
                       name: {{ .Values.secret.name }}
-                      key: {{ .Values.drReadinessCron.apiKeySecretKey | default "RANKING_ADMIN_API_KEY" }}
-                {{- if .Values.drReadinessCron.alertOnFailure }}
+                      key: {{ .Values.scaleValidateCron.apiKeySecretKey | default "RANKING_ADMIN_API_KEY" }}
+                {{- if .Values.scaleValidateCron.alertOnFailure }}
                 - name: DR_ALERT_ON_FAILURE
                   value: "true"
                 {{- end }}

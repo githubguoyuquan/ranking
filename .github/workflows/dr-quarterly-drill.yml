@@ -1,0 +1,34 @@
+name: DR quarterly drill
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 每季度首日 03:00 UTC（1/4/7/10 月）
+    - cron: "0 3 1 1,4,7,10 *"
+
+jobs:
+  drill:
+    runs-on: ubuntu-latest
+    if: ${{ vars.RANKING_DR_QUARTERLY_DRILL_ENABLED == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run quarterly DR drill
+        env:
+          RANKING_API_BASE: ${{ secrets.RANKING_DR_API_BASE }}
+          RANKING_API_KEY: ${{ secrets.RANKING_DR_API_KEY }}
+          DR_DRILL_MIN_STATUS: ${{ vars.RANKING_DR_DRILL_MIN_STATUS || 'warn' }}
+          DR_ALERT_ON_FAILURE: "true"
+          ALERT_WEBHOOK_URL: ${{ secrets.RANKING_ALERT_WEBHOOK_URL }}
+          PAGERDUTY_ROUTING_KEY: ${{ secrets.RANKING_PAGERDUTY_ROUTING_KEY }}
+        run: |
+          chmod +x scripts/dr-quarterly-drill.sh scripts/dr-alert-on-failure.sh
+          bash scripts/dr-quarterly-drill.sh
+
+      - name: Upload drill report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dr-drill-report
+          path: dr-drill-*.json
+          if-no-files-found: ignore

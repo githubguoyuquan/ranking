@@ -59,14 +59,51 @@ Secrets Manager `prod/ranking/msk`：
 }
 ```
 
-## 4. Helm 部署
+## 4. 托管搜索 / 分析（OpenSearch · ClickHouse · Qdrant）
+
+| 服务 | Secret Manager | 环境变量 |
+|------|----------------|----------|
+| OpenSearch / Elastic Cloud | `prod/ranking/search` | `ELASTICSEARCH_NODE` |
+| ClickHouse Cloud | `prod/ranking/clickhouse` | `CLICKHOUSE_URL` |
+| Qdrant Cloud | `prod/ranking/qdrant` | `QDRANT_URL` |
+
+示例 `prod/ranking/search` JSON：
+
+```json
+{
+  "elasticsearch_node": "https://search-ranking.ap-southeast-1.es.amazonaws.com"
+}
+```
+
+`PRODUCTION_WIRING_REQUIRED=true` 时，`GET /admin/ops/dr/readiness` 会附加 `prod_elasticsearch` / `prod_clickhouse` / `prod_qdrant` 静态检查（未配置为 **warn**）。
+
+## 5. 告警与 on-call（Slack + PagerDuty）
+
+Secrets Manager `prod/ranking/alerts`：
+
+```json
+{
+  "webhook_url": "https://hooks.slack.com/services/…",
+  "bearer_token": "optional",
+  "pagerduty_routing_key": "pd-integration-key"
+}
+```
+
+Helm `values-aws-production.yaml` 中 `ALERT_WEBHOOK_ROUTES` 示例：
+
+- `default` → Slack
+- `critical` → `https://events.pagerduty.com/v2/enqueue`（自动使用 Events API v2 + `PAGERDUTY_ROUTING_KEY`）
+
+## 6. Helm 部署
 
 ```bash
 helm upgrade --install ranking deploy/helm/ranking \
   -f deploy/helm/ranking/values-production.yaml \
   -f deploy/helm/ranking/values-aws-production.yaml \
   --set externalSecrets.enabled=true \
-  --set drReadinessCron.enabled=true
+  --set drReadinessCron.enabled=true \
+  --set scaleValidateCron.enabled=true \
+  --set drQuarterlyDrill.enabled=true
 ```
 
 前提：
@@ -81,11 +118,24 @@ helm upgrade --install ranking deploy/helm/ranking \
 export RANKING_API_BASE=https://api.ranking.example.com
 export RANKING_API_KEY=rk_admin_...
 bash scripts/dr-readiness.sh
+bash scripts/scale-validate.sh
 ```
 
-生产接线检查项（`prod_rds_*`、`prod_elasticache`、`prod_msk`）在 `PRODUCTION_WIRING_REQUIRED=true` 时为 **critical/warn**。
+生产接线检查项（`prod_rds_*`、`prod_elasticache`、`prod_msk`、搜索/分析）在 `PRODUCTION_WIRING_REQUIRED=true` 时为 **critical/warn**。
 
-## 6. CI
+## 6. CI 与常态化探测
+
+| 探测 | 频率 | 入口 |
+|------|------|------|
+| DR readiness | 每 15min（K8s CronJob）/ 6h（GHA） | `scripts/dr-readiness.sh` |
+| Scale validate | 每周一 04:00 UTC（K8s）/ 周一 05:00（GHA） | `scripts/scale-validate.sh` |
+| 季度 DR drill | 1/4/7/10 月 1 日 | `scripts/dr-quarterly-drill.sh` |
+
+GHA 需 Repository variables：`RANKING_DR_READINESS_ENABLED=true`、`RANKING_SCALE_VALIDATE_ENABLED=true`、`RANKING_DR_QUARTERLY_DRILL_ENABLED=true`；secrets：`RANKING_DR_API_BASE`、`RANKING_DR_API_KEY`、`RANKING_ALERT_WEBHOOK_URL`（可选 `RANKING_PAGERDUTY_ROUTING_KEY`）。
+
+失败时设 `DR_ALERT_ON_FAILURE=true` 会向 `ALERT_WEBHOOK_URL` 发送 probe 告警。
+
+## 7. CI（PR）
 
 - PR：`/.github/workflows/ci.yml` 跑单元测试 + `scripts/ci-dr-readiness.sh`（compose 栈）
 - 定时/手动：`dr-readiness-scheduled.yml` 对 staging/prod URL 探测（Repository secrets）

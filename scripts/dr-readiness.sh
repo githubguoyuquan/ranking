@@ -66,6 +66,9 @@ echo "$body" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.
 
 if [[ "$status" == "critical" ]]; then
   echo "DR readiness: CRITICAL" >&2
+  # shellcheck source=/dev/null
+  source "$(dirname "$0")/dr-alert-on-failure.sh"
+  send_probe_failure_alert "ranking-dr-readiness" "critical" "DR readiness probe returned critical"
   exit 2
 fi
 if [[ "$status" == "warn" ]]; then
@@ -74,6 +77,9 @@ if [[ "$status" == "warn" ]]; then
     echo "DR readiness: WARN accepted (DR_READINESS_MIN_STATUS=warn)"
     exit 0
   fi
+  # shellcheck source=/dev/null
+  source "$(dirname "$0")/dr-alert-on-failure.sh"
+  send_probe_failure_alert "ranking-dr-readiness" "warn" "DR readiness probe returned warn (min-status=ok)"
   exit 1
 fi
 echo "DR readiness: OK"

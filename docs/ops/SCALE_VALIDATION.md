@@ -10,6 +10,25 @@ npm run scale:validate
 
 等价于 `POST /admin/scale/validate`（并行：ES ping/ILM/stats/benchmark、Qdrant benchmark、CH MV 健康）。
 
+响应含 **`status`**（`ok` | `warn` | `critical`）与 **`checks[]`** SLO 明细。脚本退出码：`0`=ok、`1`=warn、`2`=critical。
+
+### SLO 环境变量
+
+| 变量 | 默认 | 说明 |
+|------|------|------|
+| `SCALE_VALIDATE_ES_P95_MS` | 500 | ES 实体检索 p95 上限（ms） |
+| `SCALE_VALIDATE_QDRANT_P95_MS` | 300 | Qdrant lexical/vector p95 上限 |
+| `SCALE_VALIDATE_REQUIRE_ES` | wiring 时 true | 未配置 ES 时 critical |
+| `SCALE_VALIDATE_REQUIRE_CH` | wiring 时 true | 未配置 CH 时 critical |
+| `SCALE_VALIDATE_REQUIRE_QDRANT` | wiring 时 true | 未配置 Qdrant 时 critical |
+| `SCALE_VALIDATE_MIN_STATUS` | ok | 脚本 `--min-status=warn` 仅 fail critical |
+
+### 常态化调度
+
+- **K8s**：`scaleValidateCron.enabled=true`（见 `values-aws-production.yaml`）
+- **GHA**：`.github/workflows/scale-validate-scheduled.yml`（`RANKING_SCALE_VALIDATE_ENABLED=true`）
+- 失败告警：`DR_ALERT_ON_FAILURE=true` + `ALERT_WEBHOOK_URL`
+
 ## 托管 Elasticsearch + ILM
 
 ### 环境变量

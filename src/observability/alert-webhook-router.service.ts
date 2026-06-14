@@ -106,10 +106,21 @@ export class AlertWebhookRouterService {
     }
 
     const envelope = this.buildEnvelope(input, due, worst);
-    const body =
-      cfg.format === 'slack'
-        ? JSON.stringify(formatSlackPayload(envelope, cfg.runbookBaseUrl))
-        : JSON.stringify(envelope);
+    const payloadFormat = resolvePayloadFormat(cfg, url, worst);
+    let body: string;
+    try {
+      body =
+        payloadFormat === 'slack'
+          ? JSON.stringify(formatSlackPayload(envelope, cfg.runbookBaseUrl))
+          : payloadFormat === 'pagerduty'
+            ? JSON.stringify(formatPagerDutyPayload(envelope, cfg.pagerdutyRoutingKey))
+            : JSON.stringify(envelope);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      result.errors.push(msg);
+      this.logger.warn(`alert payload build failed: ${msg}`);
+      return result;
+    }
 
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -162,6 +173,52 @@ export class AlertWebhookRouterService {
 
 function worstSeverity(alerts: UnifiedAlertItem[]): AlertSeverity {
   return alerts.some((a) => a.severity === 'critical') ? 'critical' : 'warn';
+}
+
+function resolvePayloadFormat(
+  cfg: ReturnType<typeof alertWebhookConfig>,
+  url: string,
+  worst: AlertSeverity,
+): 'json' | 'slack' | 'pagerduty' {
+  if (cfg.format === 'slack') return 'slack';
+  if (cfg.format === 'pagerduty') return 'pagerduty';
+  if (url.includes('events.pagerduty.com') && worst === 'critical') return 'pagerduty';
+  return 'json';
+}
+
+function formatPagerDutyPayload(
+  envelope: AlertWebhookEnvelopeV1,
+  routingKey: string | null,
+): {
+  routing_key: string;
+  event_action: 'trigger';
+  payload: {
+    summary: string;
+    severity: string;
+    source: string;
+    custom_details: Record<string, unknown>;
+  };
+} {
+  const key = routingKey?.trim();
+  if (!key) {
+    throw new Error('PAGERDUTY_ROUTING_KEY required for PagerDuty webhook format');
+  }
+  const summary = `[${envelope.status}] ${envelope.source} — ${envelope.alertCount} alert(s)`;
+  return {
+    routing_key: key,
+    event_action: 'trigger',
+    payload: {
+      summary,
+      severity: envelope.status === 'critical' ? 'critical' : 'warning',
+      source: envelope.source,
+      custom_details: {
+        category: envelope.category,
+        alerts: envelope.alerts,
+        environment: envelope.environment,
+        context: envelope.context,
+      },
+    },
+  };
 }
 
 function formatSlackPayload(

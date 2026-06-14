@@ -23,6 +23,9 @@ describe('production-wiring', () => {
       redisUrl: 'rediss://ranking.xxxxx.ng.0001.apse1.cache.amazonaws.com:6379',
       kafkaBrokers: '',
       kafkaSchemaRegistryUrl: '',
+      elasticsearchNode: '',
+      clickhouseUrl: '',
+      qdrantUrl: '',
     });
     expect(checks.some((c) => c.code === 'prod_rds_reader' && c.severity === 'critical')).toBe(
       true,
@@ -42,6 +45,9 @@ describe('production-wiring', () => {
       kafkaBrokers:
         'b-1.ranking.abc123.c2.kafka.ap-southeast-1.amazonaws.com:9098,b-2.ranking.abc123.c2.kafka.ap-southeast-1.amazonaws.com:9098',
       kafkaSchemaRegistryUrl: 'https://glue-schema-registry.example',
+      elasticsearchNode: 'https://search-ranking.ap-southeast-1.es.amazonaws.com',
+      clickhouseUrl: 'https://abc.clickhouse.cloud:8443',
+      qdrantUrl: 'https://xyz.cloud.qdrant.io',
     });
     expect(worstDrStatus(checks)).toBe('ok');
   });

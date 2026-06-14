@@ -32,6 +32,22 @@ drReadinessCron:
   apiBase: "http://ranking-ranking-api:3000"
   minStatus: warn
   apiKeySecretKey: RANKING_ADMIN_API_KEY
+  alertOnFailure: false
+
+scaleValidateCron:
+  enabled: false
+  schedule: "0 4 * * 1"
+  apiBase: "http://ranking-ranking-api:3000"
+  minStatus: warn
+  apiKeySecretKey: RANKING_ADMIN_API_KEY
+  alertOnFailure: false
+
+drQuarterlyDrill:
+  enabled: false
+  schedule: "0 3 1 1,4,7,10 *"
+  apiBase: "http://ranking-ranking-api:3000"
+  minStatus: warn
+  apiKeySecretKey: RANKING_ADMIN_API_KEY
 
 snapshotNotify:
   enabled: false
@@ -49,12 +65,12 @@ snapshotNotify:
 
 alerts:
   webhookUrl: ""
-  # JSON string → ALERT_WEBHOOK_ROUTES
+  # JSON string → ALERT_WEBHOOK_ROUTES (critical → PagerDuty, default → Slack)
   webhookRoutes: ""
   format: json
   cooldownSeconds: 300
-  # bearer token via secret key when externalSecrets enabled
   bearerTokenSecretKey: ALERT_WEBHOOK_BEARER_TOKEN
+  pagerdutyRoutingKeySecretKey: PAGERDUTY_ROUTING_KEY
 
 probes:
   livenessPath: /health

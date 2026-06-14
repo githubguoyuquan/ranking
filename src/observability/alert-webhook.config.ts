@@ -12,8 +12,9 @@ export type AlertWebhookConfig = {
   routes: AlertWebhookRoutes;
   bearerToken: string | null;
   cooldownSeconds: number;
-  format: 'json' | 'slack';
+  format: 'json' | 'slack' | 'pagerduty';
   runbookBaseUrl: string | null;
+  pagerdutyRoutingKey: string | null;
   /** Legacy per-domain overrides (backward compat) */
   trendOverrideUrl: string | null;
 };
@@ -25,10 +26,11 @@ export function alertWebhookConfig(): AlertWebhookConfig {
     routes: parseRoutes(),
     bearerToken: process.env.ALERT_WEBHOOK_BEARER_TOKEN?.trim() || null,
     cooldownSeconds: numEnv('ALERT_WEBHOOK_COOLDOWN_SECONDS', 300),
-    format: process.env.ALERT_WEBHOOK_FORMAT?.trim() === 'slack' ? 'slack' : 'json',
+    format: parseAlertFormat(process.env.ALERT_WEBHOOK_FORMAT),
     runbookBaseUrl:
       process.env.ALERT_RUNBOOK_BASE_URL?.trim() ||
       'https://github.com/githubguoyuquan/ranking/blob/main/docs/ops/ALERT_ONCALL_RUNBOOK.md',
+    pagerdutyRoutingKey: process.env.PAGERDUTY_ROUTING_KEY?.trim() || null,
     trendOverrideUrl: process.env.TREND_ANOMALY_ALERT_WEBHOOK_URL?.trim() || null,
   };
 }
@@ -97,4 +99,11 @@ function numEnv(key: string, fallback: number): number {
   if (!v) return fallback;
   const n = Number(v);
   return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
+function parseAlertFormat(raw: string | undefined): AlertWebhookConfig['format'] {
+  const v = raw?.trim().toLowerCase();
+  if (v === 'slack') return 'slack';
+  if (v === 'pagerduty') return 'pagerduty';
+  return 'json';
 }

@@ -43,6 +43,11 @@ hpa:
 ingress:
   enabled: true
   className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/limit-rps: "80"
+    nginx.ingress.kubernetes.io/limit-rpm: "2400"
+    nginx.ingress.kubernetes.io/proxy-body-size: "4m"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
   hosts:
     - host: ranking.example.com
       paths:

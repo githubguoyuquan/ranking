@@ -1,41 +1,40 @@
-{{- if .Values.drReadinessCron.enabled }}
+{{- if .Values.drQuarterlyDrill.enabled }}
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: {{ include "ranking.fullname" . }}-dr-readiness
+  name: {{ include "ranking.fullname" . }}-dr-quarterly-drill
   labels:
     {{- include "ranking.labels" . | nindent 4 }}
 spec:
-  schedule: {{ .Values.drReadinessCron.schedule | quote }}
+  schedule: {{ .Values.drQuarterlyDrill.schedule | quote }}
   concurrencyPolicy: Forbid
-  successfulJobsHistoryLimit: 3
-  failedJobsHistoryLimit: 3
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
   jobTemplate:
     spec:
-      backoffLimit: 1
+      backoffLimit: 0
       template:
         spec:
           restartPolicy: Never
           containers:
-            - name: dr-readiness
+            - name: dr-quarterly-drill
               image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
               imagePullPolicy: {{ .Values.image.pullPolicy }}
               command:
                 - /bin/bash
-                - /app/scripts/dr-readiness.sh
-                - --min-status={{ .Values.drReadinessCron.minStatus | default "warn" }}
+                - /app/scripts/dr-quarterly-drill.sh
               env:
                 - name: RANKING_API_BASE
-                  value: {{ .Values.drReadinessCron.apiBase | quote }}
+                  value: {{ .Values.drQuarterlyDrill.apiBase | quote }}
                 - name: RANKING_API_KEY
                   valueFrom:
                     secretKeyRef:
                       name: {{ .Values.secret.name }}
-                      key: {{ .Values.drReadinessCron.apiKeySecretKey | default "RANKING_ADMIN_API_KEY" }}
-                {{- if .Values.drReadinessCron.alertOnFailure }}
+                      key: {{ .Values.drQuarterlyDrill.apiKeySecretKey | default "RANKING_ADMIN_API_KEY" }}
+                - name: DR_DRILL_MIN_STATUS
+                  value: {{ .Values.drQuarterlyDrill.minStatus | default "warn" | quote }}
                 - name: DR_ALERT_ON_FAILURE
                   value: "true"
-                {{- end }}
                 {{- include "ranking.alertEnv" . | nindent 16 }}
               resources:
                 requests:

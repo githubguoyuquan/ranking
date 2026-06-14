@@ -23,6 +23,7 @@ describe('RankingsService.listHotBoards', () => {
   it('returns preview rows capped by previewLimit and skips empty leaderboards', async () => {
     const readPrisma = {
       topic: {
+        count: vi.fn().mockResolvedValue(2),
         findMany: vi.fn().mockResolvedValue([
           {
             id: 1n,
@@ -89,7 +90,7 @@ describe('RankingsService.listHotBoards', () => {
     expect(result.boards[0].topic.slug).toBe('demo-a');
     expect(result.boards[0].snapshot.preview).toHaveLength(2);
     expect(result.boards[0].snapshot.preview[0].entity.canonicalName).toBe('Alpha');
-    expect(result.filter).toEqual({
+    expect(result.filter).toMatchObject({
       topicsLimit: 5,
       previewLimit: 2,
       timeWindow: 'DAY',
@@ -105,6 +106,7 @@ describe('RankingsService.listHotBoards', () => {
   it('clamps topicsLimit and previewLimit', async () => {
     const readPrisma = {
       topic: {
+        count: vi.fn().mockResolvedValue(0),
         findMany: vi.fn().mockResolvedValue([]),
       },
     };

@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { ADMIN_HREF } from "@/lib/admin-web-paths";
 import { isDecimalBigIntIdString } from "@/lib/decimal-id";
 import { NEST_V1_DOC } from "@/lib/nest-api-paths";
-import { nestEntityTimelineUrl } from "@/lib/nest-api-urls";
+import { nestEntityTimelineUrl, nestEntityTimelineReportUrl } from "@/lib/nest-api-urls";
 
 type TimelineEvent = {
   type: string;
@@ -31,6 +31,8 @@ function TimelinePageInner() {
   const [timeWindow, setTimeWindow] = useState(sp.get("timeWindow")?.trim() ?? "");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
+  const [report, setReport] = useState("");
+  const [reportLoading, setReportLoading] = useState(false);
   const [data, setData] = useState<{
     entity?: { canonicalName?: string };
     topicSeries?: Array<{
@@ -99,6 +101,36 @@ function TimelinePageInner() {
     router.replace(`${ADMIN_HREF.entityTimeline}?${q.toString()}`);
   }
 
+  async function generateAiReport() {
+    const id = entityId.trim();
+    if (!isDecimalBigIntIdString(id)) {
+      setErr("entityId 须为十进制主键");
+      return;
+    }
+    const q = new URLSearchParams();
+    if (topicSlugs.trim()) q.set("topicSlugs", topicSlugs.trim());
+    if (timeWindow.trim()) q.set("timeWindow", timeWindow.trim());
+    setReportLoading(true);
+    setReport("");
+    try {
+      const res = await fetch(nestEntityTimelineReportUrl(id, q), {
+        method: "POST",
+        cache: "no-store",
+      });
+      const text = await res.text();
+      if (!res.ok) {
+        setErr(`AI 报告 HTTP ${res.status}\n${text}`);
+        return;
+      }
+      const parsed = JSON.parse(text) as { report?: string; usedLlm?: boolean };
+      setReport(parsed.report ?? text);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setReportLoading(false);
+    }
+  }
+
   return (
     <AdminPage
       title="实体运营时间线"
@@ -124,6 +156,14 @@ function TimelinePageInner() {
           <div className="flex items-end gap-2">
             <Button type="button" onClick={loadFromForm} disabled={loading}>
               {loading ? "加载中…" : "加载"}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => void generateAiReport()}
+              disabled={reportLoading || !entityId.trim()}
+            >
+              {reportLoading ? "生成中…" : "AI 报告"}
             </Button>
             <Link href={ADMIN_HREF.entityRankHistory} className="text-sm text-primary underline-offset-4 hover:underline">
               单话题曲线
@@ -164,6 +204,17 @@ function TimelinePageInner() {
           </CardContent>
         </Card>
       )}
+
+      {report ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">AI 深度分析</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="whitespace-pre-wrap text-sm">{report}</p>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {err && (
         <pre className="overflow-auto rounded bg-destructive/10 p-3 text-xs text-destructive">{err}</pre>

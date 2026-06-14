@@ -127,6 +127,23 @@ services:
     depends_on:
       - redpanda
 
+  followup-dispatch:
+    build:
+      context: ./consumers/followup-dispatch
+      dockerfile: Dockerfile
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+      KAFKA_TOPIC_RANKING_FOLLOWUP_REQUESTED: ranking.followup.requested
+      KAFKA_CONSUMER_GROUP: ranking-followup-dispatch
+      FOLLOWUP_DISPATCH_HTTP_PORT: "3011"
+      RANKING_FOLLOWUP_DISPATCH_URL: http://host.docker.internal:3000/admin/ranking-followup/dispatch
+    ports:
+      - "3011:3011"
+    depends_on:
+      - redpanda
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
 volumes:
   pgdata:
   chdata:

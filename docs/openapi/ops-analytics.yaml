@@ -67,6 +67,45 @@ paths:
         "404":
           description: entity not found
 
+  /v1/entities/{id}/timeline/report:
+    post:
+      tags: [OpsAnalytics, Rankings]
+      summary: 实体时间线 AI 报告（规则摘要 + 可选 LLM）
+      operationId: entityTimelineReport
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[0-9]+$"
+        - name: topicSlugs
+          in: query
+          schema:
+            type: string
+        - name: timeWindow
+          in: query
+          schema:
+            $ref: "#/components/schemas/TimeWindow"
+      responses:
+        "200":
+          description: 成功
+
+  /v1/topic-versions/compare/report:
+    post:
+      tags: [OpsAnalytics, Rankings]
+      summary: TopicVersion diff AI 报告
+      operationId: topicVersionDiffReport
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompareTopicVersionsRequest"
+      responses:
+        "200":
+          description: 成功
+
   /v1/topic-versions/compare:
     post:
       tags: [OpsAnalytics, Rankings]

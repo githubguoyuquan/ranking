@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -16,6 +17,7 @@ import {
   nestV1TopicPath,
   nestV1TopicSnapshotsPath,
 } from "@/lib/nest-api-paths";
+import { buildSiteMetadata } from "@/lib/site-metadata";
 import { siteFetchJson } from "@/lib/site-api";
 import { siteEntityPath, siteSnapshotPath } from "@/lib/site-web-paths";
 
@@ -25,6 +27,19 @@ type LeaderboardItem = {
   popularityScore?: number;
   entity?: { id?: string; canonicalName?: string | null };
 };
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}): Promise<Metadata> {
+  const { slug } = await params;
+  return buildSiteMetadata({
+    title: slug,
+    description: `查看话题「${slug}」最新排行榜、快照与得分分布。`,
+    path: `/topics/${slug}`,
+  });
+}
 
 export default async function TopicPage({
   params,

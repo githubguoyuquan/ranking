@@ -36,6 +36,12 @@ export const AI_AGENT_TIME_SERIES_V1 = 'time-series-v1';
 /** policy 权重 vs EntityMetric 覆盖率诊断 */
 export const AI_AGENT_RANKING_V1 = 'ranking-agent-v1';
 
+/** 实体多话题时间线深度解读（运营 / C 端） */
+export const AI_AGENT_ENTITY_TIMELINE_REPORT_V1 = 'entity-timeline-report-v1';
+
+/** TopicVersion 策略 diff 解读报告 */
+export const AI_AGENT_TOPIC_VERSION_DIFF_REPORT_V1 = 'topic-version-diff-report-v1';
+
 /** 写入 `AiAnalysis.detailJson.agentKind`，便于管理台与统计区分 */
 export type AiAnalysisAgentKind =
   | 'followup'

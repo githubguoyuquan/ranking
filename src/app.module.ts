@@ -19,6 +19,7 @@ import { OutboxModule } from './outbox/outbox.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RankingsModule } from './rankings/rankings.module';
 import { SearchModule } from './search/search.module';
+import { SiteModule } from './site/site.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { SearchModule } from './search/search.module';
     BiModule,
     ObservabilityModule,
     OpsModule,
+    SiteModule,
   ],
   controllers: [HealthController],
 })

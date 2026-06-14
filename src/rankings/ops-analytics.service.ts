@@ -3,6 +3,11 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { optionalAgentLlm } from '../agent/agent-llm.helper';
+import {
+  AI_AGENT_ENTITY_TIMELINE_REPORT_V1,
+  AI_AGENT_TOPIC_VERSION_DIFF_REPORT_V1,
+} from '../agent/ai-agent.constants';
 import type { TimeWindow } from '@prisma/client';
 import { diffTopicVersionPolicies } from '../domain/topic-version-diff';
 import { parseRankingPolicyJson } from '../domain/policy-json';
@@ -419,6 +424,157 @@ export class OpsAnalyticsService {
     return this.prisma.topicRankSnapshot.findFirst({
       where: { topicRankingId: ranking.id },
       orderBy: { snapshotTime: 'desc' },
+    });
+  }
+
+  /** 规则摘要 + 可选 LLM 润色的实体时间线报告 */
+  async generateEntityTimelineReport(
+    entityId: bigint,
+    opts: {
+      topicSlugs?: string[];
+      timeWindow?: TimeWindow;
+      useLlm?: boolean;
+    } = {},
+  ) {
+    const timeline = await this.getEntityTimeline(entityId, {
+      topicSlugs: opts.topicSlugs,
+      timeWindow: opts.timeWindow,
+      topicsLimit: 5,
+      pointsLimit: 30,
+      metricsLimit: 15,
+    }) as {
+      entity: { id: string; canonicalName: string };
+      topicSeries: Array<{
+        topicSlug: string;
+        summary?: Record<string, unknown> | null;
+        points: Array<{ rank: number }>;
+      }>;
+      metrics: Array<{ metricKey: string; value: number }>;
+      events: EntityTimelineEvent[];
+    };
+
+    const lines: string[] = [];
+    lines.push(`实体「${timeline.entity.canonicalName}」跨 ${timeline.topicSeries.length} 个话题有序列数据。`);
+    for (const s of timeline.topicSeries) {
+      const pts = s.points;
+      if (pts.length === 0) continue;
+      const first = pts[0]?.rank;
+      const last = pts[pts.length - 1]?.rank;
+      const summary = s.summary as { bestRank?: number; currentStreakUp?: number } | null;
+      lines.push(
+        `- ${s.topicSlug}：最近 ${pts.length} 点，名次 ${first}→${last}` +
+          (summary?.bestRank != null ? `，历史最佳 #${summary.bestRank}` : '') +
+          ((summary?.currentStreakUp ?? 0) > 0 ? `，连续上升 ${summary!.currentStreakUp} 步` : ''),
+      );
+    }
+    if (timeline.metrics.length > 0) {
+      const keys = [...new Set(timeline.metrics.map((m) => m.metricKey))];
+      lines.push(`近期信号键：${keys.join(', ')}（${timeline.metrics.length} 条观测）`);
+    }
+    const ruleSummary = lines.join('\n');
+
+    let report = ruleSummary;
+    let usedLlm = false;
+    let model: string | null = null;
+    if (opts.useLlm !== false) {
+      const llm = await optionalAgentLlm({
+        systemPrompt:
+          '你是排行榜数据分析师。根据下列实体跨话题名次与信号摘要，用 3～5 句中文写出运营可读结论：突出名次变化模式与信号覆盖；不得编造未出现的实体或话题。',
+        userContent: ruleSummary,
+        fallback: ruleSummary,
+        maxTokens: 400,
+      });
+      report = llm.text;
+      usedLlm = llm.usedLlm;
+      model = llm.model;
+    }
+
+    return toPlainJson({
+      agent: AI_AGENT_ENTITY_TIMELINE_REPORT_V1,
+      entityId: timeline.entity.id,
+      canonicalName: timeline.entity.canonicalName,
+      report,
+      ruleSummary,
+      usedLlm,
+      model,
+      eventCount: timeline.events.length,
+      generatedAt: new Date().toISOString(),
+    });
+  }
+
+  /** 规则摘要 + 可选 LLM 的 TopicVersion diff 报告 */
+  async generateTopicVersionDiffReport(
+    fromId: bigint,
+    toId: bigint,
+    opts: { timeWindow?: TimeWindow; useLlm?: boolean } = {},
+  ) {
+    const diff = (await this.compareTopicVersions(fromId, toId, {
+      timeWindow: opts.timeWindow,
+      includeRankPreview: true,
+    })) as {
+      topic: { slug: string; title: string };
+      from: { version: string };
+      to: { version: string };
+      policyDiff: {
+        unchanged?: boolean;
+        weightChanges?: Array<{ key: string; from?: number; to?: number }>;
+        entityIdsAdded?: string[];
+        entityIdsRemoved?: string[];
+        decayChanged?: boolean;
+      };
+      rankPreview?: {
+        available?: boolean;
+        movers?: Array<{ canonicalName: string; rankDelta: number | null }>;
+      } | null;
+    };
+
+    const pd = diff.policyDiff;
+    const lines: string[] = [];
+    lines.push(`话题「${diff.topic.title}」版本 ${diff.from.version} → ${diff.to.version}。`);
+    if (pd.unchanged) {
+      lines.push('策略 JSON 无实质变化。');
+    } else {
+      if (pd.weightChanges?.length) {
+        lines.push(`权重变更 ${pd.weightChanges.length} 项：${pd.weightChanges.slice(0, 5).map((c) => `${c.key} ${c.from ?? '—'}→${c.to ?? '—'}`).join('；')}`);
+      }
+      if (pd.entityIdsAdded?.length) lines.push(`新增实体 ${pd.entityIdsAdded.length} 个。`);
+      if (pd.entityIdsRemoved?.length) lines.push(`移除实体 ${pd.entityIdsRemoved.length} 个。`);
+      if (pd.decayChanged) lines.push('时间衰减参数已调整。');
+    }
+    const movers = diff.rankPreview?.movers?.filter((m) => m.rankDelta != null && Math.abs(m.rankDelta!) >= 3).slice(0, 5) ?? [];
+    if (movers.length > 0) {
+      lines.push(
+        `榜位波动（|Δ|≥3）：${movers.map((m) => `${m.canonicalName} Δ${m.rankDelta}`).join('；')}`,
+      );
+    }
+    const ruleSummary = lines.join('\n');
+
+    let report = ruleSummary;
+    let usedLlm = false;
+    let model: string | null = null;
+    if (opts.useLlm !== false) {
+      const llm = await optionalAgentLlm({
+        systemPrompt:
+          '你是排行榜策略分析师。根据下列 TopicVersion 策略 diff 与榜位预览，用 3～5 句中文说明变更对榜单的潜在影响；不得编造未列出的实体或权重。',
+        userContent: ruleSummary,
+        fallback: ruleSummary,
+        maxTokens: 400,
+      });
+      report = llm.text;
+      usedLlm = llm.usedLlm;
+      model = llm.model;
+    }
+
+    return toPlainJson({
+      agent: AI_AGENT_TOPIC_VERSION_DIFF_REPORT_V1,
+      topic: diff.topic,
+      fromVersion: diff.from.version,
+      toVersion: diff.to.version,
+      report,
+      ruleSummary,
+      usedLlm,
+      model,
+      generatedAt: new Date().toISOString(),
     });
   }
 }

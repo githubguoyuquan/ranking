@@ -607,3 +607,17 @@ model TopicMergeAudit {
   @@index([targetTopicId, createdAt])
   @@index([sourceTopicId])
 }
+
+/// C 端匿名设备偏好（无登录；X-Device-Id 识别）
+model SiteDeviceProfile {
+  id           String   @id @default(cuid())
+  deviceId     String   @unique @db.VarChar(64)
+  tier         String   @default("free") @db.VarChar(32)
+  recentTopics Json     @default("[]")
+  watchlist    Json     @default("[]")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([updatedAt])
+  @@map("site_device_profiles")
+}

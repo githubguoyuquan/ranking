@@ -220,6 +220,39 @@ export class HotBoardsQueryDto {
   @Min(1)
   @Max(20)
   previewLimit?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(500)
+  offset?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  topicQuery?: string;
+
+  @IsOptional()
+  @IsEnum(TopicKind)
+  topicKind?: TopicKind;
+}
+
+export class RankingFollowupDispatchDto {
+  @IsString()
+  snapshotId!: string;
+
+  @IsString()
+  topicRankingId!: string;
+
+  @IsString()
+  topicVersionId!: string;
+
+  @IsString()
+  topicId!: string;
+
+  @IsEnum(TimeWindow)
+  timeWindow!: TimeWindow;
 }
 
 @Controller()
@@ -429,6 +462,9 @@ export class RankingsController {
         timeWindow: query.timeWindow,
         topicsLimit: query.topicsLimit,
         previewLimit: query.previewLimit,
+        offset: query.offset,
+        topicQuery: query.topicQuery,
+        topicKind: query.topicKind,
       },
       getAuthFromRequest(req),
     );
@@ -459,6 +495,24 @@ export class RankingsController {
         timeWindow: query.timeWindow ?? null,
       },
     });
+  }
+
+  /**
+   * 由 `consumers/followup-dispatch` Kafka consumer 或运维调用，执行与 BullMQ `ranking-followup` 相同流水线。
+   */
+  @Post('admin/ranking-followup/dispatch')
+  @RequireScopes('admin')
+  async dispatchRankingFollowup(@Body() body: RankingFollowupDispatchDto) {
+    return toPlainJson(
+      await this.rankings.handleRankingFollowupJob({
+        schemaVersion: 1,
+        snapshotId: body.snapshotId.trim(),
+        topicRankingId: body.topicRankingId.trim(),
+        topicVersionId: body.topicVersionId.trim(),
+        topicId: body.topicId.trim(),
+        timeWindow: body.timeWindow,
+      }),
+    );
   }
 
   /** 近期 `TrendAnalysis`（默认仅快照级摘要 `entityId` 为空） */

@@ -1949,31 +1949,51 @@ export class RankingsService {
       topicsLimit?: number;
       previewLimit?: number;
       timeWindow?: TimeWindow;
+      offset?: number;
+      topicQuery?: string;
+      topicKind?: TopicKind;
     } = {},
     auth?: AuthenticatedRequestContext,
   ) {
     const topicsLimit = Math.min(Math.max(opts.topicsLimit ?? 12, 1), 30);
     const previewLimit = Math.min(Math.max(opts.previewLimit ?? 5, 1), 20);
+    const offset = Math.min(Math.max(opts.offset ?? 0, 0), 500);
+    const topicQuery = opts.topicQuery?.trim();
 
-    const topics = await this.readPrisma.topic.findMany({
-      where: {
-        ...topicWhereForAuth(auth),
-        versions: {
-          some: {
-            rankings: {
-              some: {
-                status: 'completed',
-                snapshots: { some: {} },
-                ...(opts.timeWindow ? { timeWindow: opts.timeWindow } : {}),
-              },
+    const topicWhere: Prisma.TopicWhereInput = {
+      ...topicWhereForAuth(auth),
+      ...(opts.topicKind ? { kind: opts.topicKind } : {}),
+      ...(topicQuery
+        ? {
+            OR: [
+              { slug: { contains: topicQuery, mode: 'insensitive' } },
+              { title: { contains: topicQuery, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+      versions: {
+        some: {
+          rankings: {
+            some: {
+              status: 'completed',
+              snapshots: { some: {} },
+              ...(opts.timeWindow ? { timeWindow: opts.timeWindow } : {}),
             },
           },
         },
       },
-      orderBy: { updatedAt: 'desc' },
-      take: topicsLimit + 8,
-      select: { id: true, slug: true, title: true, kind: true, tenantId: true },
-    });
+    };
+
+    const [totalMatching, topics] = await Promise.all([
+      this.readPrisma.topic.count({ where: topicWhere }),
+      this.readPrisma.topic.findMany({
+        where: topicWhere,
+        orderBy: { updatedAt: 'desc' },
+        skip: offset,
+        take: topicsLimit + 12,
+        select: { id: true, slug: true, title: true, kind: true, tenantId: true },
+      }),
+    ]);
 
     type PreviewItem = {
       rank: number;
@@ -2056,6 +2076,16 @@ export class RankingsService {
         topicsLimit,
         previewLimit,
         timeWindow: opts.timeWindow ?? null,
+        offset,
+        topicQuery: topicQuery || null,
+        topicKind: opts.topicKind ?? null,
+      },
+      pagination: {
+        offset,
+        count: boards.length,
+        totalMatching,
+        hasMore: offset + topicsLimit < totalMatching,
+        nextOffset: offset + topicsLimit < totalMatching ? offset + topicsLimit : null,
       },
       count: boards.length,
       boards,

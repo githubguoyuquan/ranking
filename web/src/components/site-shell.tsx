@@ -87,6 +87,13 @@ export function SiteShell({ children }: { children: React.ReactNode }) {
               </Link>
             ))}
             <Link
+              href="/pricing"
+              className="rounded-md px-3 py-2 text-muted-foreground hover:bg-muted hover:text-foreground"
+              onClick={() => setOpen(false)}
+            >
+              订阅
+            </Link>
+            <Link
               href={siteSearchPath()}
               className="rounded-md px-3 py-2 text-muted-foreground hover:bg-muted hover:text-foreground"
               onClick={() => setOpen(false)}

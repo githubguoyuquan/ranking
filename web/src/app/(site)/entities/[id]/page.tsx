@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -12,14 +13,29 @@ import {
 import { EntityRankLineChart } from "@/components/entity-rank-line-chart";
 import {
   nestV1EntityRankHistoryPath,
+  nestV1EntityTimelinePath,
   nestV1RecommendationsSimilarEntitiesPath,
 } from "@/lib/nest-api-paths";
+import { buildSiteMetadata } from "@/lib/site-metadata";
 import { siteFetchJson } from "@/lib/site-api";
 import {
   DEFAULT_TOPIC_SLUG,
   siteEntityPath,
   siteTopicPath,
 } from "@/lib/site-web-paths";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}): Promise<Metadata> {
+  const { id } = await params;
+  return buildSiteMetadata({
+    title: `实体 #${id}`,
+    description: "查看实体排名曲线、跨话题时间线与相似推荐。",
+    path: `/entities/${id}`,
+  });
+}
 
 export default async function EntityPage({
   params,
@@ -48,6 +64,16 @@ export default async function EntityPage({
       endStreakRankDeclining?: number | null;
     };
   }>(nestV1EntityRankHistoryPath(id, historyQ));
+
+  const timelineQ = new URLSearchParams();
+  timelineQ.set("topicSlugs", topicSlug);
+  timelineQ.set("timeWindow", "WEEK");
+  timelineQ.set("pointsLimit", "20");
+
+  const timelineRes = await siteFetchJson<{
+    events?: Array<{ type: string; at: string; label: string }>;
+    metrics?: Array<{ metricKey: string; value: number; observedAt: string }>;
+  }>(nestV1EntityTimelinePath(id, timelineQ));
 
   if (!historyRes.ok) notFound();
 
@@ -112,6 +138,34 @@ export default async function EntityPage({
       ) : (
         <p className="text-sm text-muted-foreground">暂无历史名次数据。</p>
       )}
+
+      {timelineRes.ok && (timelineRes.data.events?.length || timelineRes.data.metrics?.length) ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">时间线（名次 + 信号）</CardTitle>
+            <CardDescription>只读预览 · 完整分析见运营台</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ul className="max-h-64 space-y-1 overflow-auto text-sm">
+              {(timelineRes.data.events ?? []).slice(0, 15).map((ev, i) => (
+                <li key={`${ev.at}-${i}`}>
+                  <span className="text-muted-foreground">{ev.at.slice(0, 10)}</span>{" "}
+                  {ev.label}
+                </li>
+              ))}
+            </ul>
+            {timelineRes.data.metrics && timelineRes.data.metrics.length > 0 ? (
+              <p className="mt-3 text-xs text-muted-foreground">
+                最新信号：{" "}
+                {timelineRes.data.metrics
+                  .slice(0, 3)
+                  .map((m) => `${m.metricKey}=${m.value}`)
+                  .join(" · ")}
+              </p>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
 
       {similarRes.ok && similarRes.data.items && similarRes.data.items.length > 0 ? (
         <Card>

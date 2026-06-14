@@ -31,7 +31,7 @@
 | `clickhouse.ranking.snapshot.ingest` | ✅（镜像） | ✅ **CH Flusher**（权威） | 双轨；本服务 CH 写入不依赖 Kafka |
 | `elasticsearch.entity.sync` | ✅（镜像） | ✅ **ES Flusher**（权威） | 双轨；与 Qdrant 双写并行 |
 | `elasticsearch.crawled_url.sync` | ✅（镜像） | ✅ **ES Flusher**（权威） | 双轨 |
-| `ranking.followup.requested` | ❌ | ✅ **BullMQ** `ranking-followup` | Outbox 仅占位/可观测；跟进由队列执行 |
+| `ranking.followup.requested` | ⚙️ `KAFKA_PUBLISH_RANKING_FOLLOWUP=true` | ✅ **BullMQ** `ranking-followup` + 可选 **Kafka** → `followup-dispatch` | Outbox 占位；默认 BullMQ；外发时 consumer 调 API |
 
 注册表源码：`src/kafka/event-registry.ts`（`publishToKafka`、`sideEffect`）。
 
@@ -42,6 +42,7 @@
 | 服务 | 路径 | Topic | 说明 |
 |------|------|-------|------|
 | **Snapshot Notify**（MVP ✅） | `consumers/snapshot-notify/` | `ranking.snapshot.completed` | 校验 Envelope v1、幂等、`/metrics`、可选 Webhook |
+| **Followup Dispatch**（✅） | `consumers/followup-dispatch/` | `ranking.followup.requested` | 需 `KAFKA_PUBLISH_RANKING_FOLLOWUP=true` 外发；POST `admin/ranking-followup/dispatch` |
 
 - **搜索索引管道**：订阅 `elasticsearch.*` 或 `ranking.snapshot.completed`（若拆服务）
 - **分析 / 数仓**：订阅 `clickhouse.ranking.snapshot.ingest`、`ranking.snapshot.completed`

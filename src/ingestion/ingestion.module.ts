@@ -13,6 +13,7 @@ import { CrawlSchedulerAdminController } from './crawl-scheduler-admin.controlle
 import { CrawlSchedulerService } from './crawl-scheduler.service';
 import { IngestionController } from './ingestion.controller';
 import { IngestionService } from './ingestion.service';
+import { CrawlSignalExtractService } from './crawl-signal-extract.service';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { IngestionService } from './ingestion.service';
   controllers: [IngestionController, CrawlSchedulerAdminController, CrawlAdminController],
   providers: [
     IngestionService,
+    CrawlSignalExtractService,
     CrawlRegionalQueueService,
     ...(runsCrawlWorkers() ? [CrawlProcessor] : []),
     ...(runsCrawlScheduler() ? [CrawlSchedulerService] : []),

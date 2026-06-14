@@ -1,0 +1,24 @@
+{
+  "name": "ranking-followup-dispatch-consumer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Downstream Kafka consumer for ranking.followup.requested (see docs/kafka/CONSUMER_BOUNDARY.md)",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/main.js",
+    "start:dev": "tsx watch src/main.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
+    "dotenv": "^17.4.2",
+    "kafkajs": "^2.2.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.7",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  }
+}

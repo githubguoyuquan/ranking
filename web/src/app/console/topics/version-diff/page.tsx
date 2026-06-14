@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ADMIN_HREF, topicsAdminPath } from "@/lib/admin-web-paths";
 import { NEST_V1_DOC } from "@/lib/nest-api-paths";
-import { nestTopicVersionsCompareUrl, nestTopicVersionsUrl } from "@/lib/nest-api-urls";
+import { nestTopicVersionsCompareUrl, nestTopicVersionsCompareReportUrl, nestTopicVersionsUrl } from "@/lib/nest-api-urls";
 
 type VersionRow = { id: string; version: string; effectiveFrom: string; frozen: boolean };
 
@@ -50,6 +50,8 @@ function VersionDiffPageInner() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const [result, setResult] = useState<CompareResult | null>(null);
+  const [aiReport, setAiReport] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
 
   const loadVersions = useCallback(async (topicSlug: string) => {
     const res = await fetch(nestTopicVersionsUrl(topicSlug), { cache: "no-store" });
@@ -115,6 +117,33 @@ function VersionDiffPageInner() {
     }
   }
 
+  async function generateAiReport() {
+    if (!canCompare) return;
+    setAiLoading(true);
+    setAiReport("");
+    try {
+      const res = await fetch(nestTopicVersionsCompareReportUrl(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fromTopicVersionId: fromId.trim(),
+          toTopicVersionId: toId.trim(),
+        }),
+      });
+      const text = await res.text();
+      if (!res.ok) {
+        setErr(`AI 报告 HTTP ${res.status}\n${text}`);
+        return;
+      }
+      const parsed = JSON.parse(text) as { report?: string };
+      setAiReport(parsed.report ?? text);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
   const diffSummary = useMemo(() => {
     const d = result?.policyDiff;
     if (!d) return "";
@@ -152,6 +181,14 @@ function VersionDiffPageInner() {
           <div className="flex items-end gap-2">
             <Button type="button" onClick={() => void runCompare()} disabled={loading || !canCompare}>
               {loading ? "对比中…" : "对比"}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => void generateAiReport()}
+              disabled={aiLoading || !canCompare}
+            >
+              {aiLoading ? "生成中…" : "AI 报告"}
             </Button>
             <Link href={topicsAdminPath(slug)} className="text-sm text-primary underline-offset-4 hover:underline">
               话题页
@@ -228,6 +265,17 @@ function VersionDiffPageInner() {
           )}
         </>
       )}
+
+      {aiReport ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">AI 版本 Diff 报告</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="whitespace-pre-wrap text-sm">{aiReport}</p>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {err && (
         <pre className="overflow-auto rounded bg-destructive/10 p-3 text-xs text-destructive">{err}</pre>

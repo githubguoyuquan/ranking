@@ -116,4 +116,26 @@ export class OpsAnalyticsController {
       }),
     );
   }
+
+  @Post('v1/entities/:id/timeline/report')
+  async entityTimelineReport(@Param('id') id: string, @Query() query: EntityTimelineQueryDto) {
+    const entityId = parseBigIntId(id, 'entity id');
+    const topicSlugs = query.topicSlugs
+      ?.split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    return this.opsAnalytics.generateEntityTimelineReport(entityId, {
+      topicSlugs,
+      timeWindow: query.timeWindow,
+    });
+  }
+
+  @Post('v1/topic-versions/compare/report')
+  async topicVersionDiffReport(@Body() body: CompareTopicVersionsDto) {
+    const fromId = parseBigIntId(body.fromTopicVersionId, 'fromTopicVersionId');
+    const toId = parseBigIntId(body.toTopicVersionId, 'toTopicVersionId');
+    return this.opsAnalytics.generateTopicVersionDiffReport(fromId, toId, {
+      timeWindow: body.timeWindow,
+    });
+  }
 }

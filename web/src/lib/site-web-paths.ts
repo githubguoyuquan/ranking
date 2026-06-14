@@ -42,10 +42,19 @@ export function siteTrendsPath(params?: { timeWindow?: string; limit?: string })
   return qs ? `${SITE_HREF.trends}?${qs}` : SITE_HREF.trends;
 }
 
-export function siteHotPath(params?: { timeWindow?: string; topicsLimit?: string }): string {
+export function siteHotPath(params?: {
+  timeWindow?: string;
+  topicsLimit?: string;
+  offset?: string;
+  topicQuery?: string;
+  topicKind?: string;
+}): string {
   const q = new URLSearchParams();
   if (params?.timeWindow?.trim()) q.set("timeWindow", params.timeWindow.trim());
   if (params?.topicsLimit?.trim()) q.set("topicsLimit", params.topicsLimit.trim());
+  if (params?.offset?.trim()) q.set("offset", params.offset.trim());
+  if (params?.topicQuery?.trim()) q.set("topicQuery", params.topicQuery.trim());
+  if (params?.topicKind?.trim()) q.set("topicKind", params.topicKind.trim());
   const qs = q.toString();
   return qs ? `${SITE_HREF.hot}?${qs}` : SITE_HREF.hot;
 }

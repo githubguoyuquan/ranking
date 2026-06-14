@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 
 import { Badge } from "@/components/ui/badge";
@@ -10,7 +11,9 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { nestV1TopicLeaderboardPath, nestV1TopicPath, nestV1TrendsHotPath } from "@/lib/nest-api-paths";
+import { buildSiteMetadata } from "@/lib/site-metadata";
 import { siteFetchJson } from "@/lib/site-api";
+import { SiteDevicePersonalization } from "@/components/site-device-personalization";
 import {
   DEFAULT_TOPIC_SLUG,
   SITE_HREF,
@@ -33,6 +36,12 @@ type LeaderboardItem = {
   popularityScore?: number;
   entity?: { id?: string; canonicalName?: string | null };
 };
+
+export const metadata: Metadata = buildSiteMetadata({
+  title: "首页",
+  description: "AI 驱动的全球动态排行榜 — 热榜、涨榜、搜索与实体排名演化。",
+  path: "/",
+});
 
 export default async function HomePage() {
   const [hotRes, lbRes, topicRes] = await Promise.all([
@@ -195,6 +204,8 @@ export default async function HomePage() {
           </CardContent>
         </Card>
       </section>
+
+      <SiteDevicePersonalization />
     </div>
   );
 }

@@ -129,7 +129,16 @@ export function listKafkaRoutedOutboxTypes(): string[] {
 
 /** `OutboxPublisherService` 实际外发的 type（`kafkaPublishedAt`） */
 export function listKafkaPublishOutboxTypes(): string[] {
-  return ROUTED.filter((r) => r.publishToKafka).map((r) => r.outboxType);
+  return ROUTED.filter((r) => {
+    if (r.publishToKafka) return true;
+    if (
+      r.outboxType === OUTBOX_TYPE_RANKING_FOLLOWUP_REQUESTED &&
+      process.env.KAFKA_PUBLISH_RANKING_FOLLOWUP === 'true'
+    ) {
+      return true;
+    }
+    return false;
+  }).map((r) => r.outboxType);
 }
 
 /** 由进程内 Flusher 消费、应写入 `publishedAt` 的 type（不含纯 Kafka 领域事件） */

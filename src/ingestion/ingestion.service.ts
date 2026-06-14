@@ -48,6 +48,7 @@ import {
 } from './crawl-robots';
 import { crawlUrlViolation, fetchUrlForCrawl, normalizeCrawlProxyUrl } from './http-fetch';
 import { fetchUrlForCrawlPlaywright } from './http-fetch-playwright';
+import { CrawlSignalExtractService } from './crawl-signal-extract.service';
 
 @Injectable()
 export class IngestionService {
@@ -59,6 +60,7 @@ export class IngestionService {
     @InjectQueue(CRAWL_QUEUE) private readonly crawlQueue: Queue<CrawlJobPayload>,
     private readonly regionalQueue: CrawlRegionalQueueService,
     private readonly agentOrchestration: AgentOrchestrationService,
+    private readonly crawlSignalExtract: CrawlSignalExtractService,
   ) {}
 
   async getCheckpoint(crawlerName: string) {
@@ -522,6 +524,18 @@ export class IngestionService {
               });
             }
           });
+
+          if (!isSemanticDup) {
+            void this.crawlSignalExtract
+              .maybeIngestFromCrawledPage({
+                sourceId,
+                pageTitle: fetched.pageTitle,
+                textPreview: fetched.textPreview,
+                domFeaturesJson: domJson === Prisma.JsonNull ? null : domJson,
+                observedAt: now,
+              })
+              .catch(() => undefined);
+          }
 
           if (followLinks && fetched.discoveredLinks?.length && item.depth < maxDepth) {
             for (const link of fetched.discoveredLinks) {

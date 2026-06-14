@@ -14,11 +14,11 @@
 | 不可变快照 + 版本 | 每次排行完整快照 | `TopicRankSnapshot`：`snapshotVersion`、`rankingJson`、`tTrendSummary`、`confidenceScore`、`generatedByAi` | 已满足核心模型；缺**自动 trendSummary 生成任务链** |
 | 单条目排名演化 | previousRank、rankChange、趋势 | `RankingItem`：`previousRank`、`rankChange`、`TrendType`、多维度 score | 快照内已满足；**历史极值与末端连续升降步数**在 `GET /v1/entities/:id/rank-history` 的 `summary` 中计算；**按实体物化统计表**见 §5.1（未建） |
 | 历史时间线 | `RankingItemHistory` + 分析 | **`GET /v1/entities/:id/rank-history`** + **`GET /v1/entities/:id/timeline`**（多话题叠加）；话题侧 snapshots / trend-analyses | CH↔PG 运营报表、实时推送 |
-| 时间衰减 / 权重 | 指数/分段/可配置 | `scoring.ts` + **`EntityMetric` 全链路**：`POST /admin/entities/:id/metrics` 写入 → 物化 `scoreEntity`；可选 CH `metric_timeseries`（`SYNC_RANKING_TO_CLICKHOUSE`） | 自动从抓取页抽取结构化信号仍待接 |
+| 时间衰减 / 权重 | 指数/分段/可配置 | `scoring.ts` + **`EntityMetric` 全链路**：`POST /admin/entities/:id/metrics` 写入 → 物化 `scoreEntity`；**抓取成功后 `CRAWL_SIGNAL_EXTRACT` 自动抽取**（`crawl-signal-extract`）；可选 CH `metric_timeseries` | 更细粒度 NLP / JSON-LD 抽取 |
 | 趋势分析 | 环比/同比/MA/异常 | 物化写入 `TrendAnalysis` + **`GET /v1/topics/:slug/trend-analyses`**；**`GET /v1/trends/anomalies`** + 统一 Webhook 告警；BI `trends.alerts` | 同比回填 |
 | 抓取：增量、断点、去重 | checkpoint、fingerprint | `CrawlCheckpoint`、`CrawledUrl`；**全球调度** + overview/Prometheus | 多区域 K8s 生产落地、调度 SLA 与配额 |
 | 向量语义 / 亿级 ES | Qdrant/Milvus + ES | **Qdrant 主检索**（`SEARCH_PRIMARY`）+ ES **ILM/rollover** + 规模验证 API | 跨集群 DR、crawl 语义 ANN 全量 |
-| Kafka 事件网 | 全链路事件 | **6 类外发 Kafka** + 1 类仅登记；**本仓库无 Consumer**；双轨 `publishedAt` / `kafkaPublishedAt` | 外部消费方按 `docs/kafka/CONSUMER_BOUNDARY.md` 订阅 |
+| Kafka 事件网 | 全链路事件 | **6 类外发 Kafka** + followup 可选外发（`KAFKA_PUBLISH_RANKING_FOLLOWUP`）；**`consumers/snapshot-notify`** + **`consumers/followup-dispatch`** | 外部消费方按 `docs/kafka/CONSUMER_BOUNDARY.md` 订阅 |
 | Schema Registry | 中心化契约 | Redpanda SR + `KAFKA_SCHEMA_REGISTRY_URL` REST 注册 | 消息仍为 JSON 封套（非 Avro wire） |
 | 微服务拆分 | 多进程/多服务 | `PROCESS_ROLE` + `platform-worker` / `crawl-worker` + Helm 多 Deployment | 未拆独立仓库 |
 | 多 AZ 运维 | K8s 生产 | **Helm** + **AWS 接线**（`values-aws-production.yaml`、External Secrets、DR CronJob）、`PRODUCTION_WIRING_REQUIRED`、`scripts/dr-readiness.sh` CI | 季度 DR 演练执行 |
@@ -311,16 +311,18 @@ Wire：**Envelope v1** + AJV（`src/kafka/schemas/`）；路由 **`src/kafka/eve
 
 ## 13. 前端（Next.js）
 
-**C 端用户站点（根路径）**：`/` 首页、**`/hot` 多话题热榜索引**、`/topics/:slug` 单话题完整榜（日/周/月窗口）、`/entities/:id` 实体曲线与相似推荐、`/search`、`/trends` 涨榜、`/snapshots/:id` 只读快照；`SiteShell` 导航（首页 / 热榜 / 涨榜 / 搜索）；`site-api.ts` + 可选 `NEXT_PUBLIC_READ_API_KEY`。
+**C 端用户站点（根路径）**：`/` 首页、**`/hot` 多话题热榜索引（分页 + 话题筛选）**、`/topics/:slug`、`/entities/:id`（含时间线预览）、`/search`、`/trends`、`/snapshots/:id`、`/pricing`；**OG/Twitter 分享卡片**（`buildSiteMetadata`）；**匿名设备偏好**（`SiteDeviceProfile` + `PUT /v1/site/profile`）；`SiteShell` 导航；`site-api.ts` + 可选 `NEXT_PUBLIC_READ_API_KEY`。
 
 **运营台（`/console`）**：原管理台全部页面；`AdminShell` 侧栏含「用户站点 ↗」链回 C 端。
 
 **已有（运营台）**：多页、**`/console/bi` 大屏**、**`/console/scale`**、爬虫调度、Outbox、Agent 等；**话题版本** 页含 policy 编辑；**热榜 SSE** 等。
 
-**缺口（产品级）**：
+**已接（原 §13 缺口）**：
 
-- 实体时间线 **深度分析**（**`GET /v1/entities/:id/timeline`** + 管理台 `/console/entities/timeline`）  
-- **版本 diff**（**`POST /v1/topic-versions/compare`** + `/console/topics/version-diff`；AI 报告仍待接）  
+- 实体时间线 **深度分析**：`GET /v1/entities/:id/timeline` + **`POST …/timeline/report`** + 管理台 `/console/entities/timeline` **AI 报告**按钮  
+- **版本 diff**：`POST /v1/topic-versions/compare` + **`POST …/compare/report`** + `/console/topics/version-diff` **AI 报告**  
+
+**仍待产品级**：账号登录 / 支付订阅、Temporal 编排、验证码与人机、多区域 K8s 生产全量上线。
 
 ---
 

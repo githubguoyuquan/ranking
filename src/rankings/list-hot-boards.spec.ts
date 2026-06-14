@@ -1,6 +1,24 @@
 import { describe, expect, it, vi } from 'vitest';
 import { RankingsService } from './rankings.service';
 
+type ListHotBoardsResult = {
+  filter: {
+    topicsLimit: number;
+    previewLimit: number;
+    timeWindow: string | null;
+  };
+  count: number;
+  boards: Array<{
+    topic: { slug: string };
+    snapshot: {
+      preview: Array<{
+        entity: { canonicalName: string };
+      }>;
+    };
+  }>;
+  generatedAt: string;
+};
+
 describe('RankingsService.listHotBoards', () => {
   it('returns preview rows capped by previewLimit and skips empty leaderboards', async () => {
     const readPrisma = {
@@ -60,11 +78,11 @@ describe('RankingsService.listHotBoards', () => {
       getLeaderboardForApi,
     } as unknown as RankingsService;
 
-    const result = await RankingsService.prototype.listHotBoards.call(svc, {
+    const result = (await RankingsService.prototype.listHotBoards.call(svc, {
       topicsLimit: 5,
       previewLimit: 2,
       timeWindow: 'DAY',
-    });
+    })) as ListHotBoardsResult;
 
     expect(result.count).toBe(1);
     expect(result.boards).toHaveLength(1);
@@ -95,10 +113,10 @@ describe('RankingsService.listHotBoards', () => {
       getLeaderboardForApi: vi.fn(),
     } as unknown as RankingsService;
 
-    const result = await RankingsService.prototype.listHotBoards.call(svc, {
+    const result = (await RankingsService.prototype.listHotBoards.call(svc, {
       topicsLimit: 99,
       previewLimit: 99,
-    });
+    })) as ListHotBoardsResult;
 
     expect(result.filter.topicsLimit).toBe(30);
     expect(result.filter.previewLimit).toBe(20);

@@ -531,7 +531,8 @@ export class IngestionService {
                 sourceId,
                 pageTitle: fetched.pageTitle,
                 textPreview: fetched.textPreview,
-                domFeaturesJson: domJson === Prisma.JsonNull ? null : domJson,
+                domFeaturesJson:
+                  domJson === Prisma.JsonNull ? null : (domJson as Prisma.InputJsonValue),
                 observedAt: now,
               })
               .catch(() => undefined);

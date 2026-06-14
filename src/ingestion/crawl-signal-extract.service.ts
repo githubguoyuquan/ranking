@@ -21,7 +21,7 @@ export class CrawlSignalExtractService {
     sourceId: bigint;
     pageTitle: string | null;
     textPreview: string | null;
-    domFeaturesJson: Prisma.JsonValue | null;
+    domFeaturesJson: Prisma.InputJsonValue | null;
     observedAt: Date;
     sourceTier?: number;
   }): Promise<{ entityId: string | null; ingested: number }> {
@@ -115,7 +115,7 @@ export class CrawlSignalExtractService {
   }
 }
 
-function parseDomFeatures(json: Prisma.JsonValue | null): CrawlDomFeatures | null {
+function parseDomFeatures(json: Prisma.InputJsonValue | null): CrawlDomFeatures | null {
   if (!json || typeof json !== 'object' || Array.isArray(json)) return null;
   return json as CrawlDomFeatures;
 }

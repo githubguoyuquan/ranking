@@ -24,6 +24,8 @@
 
 Helm：`deploy/helm/ranking/` 下 `api` / `platformWorker` / `crawlWorker` 三个 Deployment。
 
+进程与限界上下文目录：`src/config/service-manifest.ts`；`GET /admin/scale/status` → `serviceManifest`。
+
 ## Phase 2（规划）：按上下文拆仓库
 
 1. 抽出 **Search**（ES/Embedding/推荐）— Outbox `elasticsearch.*` 与 Flusher 同边界。  

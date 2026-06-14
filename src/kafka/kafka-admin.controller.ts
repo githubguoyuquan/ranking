@@ -1,5 +1,5 @@
 import { Controller, Get } from '@nestjs/common';
-import { listKafkaRoutedEvents } from './event-registry';
+import { listKafkaRoutedEvents, KAFKA_WIRE_FORMAT } from './event-registry';
 import { KafkaEventSchemaService } from './kafka-event-schema.service';
 import { KafkaProducerService } from './kafka-producer.service';
 import { SchemaRegistryService } from './schema-registry.service';
@@ -17,6 +17,9 @@ export class KafkaAdminController {
   events() {
     return toPlainJson({
       envelopeVersion: 1,
+      wireFormat: KAFKA_WIRE_FORMAT,
+      wireFormatNote:
+        'Message value is UTF-8 JSON envelope; Schema Registry stores JSON Schema, not Avro wire.',
       consumerBoundary:
         'This repository publishes to Kafka only; it does not run Kafka consumer groups. See docs/kafka/CONSUMER_BOUNDARY.md.',
       routes: listKafkaRoutedEvents().map((r) => ({

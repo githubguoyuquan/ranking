@@ -49,7 +49,7 @@ export default function ScalePage() {
   return (
     <AdminPage
       title="规模与运维"
-      description="托管 ES ILM、Qdrant/ES 压测、CH MV 健康、PG 分区与写别名 rollover。"
+      description="托管 ES ILM、Qdrant/ES 压测、CH 冷热分层、PG 分区、ES CCR 与 validate 套件。"
     >
       <Card>
         <CardHeader>
@@ -134,7 +134,7 @@ export default function ScalePage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Qdrant / Postgres</CardTitle>
+          <CardTitle className="text-base">Qdrant / Postgres / ClickHouse</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-wrap gap-2">
           <Button
@@ -154,13 +154,75 @@ export default function ScalePage() {
             type="button"
             variant="secondary"
             onClick={() =>
-              void apply("PG partitions", "/admin/scale/postgres/ensure-partitions", {
-                table: "RankingItemHistory",
-                monthsAhead: 3,
+              void apply("PG partitions (both tables)", "/admin/scale/postgres/ensure-partitions", {
+                monthsAhead: 4,
               })
             }
           >
             ensure PG partitions
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => void apply("CH ensure tier", "/admin/scale/clickhouse/ensure-tier")}
+          >
+            CH ensure tier
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={async () => {
+              setStatus("CH tier status…");
+              const res = await fetch(apiUrl("/admin/scale/clickhouse/tier-status"), {
+                headers: apiHeaders(),
+              });
+              const text = await res.text();
+              setStatusJson(text);
+              setStatus(res.ok ? "CH tier ok" : `HTTP ${res.status}`);
+            }}
+          >
+            GET CH tier-status
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Elasticsearch CCR (DR)</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={async () => {
+              setStatus("ES CCR status…");
+              const res = await fetch(apiUrl("/admin/scale/elasticsearch/ccr-status"), {
+                headers: apiHeaders(),
+              });
+              const text = await res.text();
+              setStatusJson(text);
+              setStatus(res.ok ? "CCR status ok" : `HTTP ${res.status}`);
+            }}
+          >
+            GET ccr-status
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => void apply("bootstrap CCR", "/admin/scale/elasticsearch/bootstrap-ccr")}
+          >
+            bootstrap CCR
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() =>
+              void apply("sync topic vectors", "/admin/recommendations/sync-topic-vectors", {
+                maxTopics: 5000,
+              })
+            }
+          >
+            sync topic vectors → Qdrant
           </Button>
         </CardContent>
       </Card>

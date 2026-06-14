@@ -9,6 +9,10 @@ describe('DrReadinessService', () => {
         crawlCheckpoint: { count: vi.fn().mockResolvedValue(0) },
       } as never,
       { usesReadReplica: false, $queryRaw: vi.fn() } as never,
+      {
+        isTablePartitioned: vi.fn().mockResolvedValue(false),
+      } as never,
+      { remoteCluster: vi.fn().mockReturnValue(null), getCcrStatus: vi.fn() } as never,
       { ping: vi.fn().mockResolvedValue({ ok: true }) } as never,
       { ping: vi.fn().mockResolvedValue({ configured: false, ok: false }) } as never,
       { isEnabled: () => false, ping: vi.fn() } as never,

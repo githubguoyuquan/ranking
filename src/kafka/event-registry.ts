@@ -11,6 +11,9 @@ import {
 /** 当前唯一的 Kafka 外发封套版本（与 JSON Schema `event-envelope-v1` 对齐） */
 export const KAFKA_ENVELOPE_VERSION = 1 as const;
 
+/** 线上 Kafka value 为 UTF-8 JSON 封套，非 Confluent Avro wire */
+export const KAFKA_WIRE_FORMAT = 'json' as const;
+
 export type KafkaSideEffectConsumer =
   | 'external_kafka_only'
   | 'in_process_flusher'
@@ -174,6 +177,7 @@ export function buildKafkaEnvelopeV1(args: {
 }): Record<string, unknown> {
   return {
     envelopeVersion: KAFKA_ENVELOPE_VERSION,
+    wireFormat: KAFKA_WIRE_FORMAT,
     type: args.type,
     payload: args.payload,
     meta: {

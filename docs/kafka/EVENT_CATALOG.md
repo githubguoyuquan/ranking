@@ -9,6 +9,7 @@ Outbox → Kafka 外发契约。实现：`src/kafka/`（注册表、AJV、Schema
 | 字段 | 说明 |
 |------|------|
 | `envelopeVersion` | 固定 `1` |
+| `wireFormat` | 固定 `json`（UTF-8 JSON 封套，**非** Avro wire） |
 | `type` | 与 `OutboxEvent.type` 一致 |
 | `payload` | 见各 JSON Schema |
 | `meta.outboxId` / `meta.createdAt` | 溯源 |
@@ -36,6 +37,7 @@ Topic 环境变量：`KAFKA_TOPIC_*`（见 registry 各行的 `topicEnvVar`）�
 - 开发：Redpanda `http://localhost:18081`（`docker compose`）
 - 生产：`KAFKA_SCHEMA_REGISTRY_URL` — Confluent/Apicurio 兼容 REST
 - 发布前注册 subject（`{topic}-value`）；消息体仍为 **UTF-8 JSON 封套**（非 Avro wire）
+- Kafka record headers：`content-type=application/json`、`x-ranking-wire-format=json`、`x-ranking-envelope-version=1`
 
 ## Outbox 双轨
 

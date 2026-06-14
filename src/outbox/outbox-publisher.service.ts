@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { PrismaService } from '../prisma/prisma.service';
 import {
   buildKafkaEnvelopeV1,
+  KAFKA_WIRE_FORMAT,
   listKafkaPublishOutboxTypes,
   resolveKafkaMessageKey,
   resolveKafkaTopicForOutboxType,
@@ -130,7 +131,16 @@ export class OutboxPublisherService implements OnModuleInit, OnModuleDestroy {
 
       try {
         const ok = await this.kafka.send(topic, [
-          { key, value: JSON.stringify(envelope) },
+          {
+            key,
+            value: JSON.stringify(envelope),
+            headers: {
+              'content-type': 'application/json',
+              'x-ranking-envelope-version': String(envelope.envelopeVersion),
+              'x-ranking-wire-format': KAFKA_WIRE_FORMAT,
+              'x-ranking-outbox-type': row.type,
+            },
+          },
         ]);
         if (!ok) {
           const detail = this.kafka.isConfigured()

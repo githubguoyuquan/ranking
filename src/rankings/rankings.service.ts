@@ -14,6 +14,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import { PrismaReadService } from '../scale/prisma-read.service';
 import { RealtimePublisherService } from '../realtime/realtime-publisher.service';
 import {
+  isRealtimeTimeWindow,
+  resolveRealtimeRankingWindow,
+} from '../domain/realtime-ranking-window';
+import {
   aiConfidence,
   classifyTrend,
   endStreakRankDeclining,
@@ -704,6 +708,13 @@ export class RankingsService {
         snapshotId: snapshot.id.toString(),
         snapshotTime: snapshot.snapshotTime.toISOString(),
         hasScoreModel: snapshot.scoreModelId != null,
+        ...(isRealtimeTimeWindow(topicRanking.timeWindow)
+          ? {
+              realtimeSemantics: resolveRealtimeRankingWindow(
+                topicRanking.windowEnd,
+              ).semantics,
+            }
+          : {}),
       },
       snapshot: snapshotPayload,
     };

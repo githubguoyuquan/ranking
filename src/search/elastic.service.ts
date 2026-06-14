@@ -130,6 +130,11 @@ export class ElasticService implements OnModuleDestroy {
     return this.client !== null;
   }
 
+  /** 规模运维（CCR 等）；业务路径请用公开 search/index API */
+  getNativeClient(): Client | null {
+    return this.client;
+  }
+
   private usesWriteAlias(): boolean {
     return process.env.ELASTICSEARCH_USE_WRITE_ALIAS === 'true';
   }

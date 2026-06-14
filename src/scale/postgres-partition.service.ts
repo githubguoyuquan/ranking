@@ -82,4 +82,21 @@ export class PostgresPartitionService {
     void dateCol;
     return result;
   }
+
+  async ensureAllMonthlyPartitions(monthsAhead?: number): Promise<PartitionEnsureResult[]> {
+    const tables: Array<'RankingItemHistory' | 'CrawledUrl'> = [
+      'RankingItemHistory',
+      'CrawledUrl',
+    ];
+    const out: PartitionEnsureResult[] = [];
+    for (const table of tables) {
+      out.push(
+        await this.ensureMonthlyPartitions({
+          table,
+          monthsAhead,
+        }),
+      );
+    }
+    return out;
+  }
 }

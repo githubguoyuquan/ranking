@@ -32,6 +32,7 @@ import {
 import { TimeWindow, TopicKind } from '@prisma/client';
 import { RequireScopes } from '../compliance/api-key.guard';
 import { toPlainJson } from '../lib/json';
+import { resolveRealtimeRankingWindow } from '../domain/realtime-ranking-window';
 import { RankingsService } from './rankings.service';
 import { TrendAnomalyService } from './trend-anomaly.service';
 
@@ -389,6 +390,11 @@ export class RankingsController {
       if (e instanceof BadRequestException) throw e;
       throw e;
     }
+  }
+
+  @Get('v1/rankings/realtime-window')
+  realtimeWindow() {
+    return toPlainJson(resolveRealtimeRankingWindow());
   }
 
   @Get('v1/topics/:slug/leaderboard')

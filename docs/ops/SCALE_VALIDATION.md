@@ -113,5 +113,53 @@ curl -s -H "X-API-Key: $API_KEY" \
 
 ## 运维 UI
 
-- `/scale` — ILM、压测、validate 按钮
+- `/scale` — ILM、压测、validate、PG 分区、CH 冷热分层、ES CCR 按钮
 - `/bi` — 钻取侧栏
+
+## PostgreSQL 月分区
+
+父表 DDL 示例：`prisma/migrations/optional_partition_parent.sql`（维护窗口执行）。
+
+```bash
+curl -s -X POST -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
+  -d '{"monthsAhead":4}' \
+  http://localhost:3000/admin/scale/postgres/ensure-partitions | jq .
+```
+
+- 省略 `table` 时同时 ensure `RankingItemHistory` + `CrawledUrl`
+- Platform Worker 内置 Cron（`POSTGRES_PARTITION_CRON_DISABLED=true` 可关）
+- K8s：`postgresPartitionCron.enabled=true`（Helm CronJob 调用 `scripts/postgres-ensure-partitions.sh`）
+
+## ClickHouse 热/冷分层
+
+| 变量 | 说明 |
+|------|------|
+| `CLICKHOUSE_HOT_TTL_DAYS` | 热层 TTL（默认 90） |
+| `CLICKHOUSE_COLD_TTL_DAYS` | 冷层后删除（需 `CLICKHOUSE_COLD_VOLUME`） |
+| `CLICKHOUSE_COLD_VOLUME` | CH volume 名（如 `cold`；见 `004_cold_tier_storage.sql`） |
+
+```bash
+curl -s -X POST -H "X-API-Key: $API_KEY" \
+  http://localhost:3000/admin/scale/clickhouse/ensure-tier | jq .
+
+curl -s -H "X-API-Key: $API_KEY" \
+  http://localhost:3000/admin/scale/clickhouse/tier-status | jq .
+```
+
+## Elasticsearch 跨集群 DR（CCR）
+
+| 变量 | 说明 |
+|------|------|
+| `ELASTICSEARCH_CCR_REMOTE_CLUSTER` | Leader 集群注册名 |
+| `ELASTICSEARCH_CCR_LEADER_PATTERN` | 可选 leader index pattern |
+| `ELASTICSEARCH_CCR_AUTO_FOLLOW` | `true` 时 `POST bootstrap-ccr` 写入 auto-follow |
+
+```bash
+curl -s -H "X-API-Key: $API_KEY" \
+  http://localhost:3000/admin/scale/elasticsearch/ccr-status | jq .
+
+curl -s -X POST -H "X-API-Key: $API_KEY" \
+  http://localhost:3000/admin/scale/elasticsearch/bootstrap-ccr | jq .
+```
+
+DR readiness 含 `postgres_partitions`、`clickhouse_tier`、`elasticsearch_ccr` 检查项。

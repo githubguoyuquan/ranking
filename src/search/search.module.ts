@@ -11,6 +11,8 @@ import { HybridSearchService } from './hybrid-search.service';
 import { RecommendationsController } from './recommendations.controller';
 import { RecommendationsService } from './recommendations.service';
 import { SearchController } from './search.controller';
+import { CollaborativeFilteringService } from './collaborative-filtering.service';
+import { TopicVectorIndexService } from './topic-vector-index.service';
 
 @Module({
   imports: [PrismaModule, AiAuditModule],
@@ -21,6 +23,8 @@ import { SearchController } from './search.controller';
     QdrantSearchService,
     HybridSearchService,
     RecommendationsService,
+    CollaborativeFilteringService,
+    TopicVectorIndexService,
     ...(runsOutboxSideEffectFlushers()
       ? [ElasticEntityOutboxFlusherService, ElasticCrawledUrlOutboxFlusherService]
       : []),
@@ -31,6 +35,8 @@ import { SearchController } from './search.controller';
     EmbeddingService,
     HybridSearchService,
     RecommendationsService,
+    CollaborativeFilteringService,
+    TopicVectorIndexService,
   ],
 })
 export class SearchModule {}

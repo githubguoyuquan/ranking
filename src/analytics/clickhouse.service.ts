@@ -342,4 +342,95 @@ export class ClickhouseService implements OnModuleDestroy {
     });
     return (await rs.json()) as Array<{ ts: string; value: number }>;
   }
+
+  hotTtlDays(): number {
+    const raw = Number(process.env.CLICKHOUSE_HOT_TTL_DAYS ?? '90');
+    return Math.min(365, Math.max(7, Number.isFinite(raw) ? raw : 90));
+  }
+
+  coldTtlDays(): number | null {
+    const raw = process.env.CLICKHOUSE_COLD_TTL_DAYS?.trim();
+    if (!raw) return null;
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    return Math.min(730, Math.max(this.hotTtlDays() + 1, n));
+  }
+
+  coldVolume(): string | null {
+    return process.env.CLICKHOUSE_COLD_VOLUME?.trim() || null;
+  }
+
+  /** 热/冷分层 TTL（冷层需 CH 配置 `CLICKHOUSE_COLD_VOLUME`） */
+  async ensureTierPolicy(): Promise<Record<string, unknown>> {
+    if (!this.client) return { ok: false, reason: 'CLICKHOUSE_URL not set' };
+
+    const hotDays = this.hotTtlDays();
+    const coldDays = this.coldTtlDays();
+    const coldVol = this.coldVolume();
+
+    if (coldVol && coldDays != null) {
+      const vol = coldVol.replace(/'/g, "''");
+      await this.client.command({
+        query: `
+          ALTER TABLE ranking.metric_timeseries
+          MODIFY TTL
+            ts + INTERVAL ${hotDays} DAY TO VOLUME '${vol}',
+            ts + INTERVAL ${coldDays} DAY DELETE
+        `,
+      });
+      return {
+        ok: true,
+        table: 'metric_timeseries',
+        hotTtlDays: hotDays,
+        coldVolume: coldVol,
+        coldDeleteAfterDays: coldDays,
+        mode: 'hot_cold_volume',
+      };
+    }
+
+    await this.client.command({
+      query: `ALTER TABLE ranking.metric_timeseries MODIFY TTL ts + INTERVAL ${hotDays} DAY`,
+    });
+    return {
+      ok: true,
+      table: 'metric_timeseries',
+      hotTtlDays: hotDays,
+      mode: 'hot_only',
+    };
+  }
+
+  async queryTierStatus(): Promise<Record<string, unknown>> {
+    if (!this.client) return { ok: false, reason: 'CLICKHOUSE_URL not set' };
+
+    const rs = await this.client.query({
+      query: `
+        SELECT
+          disk_name,
+          count() AS parts,
+          sum(rows) AS rows,
+          formatReadableSize(sum(bytes_on_disk)) AS size
+        FROM system.parts
+        WHERE active AND database = 'ranking' AND table = 'metric_timeseries'
+        GROUP BY disk_name
+        ORDER BY rows DESC
+      `,
+      format: 'JSONEachRow',
+    });
+    const partsByDisk = (await rs.json()) as Array<{
+      disk_name: string;
+      parts: number;
+      rows: number;
+      size: string;
+    }>;
+
+    return {
+      ok: true,
+      hotTtlDays: this.hotTtlDays(),
+      coldTtlDays: this.coldTtlDays(),
+      coldVolume: this.coldVolume(),
+      mode: this.coldVolume() && this.coldTtlDays() != null ? 'hot_cold_volume' : 'hot_only',
+      partsByDisk,
+      generatedAt: new Date().toISOString(),
+    };
+  }
 }

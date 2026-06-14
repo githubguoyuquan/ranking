@@ -12,6 +12,9 @@ import { ElasticService, type EntitySearchHit } from './elastic.service';
 import { EmbeddingService } from './embedding.service';
 import { QdrantSearchService } from './qdrant-search.service';
 import { resolveSearchPrimary } from './search-primary';
+import { TopicVectorIndexService } from './topic-vector-index.service';
+import { resolveTopicVectorPrimary } from './topic-vector-primary';
+import { CollaborativeFilteringService } from './collaborative-filtering.service';
 
 export type SimilarTopicHit = {
   topicId: string;
@@ -27,6 +30,8 @@ export class RecommendationsService {
     private readonly elastic: ElasticService,
     private readonly qdrant: QdrantSearchService,
     private readonly embedding: EmbeddingService,
+    private readonly topicVectors: TopicVectorIndexService,
+    private readonly collaborative: CollaborativeFilteringService,
   ) {}
 
   private vectorFromJson(json: unknown): number[] | null {
@@ -130,12 +135,38 @@ export class RecommendationsService {
     await this.hydrateMissingTopicEmbeddings();
     const anchor = await this.ensureAnchorTopicVector(topicId);
 
+    const cap = Math.min(Math.max(limit, 1), 50);
+    const primary = resolveTopicVectorPrimary(this.topicVectors);
+
+    if (primary === 'qdrant') {
+      await this.topicVectors.ensureCollection();
+      const knn = await this.topicVectors.knnSimilarTopics(anchor, topicId, cap);
+      const missingIds = knn.filter((h) => !h.title || !h.slug).map((h) => BigInt(h.topicId));
+      const meta =
+        missingIds.length > 0
+          ? await this.prisma.topic.findMany({
+              where: { id: { in: missingIds } },
+              select: { id: true, title: true, slug: true },
+            })
+          : [];
+      const metaById = new Map(meta.map((t) => [t.id.toString(), t]));
+
+      return knn.map((h) => {
+        const m = metaById.get(h.topicId);
+        return {
+          topicId: h.topicId,
+          title: h.title ?? m?.title ?? '',
+          slug: h.slug ?? m?.slug ?? '',
+          score: h.score,
+        };
+      });
+    }
+
     const others = await this.prisma.topicEmbedding.findMany({
       where: { NOT: { topicId } },
       include: { topic: { select: { id: true, title: true, slug: true } } },
     });
 
-    const cap = Math.min(Math.max(limit, 1), 50);
     return others
       .map((row) => {
         const v = this.vectorFromJson(row.vector);
@@ -189,5 +220,18 @@ export class RecommendationsService {
     await this.elastic.upsertEntityFromRow(entity);
     const cap = Math.min(Math.max(limit, 1), 50);
     return this.elastic.knnSimilarEntities(vec, entityId, cap);
+  }
+
+  collaborativeEntities(params: {
+    entityId: bigint;
+    topicSlug?: string;
+    topN?: number;
+    limit?: number;
+  }) {
+    return this.collaborative.recommendEntities(params);
+  }
+
+  syncTopicVectorsToQdrant(opts?: { batchSize?: number; maxTopics?: number }) {
+    return this.topicVectors.syncFromPostgres(opts);
   }
 }

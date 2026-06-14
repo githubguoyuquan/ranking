@@ -8,6 +8,8 @@ import { QdrantService } from './qdrant.service';
 import { QdrantBenchmarkService } from './qdrant-benchmark.service';
 import { ScaleValidationService } from './scale-validation.service';
 import { ScaleAdminController } from './scale-admin.controller';
+import { ElasticCcrService } from './elastic-ccr.service';
+import { PostgresPartitionSchedulerService } from './postgres-partition-scheduler.service';
 
 @Module({
   imports: [SearchModule, AnalyticsModule],
@@ -15,7 +17,9 @@ import { ScaleAdminController } from './scale-admin.controller';
   providers: [
     PrismaReadService,
     PostgresPartitionService,
+    PostgresPartitionSchedulerService,
     ElasticRolloverService,
+    ElasticCcrService,
     QdrantService,
     QdrantBenchmarkService,
     ScaleValidationService,
@@ -24,6 +28,7 @@ import { ScaleAdminController } from './scale-admin.controller';
     PrismaReadService,
     PostgresPartitionService,
     ElasticRolloverService,
+    ElasticCcrService,
     QdrantService,
     QdrantBenchmarkService,
     ScaleValidationService,

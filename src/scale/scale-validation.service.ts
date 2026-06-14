@@ -6,6 +6,8 @@ import {
   evaluateScaleValidationSuite,
   scaleValidationThresholdsFromEnv,
 } from './scale-validation-result';
+import { ElasticCcrService } from './elastic-ccr.service';
+import { PostgresPartitionService } from './postgres-partition.service';
 
 @Injectable()
 export class ScaleValidationService {
@@ -13,6 +15,8 @@ export class ScaleValidationService {
     private readonly elastic: ElasticService,
     private readonly qdrantBench: QdrantBenchmarkService,
     private readonly clickhouse: ClickhouseService,
+    private readonly ccr: ElasticCcrService,
+    private readonly partitions: PostgresPartitionService,
   ) {}
 
   async runSuite(options?: {
@@ -20,7 +24,7 @@ export class ScaleValidationService {
     esIterations?: number;
     qdrantIterations?: number;
   }): Promise<Record<string, unknown>> {
-    const [esPing, esIlm, esStats, esBench, qdrantBench, chMv, chPing] =
+    const [esPing, esIlm, esStats, esBench, qdrantBench, chMv, chPing, chTier, ccrStatus, pgPart] =
       await Promise.all([
         this.elastic.ping(),
         this.elastic.getIlmStatus(),
@@ -32,6 +36,9 @@ export class ScaleValidationService {
         this.qdrantBench.run({ iterations: options?.qdrantIterations ?? 20 }),
         this.clickhouse.queryMvHealth(),
         this.clickhouse.ping(),
+        this.clickhouse.queryTierStatus(),
+        this.ccr.getCcrStatus(),
+        this.partitions.ensureAllMonthlyPartitions(1),
       ]);
 
     const thresholds = scaleValidationThresholdsFromEnv();
@@ -61,7 +68,10 @@ export class ScaleValidationService {
       clickhouse: {
         ping: chPing,
         mv: chMv,
+        tier: chTier,
       },
+      elasticsearchCcr: ccrStatus,
+      postgresPartitions: pgPart,
     };
   }
 }

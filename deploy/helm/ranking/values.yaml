@@ -42,6 +42,13 @@ scaleValidateCron:
   apiKeySecretKey: RANKING_ADMIN_API_KEY
   alertOnFailure: false
 
+postgresPartitionCron:
+  enabled: false
+  schedule: "30 3 1 * *"
+  apiBase: "http://ranking-ranking-api:3000"
+  monthsAhead: 4
+  apiKeySecretKey: RANKING_ADMIN_API_KEY
+
 drQuarterlyDrill:
   enabled: false
   schedule: "0 3 1 1,4,7,10 *"

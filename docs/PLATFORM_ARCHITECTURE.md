@@ -10,24 +10,24 @@
 | 需求域 | 愿景要求 | 当前仓库状态 | 差距 / 下一步 |
 |--------|----------|--------------|----------------|
 | 三种排行（客观/半客观/主观趋势） | TopicKind 区分策略与展示 | **`TopicKind` 预设** + `mergePolicyWithTopicKind`；物化按 kind **必填信号/覆盖率**过滤；`GET /v1/topics/:slug` 返回 `kindStrategy`；**`GET /v1/topic-versions/:id/signal-preview`** 物化前覆盖率 | 外部信源按 kind 差异化权重仍待接 |
-| 时间维度（日/周/月/年/实时/CUSTOM） | 多窗口排行与快照 | `TimeWindow` 枚举 + `TopicRanking` 唯一键 `(topicVersionId, timeWindow, windowStart)` | REALTIME 语义、滑动窗口、多 TZ 策略需产品化 |
+| 时间维度（日/周/月/年/实时/CUSTOM） | 多窗口排行与快照 | `TimeWindow` 枚举 + `TopicRanking` 唯一键 `(topicVersionId, timeWindow, windowStart)` | **`GET /v1/rankings/realtime-window`** + leaderboard `realtimeSemantics`（UTC 滑动窗口，`REALTIME_SLIDING_MINUTES`） |
 | 不可变快照 + 版本 | 每次排行完整快照 | `TopicRankSnapshot`：`snapshotVersion`、`rankingJson`、`tTrendSummary`、`confidenceScore`、`generatedByAi` | 已满足核心模型；缺**自动 trendSummary 生成任务链** |
 | 单条目排名演化 | previousRank、rankChange、趋势 | `RankingItem`：`previousRank`、`rankChange`、`TrendType`、多维度 score | 快照内已满足；**历史极值与末端连续升降步数**在 `GET /v1/entities/:id/rank-history` 的 `summary` 中计算；**按实体物化统计表**见 §5.1（未建） |
 | 历史时间线 | `RankingItemHistory` + 分析 | **`GET /v1/entities/:id/rank-history`** + **`GET /v1/entities/:id/timeline`**（多话题叠加）；话题侧 snapshots / trend-analyses | CH↔PG 运营报表、实时推送 |
 | 时间衰减 / 权重 | 指数/分段/可配置 | `scoring.ts` + **`EntityMetric` 全链路**：`POST /admin/entities/:id/metrics` 写入 → 物化 `scoreEntity`；**抓取成功后 `CRAWL_SIGNAL_EXTRACT` 自动抽取**（`crawl-signal-extract`）；可选 CH `metric_timeseries` | 更细粒度 NLP / JSON-LD 抽取 |
 | 趋势分析 | 环比/同比/MA/异常 | 物化写入 `TrendAnalysis` + **`GET /v1/topics/:slug/trend-analyses`**；**`GET /v1/trends/anomalies`** + 统一 Webhook 告警；BI `trends.alerts` | 同比回填 |
 | 抓取：增量、断点、去重 | checkpoint、fingerprint | `CrawlCheckpoint`、`CrawledUrl`；**全球调度** + overview/Prometheus | 多区域 K8s 生产落地、调度 SLA 与配额 |
-| 向量语义 / 亿级 ES | Qdrant/Milvus + ES | **Qdrant 主检索**（`SEARCH_PRIMARY`）+ ES **ILM/rollover** + 规模验证 API | 跨集群 DR、crawl 语义 ANN 全量 |
+| 向量语义 / 亿级 ES | Qdrant/Milvus + ES | **Qdrant 主检索**（`SEARCH_PRIMARY`）+ ES **ILM/rollover** + 规模验证 API | crawl 语义 ANN 全量 |
 | Kafka 事件网 | 全链路事件 | **6 类外发 Kafka** + followup 可选外发（`KAFKA_PUBLISH_RANKING_FOLLOWUP`）；**`consumers/snapshot-notify`** + **`consumers/followup-dispatch`** | 外部消费方按 `docs/kafka/CONSUMER_BOUNDARY.md` 订阅 |
-| Schema Registry | 中心化契约 | Redpanda SR + `KAFKA_SCHEMA_REGISTRY_URL` REST 注册 | 消息仍为 JSON 封套（非 Avro wire） |
-| 微服务拆分 | 多进程/多服务 | `PROCESS_ROLE` + `platform-worker` / `crawl-worker` + Helm 多 Deployment | 未拆独立仓库 |
+| Schema Registry | 中心化契约 | Redpanda SR + `KAFKA_SCHEMA_REGISTRY_URL` REST 注册 | 契约 JSON Schema；**wire 仍为 JSON 封套**（`wireFormat=json`，非 Avro） |
+| 微服务拆分 | 多进程/多服务 | `PROCESS_ROLE` + `service-manifest` + Helm 多 Deployment | 未拆独立仓库 |
 | 多 AZ 运维 | K8s 生产 | **Helm** + **AWS 接线**（`values-aws-production.yaml`、External Secrets、DR CronJob）、`PRODUCTION_WIRING_REQUIRED`、`scripts/dr-readiness.sh` CI | 季度 DR 演练执行 |
 | AI Agent 体系 | 多 Agent | **BullMQ `ai-agent`** + **`AgentRun`** + 7 类快照/生命周期 agent；`RANKING_FOLLOWUP_AGENT_PIPELINE` | Temporal / Kafka `ai.analysis.requested`；更细粒度配额 |
-| 搜索与推荐 | 语义、时间、趋势检索 + 推荐 | **Qdrant/ES/PG** + **DSL/RRF hybrid** + `similar-entities` / `similar-topics` | 协同过滤、更大规模话题向量 |
+| 搜索与推荐 | 语义、时间、趋势检索 + 推荐 | **Qdrant/ES/PG** + **DSL/RRF hybrid** + `similar-entities` / `similar-topics` + **CF** + **Qdrant 话题向量**（`TOPIC_VECTOR_PRIMARY`） | 更大规模离线 CF 训练 |
 | 生产可观测 | Outbox/爬虫/BI | `observability` + 统一 **`AlertWebhookRouterService`** + [ALERT_ONCALL_RUNBOOK.md](./docs/ops/ALERT_ONCALL_RUNBOOK.md) | 托管集群常态化压测 |
 | 规模验证 | 压测与 ILM | `POST /admin/scale/validate`、ES ILM、Qdrant benchmark、CH MV + BI 钻取 | 托管集群常态化压测 |
 | 微服务 | DDD+拆服务 | **单体 Nest** | 按限界上下文拆分为独立服务（可选） |
-| K8s / HA / 冷热分离 | 生产级 | **Helm chart** + 管理台 `/ops` + DR readiness API | Operator/多集群联邦、冷热 CH 分层待建 |
+| K8s / HA / 冷热分离 | 生产级 | **Helm chart** + 管理台 `/ops` + DR readiness API + **PG 分区** + **CH 冷热 TTL** + **ES CCR** | Operator/多集群联邦 |
 
 ---
 

@@ -10,6 +10,8 @@ import {
 import { KafkaProducerService } from '../kafka/kafka-producer.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { PrismaReadService } from '../scale/prisma-read.service';
+import { PostgresPartitionService } from '../scale/postgres-partition.service';
+import { ElasticCcrService } from '../scale/elastic-ccr.service';
 import { ElasticService } from '../search/elastic.service';
 import { QdrantSearchService } from '../search/qdrant-search.service';
 import { CrawlOpsService } from '../observability/crawl-ops.service';
@@ -24,6 +26,8 @@ export class DrReadinessService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly prismaRead: PrismaReadService,
+    private readonly partitions: PostgresPartitionService,
+    private readonly ccr: ElasticCcrService,
     private readonly redisHealth: RedisHealthService,
     private readonly kafka: KafkaProducerService,
     private readonly clickhouse: ClickhouseService,
@@ -131,6 +135,25 @@ export class DrReadinessService {
           ? 'ClickHouse reachable'
           : `ClickHouse unreachable: ${chPing.detail ?? 'unknown'}`,
       });
+
+      try {
+        const tier = await this.clickhouse.queryTierStatus();
+        const coldConfigured = Boolean(process.env.CLICKHOUSE_COLD_VOLUME?.trim());
+        checks.push({
+          code: 'clickhouse_tier',
+          severity: coldConfigured ? 'ok' : 'warn',
+          message: coldConfigured
+            ? `CH cold volume ${String(tier.coldVolume)} configured (hot ${String(tier.hotTtlDays)}d)`
+            : 'CLICKHOUSE_COLD_VOLUME not set — hot-only TTL',
+          hint: 'POST /admin/scale/clickhouse/ensure-tier after cold volume configured',
+        });
+      } catch (e) {
+        checks.push({
+          code: 'clickhouse_tier',
+          severity: 'warn',
+          message: `CH tier status failed: ${e instanceof Error ? e.message : String(e)}`,
+        });
+      }
     }
 
     if (this.elastic.isEnabled()) {
@@ -140,6 +163,56 @@ export class DrReadinessService {
         message: esPing.ok
           ? 'Elasticsearch reachable'
           : `Elasticsearch unreachable: ${esPing.detail ?? 'unknown'}`,
+      });
+
+      const remote = this.ccr.remoteCluster();
+      if (remote) {
+        try {
+          const ccrStatus = await this.ccr.getCcrStatus();
+          checks.push({
+            code: 'elasticsearch_ccr',
+            severity: ccrStatus.ok === true ? 'ok' : 'warn',
+            message: `ES CCR remote cluster: ${remote}`,
+            hint: 'POST /admin/scale/elasticsearch/bootstrap-ccr when follower auto-follow ready',
+          });
+        } catch (e) {
+          checks.push({
+            code: 'elasticsearch_ccr',
+            severity: 'warn',
+            message: `ES CCR check failed: ${e instanceof Error ? e.message : String(e)}`,
+          });
+        }
+      } else {
+        const wiring = productionWiringEnvFromProcess();
+        checks.push({
+          code: 'elasticsearch_ccr',
+          severity: wiring.productionWiringRequired ? 'warn' : 'ok',
+          message: 'ELASTICSEARCH_CCR_REMOTE_CLUSTER not set — no cross-cluster DR follower',
+        });
+      }
+    }
+
+    try {
+      const [histPart, crawlPart] = await Promise.all([
+        this.partitions.isTablePartitioned('RankingItemHistory'),
+        this.partitions.isTablePartitioned('CrawledUrl'),
+      ]);
+      const wiring = productionWiringEnvFromProcess();
+      checks.push({
+        code: 'postgres_partitions',
+        severity:
+          wiring.productionWiringRequired && !(histPart && crawlPart) ? 'warn' : 'ok',
+        message:
+          histPart && crawlPart
+            ? 'RankingItemHistory + CrawledUrl partitioned'
+            : `PG partition parents: history=${histPart}, crawledUrl=${crawlPart}`,
+        hint: 'Run optional_partition_parent.sql then POST /admin/scale/postgres/ensure-partitions',
+      });
+    } catch (e) {
+      checks.push({
+        code: 'postgres_partitions',
+        severity: 'warn',
+        message: `PG partition check failed: ${e instanceof Error ? e.message : String(e)}`,
       });
     }
 

@@ -1,0 +1,43 @@
+{{- if .Values.postgresPartitionCron.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "ranking.fullname" . }}-postgres-partitions
+  labels:
+    {{- include "ranking.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.postgresPartitionCron.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: postgres-partitions
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command:
+                - /bin/bash
+                - /app/scripts/postgres-ensure-partitions.sh
+              env:
+                - name: RANKING_API_BASE
+                  value: {{ .Values.postgresPartitionCron.apiBase | quote }}
+                - name: POSTGRES_PARTITION_MONTHS_AHEAD
+                  value: {{ .Values.postgresPartitionCron.monthsAhead | default 4 | quote }}
+                - name: RANKING_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.secret.name }}
+                      key: {{ .Values.postgresPartitionCron.apiKeySecretKey | default "RANKING_ADMIN_API_KEY" }}
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi
+{{- end }}

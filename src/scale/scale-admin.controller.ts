@@ -12,6 +12,9 @@ import { QdrantService } from './qdrant.service';
 import { ElasticService } from '../search/elastic.service';
 import { QdrantBenchmarkService } from './qdrant-benchmark.service';
 import { ScaleValidationService } from './scale-validation.service';
+import { ClickhouseService } from '../analytics/clickhouse.service';
+import { ElasticCcrService } from './elastic-ccr.service';
+import { getServiceManifest } from '../config/service-manifest';
 
 class EnsurePartitionsDto {
   @IsOptional()
@@ -86,6 +89,8 @@ export class ScaleAdminController {
     private readonly elastic: ElasticService,
     private readonly qdrantBench: QdrantBenchmarkService,
     private readonly validation: ScaleValidationService,
+    private readonly clickhouse: ClickhouseService,
+    private readonly ccr: ElasticCcrService,
   ) {}
 
   @Get('status')
@@ -116,6 +121,7 @@ export class ScaleAdminController {
         schedulerDisabled: process.env.CRAWL_SCHEDULER_DISABLED === 'true',
       },
       elasticsearchScale: this.elastic.scaleHints(),
+      serviceManifest: getServiceManifest(),
     });
   }
 
@@ -126,12 +132,35 @@ export class ScaleAdminController {
 
   @Post('postgres/ensure-partitions')
   async ensurePartitions(@Body() body: EnsurePartitionsDto) {
-    const table = body.table ?? 'RankingItemHistory';
-    const result = await this.partitions.ensureMonthlyPartitions({
-      table,
-      monthsAhead: body.monthsAhead,
-    });
-    return toPlainJson(result);
+    if (body.table) {
+      const result = await this.partitions.ensureMonthlyPartitions({
+        table: body.table,
+        monthsAhead: body.monthsAhead,
+      });
+      return toPlainJson(result);
+    }
+    const results = await this.partitions.ensureAllMonthlyPartitions(body.monthsAhead);
+    return toPlainJson({ results });
+  }
+
+  @Post('clickhouse/ensure-tier')
+  async ensureClickhouseTier() {
+    return toPlainJson(await this.clickhouse.ensureTierPolicy());
+  }
+
+  @Get('clickhouse/tier-status')
+  async clickhouseTierStatus() {
+    return toPlainJson(await this.clickhouse.queryTierStatus());
+  }
+
+  @Get('elasticsearch/ccr-status')
+  async esCcrStatus() {
+    return toPlainJson(await this.ccr.getCcrStatus());
+  }
+
+  @Post('elasticsearch/bootstrap-ccr')
+  async esBootstrapCcr() {
+    return toPlainJson(await this.ccr.bootstrapAutoFollow());
   }
 
   @Post('elasticsearch/rollover-entities')

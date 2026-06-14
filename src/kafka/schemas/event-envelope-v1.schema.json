@@ -10,6 +10,11 @@
       "const": 1,
       "description": "Wire format version for the outer envelope (independent of payload.schemaVersion)."
     },
+    "wireFormat": {
+      "type": "string",
+      "const": "json",
+      "description": "Kafka message body encoding: JSON envelope (not Avro wire)."
+    },
     "type": {
       "type": "string",
       "minLength": 1,

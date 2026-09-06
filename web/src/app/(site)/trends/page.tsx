@@ -77,7 +77,7 @@ function TrendsPageInner() {
   return (
     <div className="space-y-6">
       <header className="space-y-2">
-        <h1 className="text-3xl font-bold tracking-tight">热点涨榜</h1>
+        <h1 className="text-[28px] font-bold tracking-tight">热点涨榜</h1>
         <p className="text-muted-foreground">
           汇总近期快照中的名次上升实体，发现跨话题待势条目。
         </p>

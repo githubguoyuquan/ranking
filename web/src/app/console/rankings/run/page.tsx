@@ -434,7 +434,7 @@ function RunRankingForm() {
   return (
     <div className="w-full max-w-none space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">运行排行</h1>
+        <h1 className="text-[22px] font-semibold tracking-tight">运行排行</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           <code className="rounded bg-muted px-1">POST {NEST_V1.rankingsRun}</code>
         </p>
@@ -475,7 +475,7 @@ function RunRankingForm() {
             <code className="text-xs">{ISO_DATETIME_INPUT_MAX_LEN}</code>（三处日期时间）。支持 URL{" "}
             <code className="text-xs">?topicVersionId=</code>
             （话题版本页的「跑榜」会带此参数）。各参数框内{" "}
-            <kbd className="rounded border border-border bg-muted px-1 text-[10px]">Enter</kbd>{" "}
+            <kbd className="rounded border border-border bg-muted px-1 text-xs">Enter</kbd>{" "}
             可提交（同「运行」）。
           </CardDescription>
         </CardHeader>
@@ -616,7 +616,7 @@ function RunRankingForm() {
           {runMeta &&
           (runMeta.jobId || runMeta.topicRankingId) ? (
             <div className="flex flex-col gap-1 rounded-md border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-              <p className="text-[11px] leading-relaxed" aria-live="polite">
+              <p className="text-xs leading-relaxed" aria-live="polite">
                 实时 SSE（job / ranking）：
                 {rankingSseState === "off" && "未订阅"}
                 {rankingSseState === "connecting" && "连接中…"}

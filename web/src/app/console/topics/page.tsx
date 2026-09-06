@@ -815,7 +815,7 @@ function TopicsPageInner() {
   return (
     <div className="w-full max-w-none space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">话题版本</h1>
+        <h1 className="text-[22px] font-semibold tracking-tight">话题版本</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           <code className="rounded bg-muted px-1">GET {NEST_V1_DOC.topic}</code> ·{" "}
           <code className="rounded bg-muted px-1">PATCH {NEST_V1_DOC.topic}</code> ·{" "}
@@ -840,7 +840,7 @@ function TopicsPageInner() {
               ?slug=&amp;version=&amp;timeWindow=&amp;windowStart=&amp;includeAiStats=
             </code>
             （热榜查询串与 API 一致）。在 slug 或热榜参数框内按{" "}
-            <kbd className="rounded border border-border bg-muted px-1 text-[10px]">Enter</kbd>{" "}
+            <kbd className="rounded border border-border bg-muted px-1 text-xs">Enter</kbd>{" "}
             可触发「版本列表」或「热榜」。加载版本成功后可用表格中的「跑榜」跳转到{" "}
             <code className="text-xs">{ADMIN_HREF.rankingsRun}?topicVersionId=…</code>。
           </CardDescription>
@@ -889,7 +889,7 @@ function TopicsPageInner() {
                 物化排行时与 <code className="rounded bg-muted px-1">policyJson</code>{" "}
                 合并默认权重与衰减；显式 policy 字段仍优先。
                 {topicMeta ? (
-                  <span className="ml-1 font-mono text-[11px]">
+                  <span className="ml-1 font-mono text-xs">
                     topicId={topicMeta.id}
                   </span>
                 ) : null}
@@ -913,14 +913,14 @@ function TopicsPageInner() {
                     </option>
                   ))}
                 </select>
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-xs text-muted-foreground">
                   {
                     TOPIC_KIND_OPTIONS.find((o) => o.value === topicKindDraft)
                       ?.hint
                   }
                 </p>
                 {topicMeta?.kindStrategy ? (
-                  <div className="mt-2 rounded-md border border-border/80 bg-background/80 p-2 text-[11px] text-muted-foreground">
+                  <div className="mt-2 rounded-md border border-border/80 bg-background/80 p-2 text-xs text-muted-foreground">
                     <p>{topicMeta.kindStrategy.description}</p>
                     <p className="mt-1 font-mono">
                       必选: {topicMeta.kindStrategy.requiredSignalKeys.join(", ")}
@@ -1009,7 +1009,7 @@ function TopicsPageInner() {
               />
             </div>
           </div>
-          <p className="text-[11px] leading-relaxed text-muted-foreground">
+          <p className="text-xs leading-relaxed text-muted-foreground">
             填写 <code className="rounded bg-muted px-1">windowStart</code> 时必须同时填写{" "}
             <code className="rounded bg-muted px-1">timeWindow</code>
             （REALTIME / DAY / WEEK / MONTH / YEAR / CUSTOM）。
@@ -1178,7 +1178,7 @@ function TopicsPageInner() {
                               >
                                 {row.canonicalName}
                               </Link>
-                              <div className="mt-0.5 text-[11px]">
+                              <div className="mt-0.5 text-xs">
                                 <Link
                                   href={entitiesAdminPrefillPath(row.canonicalName)}
                                   className="text-muted-foreground underline-offset-2 hover:text-primary hover:underline"
@@ -1194,14 +1194,14 @@ function TopicsPageInner() {
                                     ),
                                   )}
                                   idleLabel="复制搜索页"
-                                  className="h-5 px-2 text-[10px]"
+                                  className="h-5 px-2 text-xs"
                                 />
                                 <CopyTextButton
                                   text={abs(
                                     entitiesAdminPrefillPath(row.canonicalName),
                                   )}
                                   idleLabel="复制实体页"
-                                  className="h-5 px-2 text-[10px]"
+                                  className="h-5 px-2 text-xs"
                                 />
                               </div>
                             </>
@@ -1326,7 +1326,7 @@ function TopicsPageInner() {
             </p>
             <div className="space-y-3 rounded-md border border-border bg-muted/20 p-3">
               <p className="text-xs font-medium text-foreground">快捷编辑</p>
-              <p className="text-[11px] leading-relaxed text-muted-foreground">
+              <p className="text-xs leading-relaxed text-muted-foreground">
                 四路权重与演示 seed 一致；其它 <code className="text-xs">weights</code> 键请用下方
                 JSON。先改表单再点「表单 → 写入 JSON」，或改 JSON 后点「JSON → 读回表单」。
               </p>

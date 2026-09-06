@@ -232,7 +232,7 @@ export default async function SnapshotPage({
     <div className="w-full max-w-none space-y-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+          <h1 className="text-[22px] font-semibold tracking-tight">{title}</h1>
           <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
             <span>
               id <code className="rounded bg-muted px-1 text-xs">{data.id}</code>
@@ -318,7 +318,7 @@ export default async function SnapshotPage({
           </div>
           {topicRankingId ? (
             <div className="flex max-w-md flex-col items-end gap-1 text-right">
-              <p className="text-[10px] text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 topicRankingId{" "}
                 <code className="rounded bg-muted px-1">{topicRankingId}</code>
               </p>
@@ -332,7 +332,7 @@ export default async function SnapshotPage({
                   href={nestRankingStatusUrl(topicRankingId)}
                   target="_blank"
                   rel="noreferrer"
-                  className="text-[11px] text-primary underline-offset-4 hover:underline"
+                  className="text-xs text-primary underline-offset-4 hover:underline"
                 >
                   DB status
                 </a>
@@ -365,7 +365,7 @@ export default async function SnapshotPage({
               </>
             ) : null}
           </p>
-          <p className="mt-1 text-[11px] text-muted-foreground/90">
+          <p className="mt-1 text-xs text-muted-foreground/90">
             关系表 <code className="rounded bg-muted/80 px-1">ScoreBreakdown</code> 与条目一一对应；条目字段{" "}
             <code className="rounded bg-muted/80 px-1">scoreBreakdown</code> 为同次打分的 JSON 投影。
             扁平导出：<code className="rounded bg-muted/80 px-1">GET …/score-breakdowns</code>（页脚链）。
@@ -387,7 +387,7 @@ export default async function SnapshotPage({
                   <summary className="cursor-pointer text-primary underline-offset-2 hover:underline">
                     查看 weights
                   </summary>
-                  <pre className="mt-2 max-h-48 overflow-auto rounded border border-border/60 bg-background p-2 text-[11px] leading-snug">
+                  <pre className="mt-2 max-h-48 overflow-auto rounded border border-border/60 bg-background p-2 text-xs leading-snug">
                     {JSON.stringify(data.scoreModel.weights, null, 2)}
                   </pre>
                 </details>
@@ -456,7 +456,7 @@ export default async function SnapshotPage({
                             >
                               {row.entity.canonicalName}
                             </Link>
-                            <div className="mt-0.5 text-[11px]">
+                            <div className="mt-0.5 text-xs">
                               <Link
                                 href={entitiesAdminPrefillPath(
                                   row.entity.canonicalName,
@@ -472,14 +472,14 @@ export default async function SnapshotPage({
                                   row.entity.canonicalName,
                                 )}
                                 idleLabel="复制搜索页"
-                                className="h-5 px-2 text-[10px]"
+                                className="h-5 px-2 text-xs"
                               />
                               <CopyAdminPageUrlButton
                                 path={entitiesAdminPrefillPath(
                                   row.entity.canonicalName,
                                 )}
                                 idleLabel="复制实体页"
-                                className="h-5 px-2 text-[10px]"
+                                className="h-5 px-2 text-xs"
                               />
                             </div>
                           </>

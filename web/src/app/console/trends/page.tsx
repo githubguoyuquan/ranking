@@ -154,7 +154,7 @@ function TrendsPageInner() {
   return (
     <div className="w-full max-w-none space-y-6 p-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">热点名次（演示）</h1>
+        <h1 className="text-[22px] font-semibold tracking-tight">热点名次（演示）</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           <code className="rounded bg-muted px-1">GET {NEST_V1_DOC.trendsHot}</code>
           — 自近期快照级 <code className="text-xs">TrendAnalysis</code> 的{" "}
@@ -297,7 +297,7 @@ function TrendsPageInner() {
                   <tr key={row.entityId} className="border-b border-border/60 last:border-0">
                     <th scope="row" className="px-3 py-2 font-normal">
                       <span className="font-medium">{row.canonicalName}</span>
-                      <div className="mt-1 text-[11px] text-muted-foreground">
+                      <div className="mt-1 text-xs text-muted-foreground">
                         id {row.entityId}
                       </div>
                     </th>

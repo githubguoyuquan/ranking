@@ -66,7 +66,7 @@ export default async function SnapshotPage({
     <div className="space-y-6">
       <header className="space-y-2">
         <p className="text-sm text-muted-foreground">快照 #{id}</p>
-        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
+        <h1 className="text-[22px] font-bold tracking-tight sm:text-[28px]">
           {topicTitle ?? "排行榜快照"}
         </h1>
         {snap.snapshotTime ? (

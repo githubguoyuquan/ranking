@@ -39,12 +39,12 @@ export function AdminPage({
         <header className="flex flex-col gap-3 border-b border-border pb-5 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0 space-y-1">
             {title ? (
-              <h1 className="text-3xl font-semibold tracking-tight text-foreground">
+              <h1 className="text-[28px] font-semibold tracking-tight text-foreground">
                 {title}
               </h1>
             ) : null}
             {description ? (
-              <div className="text-base leading-relaxed text-muted-foreground">
+              <div className="text-sm leading-5 text-muted-foreground">
                 {description}
               </div>
             ) : null}

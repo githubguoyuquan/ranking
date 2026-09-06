@@ -297,7 +297,7 @@ export default function OutboxPage() {
   return (
     <div className="w-full max-w-none space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Outbox</h1>
+        <h1 className="text-[22px] font-semibold tracking-tight">Outbox</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           GET {BACKEND_ADMIN.outbox} — 只读排查（
           <code className="rounded bg-muted px-1 text-xs">pendingOnly</code> 仅未发布）。生产请不要再暴露公网。ES
@@ -312,7 +312,7 @@ export default function OutboxPage() {
             <CopyAdminPageUrlButton
               path={ADMIN_HREF.reindex}
               idleLabel="复制"
-              className="h-5 px-2 text-[10px]"
+              className="h-5 px-2 text-xs"
             />
           </span>
           。
@@ -362,7 +362,7 @@ export default function OutboxPage() {
             <code className="text-xs">limit</code> 需为正整数：非法或空视为{" "}
             <code className="text-xs">40</code>，超过 <code className="text-xs">{OUTBOX_LIST_LIMIT_MAX}</code>{" "}
             时按 {OUTBOX_LIST_LIMIT_MAX} 请求（与 DTO 上限一致）。在 limit / type 输入框按{" "}
-            <kbd className="rounded border border-border bg-muted px-1 text-[10px]">Enter</kbd>{" "}
+            <kbd className="rounded border border-border bg-muted px-1 text-xs">Enter</kbd>{" "}
             同「加载」。
           </CardDescription>
         </CardHeader>

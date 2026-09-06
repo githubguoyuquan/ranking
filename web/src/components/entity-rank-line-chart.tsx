@@ -15,7 +15,7 @@ export function EntityRankLineChart({ points }: { points: RankHistoryPoint[] }) 
     const chart = echarts.init(el, undefined, { renderer: "canvas" });
     chart.setOption({
       backgroundColor: "transparent",
-      textStyle: { color: "#a1a1aa" },
+      textStyle: { color: "#cccccc" },
       grid: { left: 52, right: 20, top: 28, bottom: 52 },
       tooltip: { trigger: "axis" },
       xAxis: {

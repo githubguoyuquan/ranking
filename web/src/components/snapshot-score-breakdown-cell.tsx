@@ -15,7 +15,7 @@ export function SnapshotScoreBreakdownCell({ raw }: { raw: unknown }) {
         {preview}
         {entries.length > 2 ? " …" : ""}
       </summary>
-      <dl className="mt-1.5 max-w-[14rem] space-y-1 rounded-md border border-border/60 bg-muted/30 px-2 py-1.5 text-[11px]">
+      <dl className="mt-1.5 max-w-[14rem] space-y-1 rounded-md border border-border/60 bg-muted/30 px-2 py-1.5 text-xs">
         {entries.map((e) => (
           <div key={e.key} className="flex justify-between gap-2">
             <dt className="truncate text-muted-foreground" title={e.key}>

@@ -439,7 +439,7 @@ export default function AgentsPage() {
                   <td className="py-2 pr-2 max-w-[200px] truncate text-xs text-muted-foreground">
                     {r.outputSummary ?? "—"}
                   </td>
-                  <td className="py-2 pr-2 font-mono text-[10px]">{r.correlationId}</td>
+                  <td className="py-2 pr-2 font-mono text-xs">{r.correlationId}</td>
                 </tr>
               ))}
             </tbody>

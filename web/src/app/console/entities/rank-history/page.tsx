@@ -160,7 +160,7 @@ function RankHistoryPageInner() {
   return (
     <div className="w-full max-w-none space-y-6 p-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">实体名次曲线</h1>
+        <h1 className="text-[22px] font-semibold tracking-tight">实体名次曲线</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           <code className="rounded bg-muted px-1">
             GET {NEST_V1_DOC.entityRankHistory}
@@ -354,7 +354,7 @@ function RankHistoryPageInner() {
                             <CopyTextButton
                               text={abs(snapshotDetailAdminPath(p.snapshotId))}
                               idleLabel="复制快照页"
-                              className="h-5 px-2 text-[10px]"
+                              className="h-5 px-2 text-xs"
                             />
                           </span>
                         ) : (

@@ -23,7 +23,7 @@ export function SnapshotBarChart({ items }: { items: SnapshotChartItem[] }) {
     const sorted = [...items].sort((a, b) => a.rank - b.rank);
     chart.setOption({
       backgroundColor: "transparent",
-      textStyle: { color: "#a1a1aa" },
+      textStyle: { color: "#cccccc" },
       grid: { left: 100, right: 32, top: 24, bottom: 24 },
       xAxis: {
         type: "value",

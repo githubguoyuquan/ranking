@@ -372,10 +372,10 @@ function EngineSwitch(props: {
         />
       </span>
       <span className="min-w-0">
-        <span className="block text-sm font-semibold tracking-wide text-white/95">
+        <span className="block text-sm font-semibold tracking-wide text-[#f0f0f0]">
           {label}
         </span>
-        <span className="mt-0.5 block text-[11px] leading-snug text-white/55">
+        <span className="mt-0.5 block text-xs leading-snug text-[#b4b4b4]">
           {hint}
         </span>
       </span>
@@ -674,11 +674,11 @@ export function CrawlMonitorDashboard() {
   const logColor = (k: LogKind) => {
     switch (k) {
       case "ingest":
-        return "text-cyan-300/95";
+        return "text-[#4ec9b0]";
       case "task":
-        return "text-fuchsia-300/95";
+        return "text-[#c586c0]";
       case "warn":
-        return "text-amber-300/95";
+        return "text-[#dcdcaa]/95";
       case "ops":
         return "text-emerald-300/95";
       default:
@@ -689,7 +689,7 @@ export function CrawlMonitorDashboard() {
   return (
     <div
       className={cn(
-        "crawl-monitor-deck relative overflow-hidden rounded-2xl border border-cyan-500/25 bg-[#030711] text-sm shadow-[0_0_60px_oklch(0.55_0.2_260_/_0.08)]",
+        "crawl-monitor-deck relative overflow-hidden rounded-2xl border border-cyan-500/25 bg-[#1e1e1e] text-sm shadow-[0_0_60px_oklch(0.55_0.2_260_/_0.08)]",
         auxRaster && "crawl-monitor-aux",
       )}
     >
@@ -722,19 +722,19 @@ export function CrawlMonitorDashboard() {
       <div className="relative z-20 space-y-6 p-5 md:p-8">
         <header className="flex flex-col gap-4 border-b border-white/10 pb-6 md:flex-row md:items-end md:justify-between">
           <div>
-            <p className="text-[11px] font-medium uppercase tracking-[0.35em] text-cyan-400/90">
+            <p className="text-xs font-medium uppercase tracking-[0.35em] text-[#4ec9b0]">
               Crawl Nexus · Live
             </p>
-            <h1 className="mt-2 bg-gradient-to-r from-cyan-200 via-white to-fuchsia-300 bg-clip-text text-2xl font-bold tracking-tight text-transparent md:text-3xl">
+            <h1 className="mt-2 bg-gradient-to-r from-cyan-200 via-white to-fuchsia-300 bg-clip-text text-[22px] font-bold tracking-tight text-transparent md:text-[28px]">
               爬虫引擎监控甲板
             </h1>
-            <p className="mt-2 max-w-xl text-[13px] leading-relaxed text-white/55">
+            <p className="mt-2 max-w-xl text-sm leading-relaxed text-[#b4b4b4]">
               实时汇聚{" "}
-              <code className="rounded bg-white/10 px-1 text-xs text-cyan-200/90">
+              <code className="rounded bg-white/10 px-1 text-xs text-[#9cdcfe]">
                 GET /v1/crawl/sources
               </code>{" "}
               与{" "}
-              <code className="rounded bg-white/10 px-1 text-xs text-cyan-200/90">
+              <code className="rounded bg-white/10 px-1 text-xs text-[#9cdcfe]">
                 …/urls
               </code>
               ；可在此入轨异步任务并追踪状态。区别于「概览」的全站健康面板。
@@ -748,7 +748,7 @@ export function CrawlMonitorDashboard() {
               aria-pressed={sidebarHidden}
               title="隐藏应用侧栏以扩大监控区域；按 Esc 退出"
               onClick={() => setSidebarHidden(!sidebarHidden)}
-              className="shrink-0 border-cyan-400/45 bg-black/45 text-cyan-100 shadow-[0_0_16px_oklch(0.65_0.15_195_/_0.25)] hover:bg-cyan-500/15"
+              className="shrink-0 border-cyan-400/45 bg-black/45 text-[#9cdcfe] shadow-[0_0_16px_oklch(0.65_0.15_195_/_0.25)] hover:bg-cyan-500/15"
             >
               {sidebarHidden ? (
                 <>
@@ -764,25 +764,25 @@ export function CrawlMonitorDashboard() {
             </Button>
             <span
               className={cn(
-                "rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-wider",
+                "rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-wider",
                 liveRelay
                   ? "border-emerald-400/50 bg-emerald-500/15 text-emerald-200"
-                  : "border-white/20 bg-black/40 text-white/45",
+                  : "border-white/20 bg-black/40 text-[#9d9d9d]",
               )}
             >
               {liveRelay ? "遥测中继 · ON" : "遥测中继 · STANDBY"}
             </span>
-            <span className="rounded-full border border-white/15 bg-black/35 px-3 py-1 text-[11px] text-white/60">
+            <span className="rounded-full border border-white/15 bg-black/35 px-3 py-1 text-xs text-[#b4b4b4]">
               Δt {pollMs}ms
             </span>
             {lastApiPulse ? (
-              <span className="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1 text-[11px] text-cyan-100/90">
+              <span className="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1 text-xs text-[#9cdcfe]">
                 最后脉冲 {formatClock(lastApiPulse)}
               </span>
             ) : null}
             <Link
               href={ADMIN_HREF.crawl}
-              className="rounded-full border border-fuchsia-500/35 bg-fuchsia-500/10 px-3 py-1 text-[11px] font-medium text-fuchsia-100/90 underline-offset-4 hover:underline"
+              className="rounded-full border border-fuchsia-500/35 bg-fuchsia-500/10 px-3 py-1 text-xs font-medium text-[#c586c0] underline-offset-4 hover:underline"
             >
               经典爬虫表单 →
             </Link>
@@ -792,13 +792,13 @@ export function CrawlMonitorDashboard() {
         {overview ? (
           <section className="grid gap-3 rounded-xl border border-cyan-500/20 bg-black/35 p-4 sm:grid-cols-2 lg:grid-cols-4">
             <div>
-              <p className="text-[10px] uppercase tracking-wider text-white/40">
+              <p className="text-xs uppercase tracking-wider text-[#858585]">
                 全站概览
               </p>
-              <p className="mt-1 font-mono text-sm text-cyan-100">
+              <p className="mt-1 font-mono text-sm text-[#9cdcfe]">
                 {overview.sources} 源 · {overview.scheduledSources} 定时
               </p>
-              <p className="text-[11px] text-white/50">
+              <p className="text-xs text-[#9d9d9d]">
                 任务 running {overview.tasks.running} · failed{" "}
                 {overview.tasks.failed}
                 {overview.tasks.queued != null
@@ -806,17 +806,17 @@ export function CrawlMonitorDashboard() {
                   : ""}
               </p>
               {overview.scheduler?.sla?.healthy === false ? (
-                <p className="mt-1 text-[11px] text-amber-300">
+                <p className="mt-1 text-xs text-[#dcdcaa]">
                   调度 SLA 异常（超过{" "}
                   {overview.scheduler.sla.staleAfterMinutes ?? "?"} 分钟未 tick）
                 </p>
               ) : null}
             </div>
             <div>
-              <p className="text-[10px] uppercase tracking-wider text-white/40">
+              <p className="text-xs uppercase tracking-wider text-[#858585]">
                 URL 状态
               </p>
-              <p className="mt-1 font-mono text-[11px] leading-relaxed text-white/70">
+              <p className="mt-1 font-mono text-xs leading-relaxed text-[#cccccc]">
                 {Object.entries(overview.urlsByStatus).length === 0
                   ? "—"
                   : Object.entries(overview.urlsByStatus)
@@ -825,7 +825,7 @@ export function CrawlMonitorDashboard() {
               </p>
             </div>
             <div className="sm:col-span-2">
-              <p className="text-[10px] uppercase tracking-wider text-white/40">
+              <p className="text-xs uppercase tracking-wider text-[#858585]">
                 运行时特性 / 链接策略
               </p>
               <div className="mt-2 flex flex-wrap gap-1.5">
@@ -843,10 +843,10 @@ export function CrawlMonitorDashboard() {
                   <span
                     key={label}
                     className={cn(
-                      "rounded-full border px-2 py-0.5 text-[10px] font-medium",
+                      "rounded-full border px-2 py-0.5 text-xs font-medium",
                       on
                         ? "border-emerald-400/40 bg-emerald-500/15 text-emerald-200"
-                        : "border-white/15 bg-black/40 text-white/35",
+                        : "border-white/15 bg-black/40 text-[#858585]",
                     )}
                   >
                     {label} {on ? "ON" : "off"}
@@ -854,7 +854,7 @@ export function CrawlMonitorDashboard() {
                 ))}
               </div>
               {overview.features.followLinks ? (
-                <p className="mt-2 text-[10px] text-white/50">
+                <p className="mt-2 text-xs text-[#9d9d9d]">
                   depth≤{overview.linkPolicy?.maxDepth ?? "?"}{" "}
                   · max {overview.linkPolicy?.maxUrlsPerTask ?? "?"} URLs/task
                   {overview.linkPolicy?.allowHosts?.length
@@ -863,12 +863,12 @@ export function CrawlMonitorDashboard() {
                 </p>
               ) : null}
               {overview.worker?.scheduledRegions?.length ? (
-                <p className="mt-1 text-[10px] text-cyan-200/70">
+                <p className="mt-1 text-xs text-[#9cdcfe]">
                   定时区域 {overview.worker.scheduledRegions.join(" · ")} · 队列{" "}
                   {overview.worker.queueName ?? "crawl"}
                 </p>
               ) : null}
-              <p className="mt-1 text-[10px] text-white/35">
+              <p className="mt-1 text-xs text-[#858585]">
                 GET {adminCrawlOverviewUrl().replace(/^https?:\/\/[^/]+/, "")}
               </p>
             </div>
@@ -877,7 +877,7 @@ export function CrawlMonitorDashboard() {
 
         <div className="grid gap-6 lg:grid-cols-12">
           <section className="flex flex-col gap-4 lg:col-span-4">
-            <h2 className="text-xs font-semibold uppercase tracking-[0.2em] text-white/40">
+            <h2 className="text-xs font-semibold uppercase tracking-[0.2em] text-[#858585]">
               引擎开关
             </h2>
             <EngineSwitch
@@ -914,33 +914,33 @@ export function CrawlMonitorDashboard() {
             />
 
             <div className="rounded-xl border border-white/10 bg-black/35 p-4 backdrop-blur-sm">
-              <h3 className="text-xs font-semibold uppercase tracking-[0.15em] text-white/45">
+              <h3 className="text-xs font-semibold uppercase tracking-[0.15em] text-[#9d9d9d]">
                 任务入轨
               </h3>
-              <p className="mt-1 text-[11px] text-white/45">
+              <p className="mt-1 text-xs text-[#9d9d9d]">
                 POST{" "}
-                <code className="text-cyan-200/80">/v1/crawl/tasks</code>
+                <code className="text-[#9cdcfe]">/v1/crawl/tasks</code>
               </p>
               <div className="mt-3 space-y-2">
                 <div>
-                  <Label className="text-white/60">sourceId</Label>
+                  <Label className="text-[#b4b4b4]">sourceId</Label>
                   <Input
                     value={dispatchSourceId}
                     onChange={(e) => setDispatchSourceId(e.target.value)}
-                    className="mt-1 border-white/15 bg-black/50 font-mono text-cyan-100"
+                    className="mt-1 border-white/15 bg-black/50 font-mono text-[#9cdcfe]"
                     placeholder="从下方列表复制"
                   />
                 </div>
                 <div>
-                  <Label className="text-white/60">seedUrl</Label>
+                  <Label className="text-[#b4b4b4]">seedUrl</Label>
                   <Input
                     value={dispatchSeed}
                     maxLength={HTTP_URL_INPUT_MAX_LEN}
                     onChange={(e) => setDispatchSeed(e.target.value)}
-                    className="mt-1 border-white/15 bg-black/50 text-cyan-100"
+                    className="mt-1 border-white/15 bg-black/50 text-[#9cdcfe]"
                   />
                 </div>
-                <label className="flex cursor-pointer items-center gap-2 text-xs text-white/60">
+                <label className="flex cursor-pointer items-center gap-2 text-xs text-[#b4b4b4]">
                   <input
                     type="checkbox"
                     className="size-4 rounded border-white/30 accent-fuchsia-500"
@@ -953,7 +953,7 @@ export function CrawlMonitorDashboard() {
                   type="button"
                   disabled={dispatchBusy}
                   onClick={() => void fireTask()}
-                  className="w-full bg-gradient-to-r from-cyan-600 to-fuchsia-600 font-semibold text-white hover:from-cyan-500 hover:to-fuchsia-500"
+                  className="w-full bg-gradient-to-r from-cyan-600 to-fuchsia-600 font-semibold text-[#f0f0f0] hover:from-cyan-500 hover:to-fuchsia-500"
                 >
                   {dispatchBusy ? "发射中…" : "⚡ 发射爬取任务"}
                 </Button>
@@ -961,19 +961,19 @@ export function CrawlMonitorDashboard() {
             </div>
 
             <div className="rounded-xl border border-white/10 bg-black/35 p-4">
-              <Label className="text-white/60">追踪 taskId（可选）</Label>
+              <Label className="text-[#b4b4b4]">追踪 taskId（可选）</Label>
               <Input
                 value={taskWatchId}
                 onChange={(e) => setTaskWatchId(e.target.value)}
-                className="mt-1 border-white/15 bg-black/50 font-mono text-sm text-fuchsia-100"
+                className="mt-1 border-white/15 bg-black/50 font-mono text-sm text-[#c586c0]"
                 placeholder="十进制任务 id"
               />
               {taskView ? (
-                <pre className="mt-3 max-h-40 overflow-auto rounded-lg bg-black/60 p-2 text-[11px] text-fuchsia-100/90">
+                <pre className="mt-3 max-h-40 overflow-auto rounded-lg bg-black/60 p-2 text-xs text-[#c586c0]">
                   {JSON.stringify(taskView, null, 2)}
                 </pre>
               ) : (
-                <p className="mt-2 text-[11px] text-white/40">
+                <p className="mt-2 text-xs text-[#858585]">
                   入轨成功后自动写入；亦可手填。
                 </p>
               )}
@@ -1002,13 +1002,13 @@ export function CrawlMonitorDashboard() {
                 />
                 <div className="relative flex h-[44%] w-[44%] items-center justify-center rounded-full border-2 border-cyan-300/40 bg-gradient-to-br from-cyan-500/30 via-black/60 to-fuchsia-600/25 shadow-[inset_0_0_40px_oklch(0.6_0.2_280_/_0.25)]">
                   <div className="text-center">
-                    <p className="text-[10px] uppercase tracking-[0.25em] text-white/50">
+                    <p className="text-xs uppercase tracking-[0.25em] text-[#9d9d9d]">
                       Core
                     </p>
-                    <p className="mt-1 font-mono text-2xl font-bold tabular-nums text-cyan-100">
+                    <p className="mt-1 font-mono text-[22px] font-bold tabular-nums text-[#9cdcfe]">
                       {sources.length}
                     </p>
-                    <p className="text-[10px] text-white/45">SOURCES</p>
+                    <p className="text-xs text-[#9d9d9d]">SOURCES</p>
                   </div>
                 </div>
                 {auxRaster
@@ -1031,7 +1031,7 @@ export function CrawlMonitorDashboard() {
               </div>
 
               <div className="w-full space-y-3 rounded-xl border border-white/10 bg-black/40 p-4">
-                <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">
+                <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-[#9d9d9d]">
                   数据信道
                 </h3>
                 <div className="flex flex-wrap gap-2">
@@ -1039,7 +1039,7 @@ export function CrawlMonitorDashboard() {
                   <select
                     value={selectedSourceId}
                     onChange={(e) => setSelectedSourceId(e.target.value)}
-                    className="min-w-[12rem] flex-1 rounded-md border border-white/15 bg-black/55 px-3 py-2 text-sm text-cyan-100"
+                    className="min-w-[12rem] flex-1 rounded-md border border-white/15 bg-black/55 px-3 py-2 text-sm text-[#9cdcfe]"
                   >
                     {sources.length === 0 ? (
                       <option value="">（无源）</option>
@@ -1053,17 +1053,17 @@ export function CrawlMonitorDashboard() {
                   </select>
                 </div>
                 {apiError ? (
-                  <p className="text-xs text-amber-300">{apiError}</p>
+                  <p className="text-xs text-[#dcdcaa]">{apiError}</p>
                 ) : null}
                 <div className="grid grid-cols-3 gap-2 text-center">
                   <div className="rounded-lg border border-white/10 bg-white/5 py-2">
-                    <p className="text-[10px] uppercase text-white/45">样本</p>
-                    <p className="font-mono text-lg text-cyan-200">
+                    <p className="text-xs uppercase text-[#9d9d9d]">样本</p>
+                    <p className="font-mono text-lg text-[#9cdcfe]">
                       {metrics.total}
                     </p>
                   </div>
                   <div className="rounded-lg border border-white/10 bg-white/5 py-2">
-                    <p className="text-[10px] uppercase text-white/45">
+                    <p className="text-xs uppercase text-[#9d9d9d]">
                       fetched
                     </p>
                     <p className="font-mono text-lg text-emerald-300">
@@ -1071,7 +1071,7 @@ export function CrawlMonitorDashboard() {
                     </p>
                   </div>
                   <div className="rounded-lg border border-white/10 bg-white/5 py-2">
-                    <p className="text-[10px] uppercase text-white/45">reg</p>
+                    <p className="text-xs uppercase text-[#9d9d9d]">reg</p>
                     <p className="font-mono text-lg text-amber-200">
                       {metrics.reg}
                     </p>
@@ -1079,23 +1079,23 @@ export function CrawlMonitorDashboard() {
                 </div>
                 <div className="space-y-1">
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <h4 className="text-[10px] font-semibold uppercase tracking-wider text-white/40">
+                    <h4 className="text-xs font-semibold uppercase tracking-wider text-[#858585]">
                       最近 CrawlTask
                     </h4>
-                    <span className="text-[10px] text-white/35">
+                    <span className="text-xs text-[#858585]">
                       点击行填入左侧追踪 · current source
                     </span>
                   </div>
                   <div className="max-h-36 overflow-auto rounded-lg border border-fuchsia-500/20 bg-black/50">
-                    <table className="w-full text-left text-[11px]">
-                      <thead className="sticky top-0 bg-black/90 text-white/45">
+                    <table className="w-full text-left text-xs">
+                      <thead className="sticky top-0 bg-black/90 text-[#9d9d9d]">
                         <tr>
                           <th className="px-2 py-1.5">id</th>
                           <th className="px-2 py-1.5">状态</th>
                           <th className="px-2 py-1.5">更新</th>
                         </tr>
                       </thead>
-                      <tbody className="text-white/70">
+                      <tbody className="text-[#cccccc]">
                         {recentTasks.map((t) => (
                           <tr
                             key={t.id}
@@ -1110,12 +1110,12 @@ export function CrawlMonitorDashboard() {
                             }}
                             className="cursor-pointer border-t border-white/5 hover:bg-fuchsia-500/15"
                           >
-                            <td className="px-2 py-1 font-mono text-fuchsia-200/90">
+                            <td className="px-2 py-1 font-mono text-[#c586c0]">
                               {t.id}
                             </td>
-                            <td className="px-2 py-1 text-cyan-200/90">{t.status}</td>
+                            <td className="px-2 py-1 text-[#9cdcfe]">{t.status}</td>
                             <td
-                              className="max-w-[7rem] truncate px-2 py-1 text-white/50"
+                              className="max-w-[7rem] truncate px-2 py-1 text-[#9d9d9d]"
                               title={t.updatedAt ?? t.createdAt}
                             >
                               {t.updatedAt || t.createdAt
@@ -1129,15 +1129,15 @@ export function CrawlMonitorDashboard() {
                       </tbody>
                     </table>
                     {recentTasks.length === 0 ? (
-                      <p className="p-3 text-center text-[11px] text-white/35">
+                      <p className="p-3 text-center text-xs text-[#858585]">
                         暂无任务
                       </p>
                     ) : null}
                   </div>
                 </div>
                 <div className="max-h-52 overflow-auto rounded-lg border border-white/10 bg-black/55">
-                  <table className="w-full text-left text-[11px]">
-                    <thead className="sticky top-0 bg-black/90 text-white/45">
+                  <table className="w-full text-left text-xs">
+                    <thead className="sticky top-0 bg-black/90 text-[#9d9d9d]">
                       <tr>
                         <th className="px-2 py-1.5">id</th>
                         <th className="px-2 py-1.5">状态</th>
@@ -1145,20 +1145,20 @@ export function CrawlMonitorDashboard() {
                         <th className="px-2 py-1.5">url</th>
                       </tr>
                     </thead>
-                    <tbody className="text-white/70">
+                    <tbody className="text-[#cccccc]">
                       {urlRows.map((r) => (
                         <tr
                           key={r.id}
                           className="border-t border-white/5 hover:bg-white/[0.04]"
                         >
-                          <td className="px-2 py-1 font-mono text-cyan-200/90">
+                          <td className="px-2 py-1 font-mono text-[#9cdcfe]">
                             {r.id}
                           </td>
-                          <td className="px-2 py-1 text-fuchsia-200/90">
+                          <td className="px-2 py-1 text-[#c586c0]">
                             {r.status ?? "—"}
                           </td>
                           <td
-                            className="max-w-[140px] truncate px-2 py-1 text-white/55"
+                            className="max-w-[140px] truncate px-2 py-1 text-[#b4b4b4]"
                             title={r.pageTitle ?? r.domHint ?? undefined}
                           >
                             {r.pageTitle ?? r.domHint ?? "—"}
@@ -1171,7 +1171,7 @@ export function CrawlMonitorDashboard() {
                     </tbody>
                   </table>
                   {urlRows.length === 0 ? (
-                    <p className="p-4 text-center text-white/40">暂无 URL 样本</p>
+                    <p className="p-4 text-center text-[#858585]">暂无 URL 样本</p>
                   ) : null}
                 </div>
               </div>
@@ -1181,25 +1181,25 @@ export function CrawlMonitorDashboard() {
           <section className="lg:col-span-3">
             <div className="flex h-full min-h-[28rem] flex-col rounded-xl border border-white/10 bg-black/40">
               <div className="border-b border-white/10 px-3 py-2">
-                <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-white/45">
+                <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-[#9d9d9d]">
                   事件流
                 </h3>
-                <p className="text-[10px] text-white/35">
+                <p className="text-xs text-[#858585]">
                   最新在上 · 仅展示真实遥测 diff 与操作
                 </p>
               </div>
-              <div className="flex-1 overflow-y-auto p-3 font-mono text-[11px] leading-relaxed">
+              <div className="flex-1 overflow-y-auto p-3 font-mono text-xs leading-relaxed">
                 {log.map((line) => (
                   <div
                     key={line.id}
                     className="border-b border-white/5 py-1.5 last:border-0"
                   >
-                    <span className="text-white/35">{formatClock(line.t)} </span>
+                    <span className="text-[#858585]">{formatClock(line.t)} </span>
                     <span className={logColor(line.kind)}>{line.msg}</span>
                   </div>
                 ))}
                 {log.length === 0 ? (
-                  <p className="py-8 text-center text-white/35">等待中继…</p>
+                  <p className="py-8 text-center text-[#858585]">等待中继…</p>
                 ) : null}
               </div>
             </div>

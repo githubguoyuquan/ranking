@@ -105,7 +105,7 @@ export default async function HotBoardsPage({
     <div className="space-y-8">
       <header className="space-y-4">
         <div className="space-y-2">
-          <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">热榜</h1>
+          <h1 className="text-[28px] font-bold tracking-tight sm:text-[32px]">热榜</h1>
           <p className="max-w-2xl text-muted-foreground">
             只读浏览各话题最新排行快照。点击卡片查看完整榜单与历史快照。
           </p>

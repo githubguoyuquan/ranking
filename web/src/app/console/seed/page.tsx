@@ -90,7 +90,7 @@ export default function SeedPage() {
   return (
     <div className="w-full max-w-none space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">演示数据</h1>
+        <h1 className="text-[22px] font-semibold tracking-tight">演示数据</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           调用后端 <code className="rounded bg-muted px-1">POST {BACKEND_ADMIN.seedDemo}</code>
           ，写入示例话题与多次快照。
@@ -126,7 +126,7 @@ export default function SeedPage() {
             成功后在下方 JSON 中取快照 id；可选 slug，空则使用后端默认{" "}
             <code className="text-xs">global-female-singers</code>
             。slug 框内{" "}
-            <kbd className="rounded border border-border bg-muted px-1 text-[10px]">Enter</kbd>{" "}
+            <kbd className="rounded border border-border bg-muted px-1 text-xs">Enter</kbd>{" "}
             可提交。
           </CardDescription>
         </CardHeader>
@@ -217,7 +217,7 @@ export default function SeedPage() {
                       <CopyTextButton
                         text={appUrl(snapshotDetailAdminPath(id))}
                         idleLabel="复制"
-                        className="h-5 px-1.5 text-[10px]"
+                        className="h-5 px-1.5 text-xs"
                       />
                     </li>
                   ))}
@@ -234,7 +234,7 @@ export default function SeedPage() {
                   <CopyTextButton
                     text={appUrl(snapshotsCompareAdminPath(quickLinks.snapshotIds))}
                     idleLabel="复制"
-                    className="h-5 px-1.5 text-[10px]"
+                    className="h-5 px-1.5 text-xs"
                   />
                 </p>
               ) : null}
@@ -261,7 +261,7 @@ export default function SeedPage() {
                     <CopyTextButton
                       text={appUrl(rankingsRunAdminPath(quickLinks.topicVersionId))}
                       idleLabel="复制"
-                      className="h-5 px-2 text-[10px]"
+                      className="h-5 px-2 text-xs"
                     />
                   </span>{" "}
                   或{" "}
@@ -275,7 +275,7 @@ export default function SeedPage() {
                     <CopyTextButton
                       text={appUrl(ADMIN_HREF.topics)}
                       idleLabel="复制"
-                      className="h-5 px-2 text-[10px]"
+                      className="h-5 px-2 text-xs"
                     />
                   </span>{" "}
                   继续使用。

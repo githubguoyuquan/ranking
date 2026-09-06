@@ -92,7 +92,7 @@ export default async function TopicPage({
     <div className="space-y-6">
       <header className="space-y-2">
         <p className="text-sm text-muted-foreground">{slug}</p>
-        <h1 className="text-3xl font-bold tracking-tight">{title}</h1>
+        <h1 className="text-[28px] font-bold tracking-tight">{title}</h1>
         {topic?.kindStrategy?.description ? (
           <p className="text-muted-foreground">{topic.kindStrategy.description}</p>
         ) : null}

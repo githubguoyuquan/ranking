@@ -281,12 +281,12 @@ export default async function HomePage() {
                 <p className="text-muted-foreground">
                   快照读缓存：{" "}
                   {redis?.cacheReadsEnabled !== false ? "开启" : "已关闭"}{" "}
-                  <code className="rounded bg-muted px-1 text-[10px]">
+                  <code className="rounded bg-muted px-1 text-xs">
                     RANKING_CACHE_ENABLED
                   </code>
                 </p>
                 {redis?.ok === true && redis?.cacheReadsEnabled !== false ? (
-                  <p className="mt-1 text-[11px] text-muted-foreground">
+                  <p className="mt-1 text-xs text-muted-foreground">
                     键前缀示例：<code className="rounded bg-muted px-1">ranking:v2:snap:</code>、
                     <code className="rounded bg-muted px-1">ranking:v3:lb:</code>
                   </p>

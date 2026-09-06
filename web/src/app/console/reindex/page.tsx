@@ -78,7 +78,7 @@ export default function ReindexPage() {
   return (
     <div className="w-full max-w-none space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">索引维护</h1>
+        <h1 className="text-[22px] font-semibold tracking-tight">索引维护</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           需配置 <code className="rounded bg-muted px-1 text-xs">ELASTICSEARCH_NODE</code>
           。全量灌库，数据量大时可能较慢。

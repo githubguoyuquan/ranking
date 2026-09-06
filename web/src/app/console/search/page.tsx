@@ -354,7 +354,7 @@ function SearchPageInner() {
   return (
     <div className="w-full max-w-none space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">搜索</h1>
+        <h1 className="text-[22px] font-semibold tracking-tight">搜索</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           <code className="rounded bg-muted px-1">GET {NEST_V1.search}</code>
           ：实体（
@@ -416,7 +416,7 @@ function SearchPageInner() {
             一致），字符串最长 <code className="text-xs">{SEARCH_SOURCE_ID_QUERY_MAX_LEN}</code>；<code className="text-xs">status</code>{" "}
             最长 <code className="text-xs">{SEARCH_CRAWL_STATUS_MAX_LEN}</code> 字符。在有 <code className="text-xs">q</code>{" "}
             的前提下，limit / sourceId / status 框内也可按{" "}
-            <kbd className="rounded border border-border bg-muted px-1 text-[10px]">Enter</kbd>{" "}
+            <kbd className="rounded border border-border bg-muted px-1 text-xs">Enter</kbd>{" "}
             搜索。表单下方可新标签打开与当前参数一致的{" "}
             <code className="text-xs">{NEST_V1.searchEntities}</code>、
             <code className="text-xs">{NEST_V1.searchCrawledUrls}</code> /{" "}
@@ -565,7 +565,7 @@ function SearchPageInner() {
                 </>
               ) : (
                 <span className="text-muted-foreground/90">
-                  实体子检索需非空 <code className="text-[10px]">q</code>
+                  实体子检索需非空 <code className="text-xs">q</code>
                 </span>
               )}
             </p>
@@ -606,8 +606,8 @@ function SearchPageInner() {
               ) : null}
               {!searchCrawledUrlsSubUrl && !searchCrawledUrlsEsSubUrl ? (
                 <span className="text-muted-foreground/90">
-                  爬取分项 API 需 <code className="text-[10px]">q</code> 至少 2 字符（与后端{" "}
-                  <code className="text-[10px]">MinLength(2)</code> 一致）
+                  爬取分项 API 需 <code className="text-xs">q</code> 至少 2 字符（与后端{" "}
+                  <code className="text-xs">MinLength(2)</code> 一致）
                 </span>
               ) : null}
             </p>
@@ -688,14 +688,14 @@ function SearchPageInner() {
                                 ),
                               )}
                               idleLabel="复制搜索页"
-                              className="h-5 px-2 text-[10px]"
+                              className="h-5 px-2 text-xs"
                             />
                             <CopyTextButton
                               text={abs(
                                 entitiesAdminPrefillPath(h.canonicalName),
                               )}
                               idleLabel="复制实体页"
-                              className="h-5 px-2 text-[10px]"
+                              className="h-5 px-2 text-xs"
                             />
                           </div>
                         </li>
@@ -783,7 +783,7 @@ function SearchPageInner() {
                                 <CopyTextButton
                                   text={abs(refineHref)}
                                   idleLabel="复制限定搜索"
-                                  className="h-5 px-2 text-[10px]"
+                                  className="h-5 px-2 text-xs"
                                 />
                               </div>
                               {row.snippet.includes("<em>") ? (
@@ -851,7 +851,7 @@ function SearchPageInner() {
                                 <CopyTextButton
                                   text={abs(refineHref)}
                                   idleLabel="复制限定搜索"
-                                  className="h-5 px-2 text-[10px]"
+                                  className="h-5 px-2 text-xs"
                                 />
                               </div>
                               {preview ? (
@@ -870,7 +870,7 @@ function SearchPageInner() {
                             key={i}
                             className="rounded-md border border-dashed border-border px-3 py-2 text-xs"
                           >
-                            <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[11px]">
+                            <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-xs">
                               {JSON.stringify(row, null, 2)}
                             </pre>
                           </li>

@@ -18,7 +18,7 @@ function apiHeaders(): HeadersInit {
   const key = process.env.NEXT_PUBLIC_API_KEY?.trim();
   return key ? { "X-API-Key": key } : {};
 }
-const CHART_TEXT = "#94a3b8";
+const CHART_TEXT = "#cccccc";
 const CHART_GRID = "rgba(148,163,184,0.08)";
 
 function formatClock(d: Date): string {
@@ -50,14 +50,14 @@ function KpiCard({
         ring[accent],
       )}
     >
-      <div className="text-[11px] font-medium uppercase tracking-wider text-white/45">
+      <div className="text-xs font-medium uppercase tracking-wider text-[#9d9d9d]">
         {label}
       </div>
-      <div className="mt-1 font-mono text-2xl font-semibold tabular-nums text-white">
+      <div className="mt-1 font-mono text-[22px] font-semibold tabular-nums text-[#f0f0f0]">
         {value}
       </div>
       {sub ? (
-        <div className="mt-0.5 text-[11px] text-white/40">{sub}</div>
+        <div className="mt-0.5 text-xs text-[#858585]">{sub}</div>
       ) : null}
     </div>
   );
@@ -68,7 +68,7 @@ function HealthPill({ name, ok, detail }: { name: string; ok: boolean; detail?: 
     <span
       title={detail}
       className={cn(
-        "rounded-full border px-2.5 py-0.5 text-[11px] font-medium",
+        "rounded-full border px-2.5 py-0.5 text-xs font-medium",
         ok
           ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-200"
           : "border-rose-500/40 bg-rose-500/15 text-rose-200",
@@ -343,7 +343,7 @@ export function BiDashboard() {
   const q = data?.kpis.rankingQueue ?? {};
 
   return (
-    <div className="relative min-h-[calc(100svh-4rem)] overflow-hidden rounded-2xl border border-white/10 bg-[#070b14] text-white shadow-2xl">
+    <div className="relative min-h-[calc(100svh-4rem)] overflow-hidden rounded-2xl border border-white/10 bg-[#1e1e1e] text-[#f0f0f0] shadow-2xl">
       <div
         className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,rgba(120,80,255,0.18),transparent)]"
         aria-hidden
@@ -356,30 +356,30 @@ export function BiDashboard() {
       <div className="relative z-10 flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
         <header className="flex flex-col gap-4 border-b border-white/10 pb-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.35em] text-violet-300/80">
+            <p className="text-xs font-semibold uppercase tracking-[0.35em] text-[#c586c0]">
               Ranking Platform
             </p>
-            <h1 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
+            <h1 className="mt-1 text-[22px] font-semibold tracking-tight sm:text-[28px]">
               运营 BI 大屏
             </h1>
-            <p className="mt-1 text-sm text-white/45">
+            <p className="mt-1 text-sm text-[#9d9d9d]">
               全球爬虫 · 亿级检索 · ClickHouse 趋势 · Outbox · 依赖健康
               {data?.generatedAt ? (
-                <span className="ml-2 font-mono text-xs text-white/35">
+                <span className="ml-2 font-mono text-xs text-[#858585]">
                   数据 {new Date(data.generatedAt).toLocaleString("zh-CN")}
                 </span>
               ) : null}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-mono text-lg tabular-nums text-cyan-200/90">
+            <span className="font-mono text-lg tabular-nums text-[#9cdcfe]">
               {formatClock(clock)}
             </span>
             <Button
               type="button"
               variant="outline"
               size="sm"
-              className="border-white/15 bg-black/40 text-white hover:bg-white/10"
+              className="border-white/15 bg-black/40 text-[#f0f0f0] hover:bg-white/10"
               onClick={() => {
                 setLoading(true);
                 void load();
@@ -394,7 +394,7 @@ export function BiDashboard() {
               variant="outline"
               size="sm"
               aria-pressed={sidebarHidden}
-              className="border-violet-400/40 bg-black/40 text-violet-100"
+              className="border-violet-400/40 bg-black/40 text-[#c586c0]"
               onClick={() => setSidebarHidden(!sidebarHidden)}
             >
               {sidebarHidden ? (
@@ -411,7 +411,7 @@ export function BiDashboard() {
             </Button>
             <Link
               href={ADMIN_HREF.home}
-              className="rounded-md border border-white/15 px-3 py-1.5 text-xs text-white/70 hover:bg-white/10"
+              className="rounded-md border border-white/15 px-3 py-1.5 text-xs text-[#cccccc] hover:bg-white/10"
             >
               系统概览
             </Link>
@@ -473,7 +473,7 @@ export function BiDashboard() {
                 detail={data.health.elasticsearch.detail}
               />
               {lastFetch ? (
-                <span className="text-[11px] text-white/35">
+                <span className="text-xs text-[#858585]">
                   上次拉取 {formatClock(lastFetch)} · 每 {REFRESH_MS / 1000}s 自动刷新
                 </span>
               ) : null}
@@ -529,28 +529,28 @@ export function BiDashboard() {
 
             <div className="grid gap-4 lg:grid-cols-12">
               <section className="rounded-xl border border-white/10 bg-black/35 p-3 lg:col-span-5">
-                <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-white/45">
+                <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-[#9d9d9d]">
                   近 14 日快照量
                 </h2>
                 <div ref={lineRef} className="h-[min(280px,32vh)] w-full min-h-[200px]" />
               </section>
               <section className="rounded-xl border border-white/10 bg-black/35 p-3 lg:col-span-3">
-                <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-white/45">
+                <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-[#9d9d9d]">
                   24h 趋势标签分布
                 </h2>
                 <div ref={pieRef} className="h-[min(280px,32vh)] w-full min-h-[200px]" />
               </section>
               <section className="rounded-xl border border-white/10 bg-black/35 p-3 lg:col-span-4">
-                <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-white/45">
+                <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-[#9d9d9d]">
                   涨榜热点 Top10
                 </h2>
                 <div ref={barRef} className="h-[min(280px,32vh)] w-full min-h-[200px]" />
-                <ul className="mt-2 max-h-24 space-y-0.5 overflow-y-auto text-[10px]">
+                <ul className="mt-2 max-h-24 space-y-0.5 overflow-y-auto text-xs">
                   {hot.map((h) => (
                     <li key={h.entityId}>
                       <button
                         type="button"
-                        className="text-cyan-200/90 hover:underline"
+                        className="text-[#9cdcfe] hover:underline"
                         onClick={() =>
                           setDrill({
                             kind: "entity",
@@ -569,10 +569,10 @@ export function BiDashboard() {
 
             <div className="grid gap-4 lg:grid-cols-12">
               <section className="rounded-xl border border-white/10 bg-black/35 p-3 lg:col-span-5">
-                <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-white/45">
+                <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-[#9d9d9d]">
                   ClickHouse 话题热度
                   {data.charts.clickhouseMv ? (
-                    <span className="ml-2 font-normal normal-case text-white/35">
+                    <span className="ml-2 font-normal normal-case text-[#858585]">
                       MV {data.charts.clickhouseMv.mvExists ? "OK" : "缺失"}
                     </span>
                   ) : null}
@@ -584,7 +584,7 @@ export function BiDashboard() {
                       <button
                         key={tid}
                         type="button"
-                        className="rounded border border-cyan-500/30 px-2 py-0.5 text-[10px] text-cyan-200/90 hover:bg-cyan-500/10"
+                        className="rounded border border-cyan-500/30 px-2 py-0.5 text-xs text-[#9cdcfe] hover:bg-cyan-500/10"
                         onClick={() =>
                           setDrill({
                             kind: "topic",
@@ -600,13 +600,13 @@ export function BiDashboard() {
                 ) : null}
               </section>
               <section className="rounded-xl border border-white/10 bg-black/35 p-3 lg:col-span-4">
-                <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-white/45">
+                <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-[#9d9d9d]">
                   Outbox 待发布
                 </h2>
                 <div ref={outboxRef} className="h-[min(240px,28vh)] w-full min-h-[180px]" />
               </section>
-              <section className="rounded-xl border border-white/10 bg-black/35 p-3 lg:col-span-3 text-sm text-white/60">
-                <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-white/45">
+              <section className="rounded-xl border border-white/10 bg-black/35 p-3 lg:col-span-3 text-sm text-[#b4b4b4]">
+                <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-[#9d9d9d]">
                   全球爬虫
                 </h2>
                 <p>
@@ -623,13 +623,13 @@ export function BiDashboard() {
             </div>
 
             <section className="rounded-xl border border-white/10 bg-black/35 p-3">
-              <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-white/45">
+              <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-[#9d9d9d]">
                 最新快照
               </h2>
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[720px] text-left text-sm">
                   <thead>
-                    <tr className="border-b border-white/10 text-[11px] uppercase tracking-wider text-white/40">
+                    <tr className="border-b border-white/10 text-xs uppercase tracking-wider text-[#858585]">
                       <th scope="col" className="px-2 py-2">
                         时间
                       </th>
@@ -659,17 +659,17 @@ export function BiDashboard() {
                         key={row.snapshotId}
                         className="border-b border-white/5 hover:bg-white/5"
                       >
-                        <td className="whitespace-nowrap px-2 py-2 font-mono text-xs text-white/70">
+                        <td className="whitespace-nowrap px-2 py-2 font-mono text-xs text-[#cccccc]">
                           {new Date(row.snapshotTime).toLocaleString("zh-CN")}
                         </td>
                         <td className="px-2 py-2">
                           <Link
                             href={snapshotDetailAdminPath(row.snapshotId)}
-                            className="text-violet-300 hover:underline"
+                            className="text-[#c586c0] hover:underline"
                           >
                             {row.topicTitle}
                           </Link>
-                          <div className="text-[10px] text-white/35">{row.topicSlug}</div>
+                          <div className="text-xs text-[#858585]">{row.topicSlug}</div>
                         </td>
                         <td className="px-2 py-2 text-xs">{row.timeWindow}</td>
                         <td className="px-2 py-2 tabular-nums">{row.itemCount}</td>
@@ -679,7 +679,7 @@ export function BiDashboard() {
                         <td className="px-2 py-2 text-xs">
                           {row.generatedByAi ? "摘要" : "—"} ({row.aiAnalysisCount})
                         </td>
-                        <td className="px-2 py-2 text-xs text-white/50">
+                        <td className="px-2 py-2 text-xs text-[#9d9d9d]">
                           {row.rankingStatus}
                         </td>
                       </tr>
@@ -690,7 +690,7 @@ export function BiDashboard() {
             </section>
           </>
         ) : loading ? (
-          <p className="text-center text-white/50">加载 BI 数据…</p>
+          <p className="text-center text-[#9d9d9d]">加载 BI 数据…</p>
         ) : null}
       </div>
       <BiDrillPanel target={drill} onClose={() => setDrill(null)} />

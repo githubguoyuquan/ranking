@@ -10,7 +10,7 @@ import { X } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-const CHART_TEXT = "#94a3b8";
+const CHART_TEXT = "#cccccc";
 const CHART_GRID = "rgba(148,163,184,0.08)";
 
 function apiHeaders(): HeadersInit {
@@ -178,19 +178,19 @@ export function BiDrillPanel({
         <button
           type="button"
           onClick={onClose}
-          className="rounded-md border border-white/15 p-1 text-white/70 hover:bg-white/10"
+          className="rounded-md border border-white/15 p-1 text-[#cccccc] hover:bg-white/10"
           aria-label="关闭钻取"
         >
           <X className="size-4" />
         </button>
       </div>
-      {loading ? <p className="text-sm text-white/50">加载钻取数据…</p> : null}
+      {loading ? <p className="text-sm text-[#9d9d9d]">加载钻取数据…</p> : null}
       {err ? (
         <p className="rounded border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-sm text-rose-100">
           {err}
         </p>
       ) : null}
-      <div className="mb-3 text-sm text-white/60">
+      <div className="mb-3 text-sm text-[#b4b4b4]">
         {target.kind === "entity" && entityData?.entity ? (
           <p>
             {entityData.entity.canonicalName} · {entityData.entity.type}
@@ -199,13 +199,13 @@ export function BiDrillPanel({
         {target.kind === "topic" && topicData?.topic ? (
           <p>
             {topicData.topic.title}{" "}
-            <span className="text-white/35">({topicData.topic.slug})</span>
+            <span className="text-[#858585]">({topicData.topic.slug})</span>
           </p>
         ) : null}
         {target.kind === "entity" ? (
           <Link
             href={`/entities/rank-history?entityId=${encodeURIComponent(target.id)}`}
-            className="mt-1 inline-block text-xs text-violet-300 hover:underline"
+            className="mt-1 inline-block text-xs text-[#c586c0] hover:underline"
           >
             PG 榜位历史 →
           </Link>
@@ -215,7 +215,7 @@ export function BiDrillPanel({
         {chartOption ? (
           <div ref={chartRef} className="h-[min(320px,50vh)] w-full" />
         ) : (
-          <p className="text-sm text-white/40">暂无 ClickHouse 时序数据</p>
+          <p className="text-sm text-[#858585]">暂无 ClickHouse 时序数据</p>
         )}
       </div>
     </aside>
@@ -225,11 +225,11 @@ export function BiDrillPanel({
 function DrillHeader({ target }: { target: NonNullable<BiDrillTarget> }) {
   return (
     <div>
-      <p className="text-[10px] font-semibold uppercase tracking-wider text-violet-300/80">
+      <p className="text-xs font-semibold uppercase tracking-wider text-[#c586c0]">
         BI 钻取 · {target.kind === "entity" ? "实体榜位" : "话题 MV"}
       </p>
-      <h2 className="text-lg font-semibold text-white">{target.label}</h2>
-      <p className="font-mono text-xs text-white/40">id {target.id}</p>
+      <h2 className="text-lg font-semibold text-[#f0f0f0]">{target.label}</h2>
+      <p className="font-mono text-xs text-[#858585]">id {target.id}</p>
     </div>
   );
 }

@@ -39,7 +39,7 @@ export default function PricingPage() {
   return (
     <div className="space-y-8">
       <header className="space-y-2">
-        <h1 className="text-3xl font-bold tracking-tight">订阅方案</h1>
+        <h1 className="text-[28px] font-bold tracking-tight">订阅方案</h1>
         <p className="max-w-2xl text-muted-foreground">
           C 端默认免费只读。Pro 为产品演示档位，无需登录即可在本地设置设备偏好；正式支付与账号体系待接。
         </p>
@@ -51,7 +51,7 @@ export default function PricingPage() {
             <CardHeader>
               <CardTitle>{tier.name}</CardTitle>
               <CardDescription>{tier.desc}</CardDescription>
-              <p className="text-2xl font-semibold">{tier.price}</p>
+              <p className="text-[22px] font-semibold">{tier.price}</p>
             </CardHeader>
             <CardContent>
               <ul className="mb-4 space-y-1 text-sm text-muted-foreground">

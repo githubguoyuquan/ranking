@@ -38,7 +38,7 @@ DATABASE_URL='postgresql://...' npm run prisma:deploy
    - ✅ **Transactional Outbox**：快照提交事务内写入 `OutboxEvent`；`OutboxPublisherService` 定时发往 Kafka 兼容 broker（默认 topic `ranking.snapshot.completed`）。未配置 `KAFKA_BROKERS` 时仅积累 outbox 并打日志。  
    - ✅ 本地 **Redpanda**：`docker compose` 中 `redpanda`，宿主机端口 **19092**（`.env` 中 `KAFKA_BROKERS=localhost:19092`）  
    - ✅ 多实例 **Outbox**：`leasedUntil` 租约 + `FOR UPDATE SKIP LOCKED` 抢占，避免并行重复发布  
-   - ✅ **爬虫**：Checkpoint / `Source` / `CrawlTask` / `CrawledUrl` + BullMQ `crawl`；真 HTTP / Playwright；**DOM 特征**；**反爬重试** + UA 池；**链接跟进 BFS**（深度 / 域名白名单 / **`CRAWL_RESPECT_ROBOTS`**）；语义去重 / 代理池 / 全球调度；`GET /admin/crawl/overview` 与 **`ranking_crawl_*` Prometheus** 同源
+   - ✅ **爬虫**：Checkpoint / `Source` / `CrawlTask` / `CrawledUrl` + BullMQ `crawl`；**`GET /v1/crawl/tasks`** 按 `limit`（1–100，默认 30）、可选 **`sourceId`** 列出近期任务（引擎监控 / 运营排障）；**可选真 HTTP**（`CRAWL_HTTP_FETCH` 或 `kind: http-fetch`）或 **Playwright**（`CRAWL_USE_PLAYWRIGHT` / `kind: http-playwright`）：`contentHash`、`textPreview`、基础 SSRF；**`CRAWL_HTTP_PROXY` / `Source.httpProxyUrl`** 出站代理；**多实例**共用 Redis 消费同一 `crawl` 队列（`npm run start:crawl-worker` 独立 Worker 进程）；**`CRAWL_PER_HOST_MIN_INTERVAL_MS`** Redis 同 host 节流；**`CRAWL_SEMANTIC_DEDUP`** + `OPENAI_API_KEY` 时同信源正文 embedding 去重（`fetched_semantic_dup` / `duplicateOfId`，不重复入 ES）；未开真抓取时仍为桩 `fetched_stub`
 3. **P2 — Analytics & search**  
    - ✅ **ClickHouse**：compose、`metric_timeseries`、MV `metric_daily_topic`、`AnalyticsModule`；`SYNC_RANKING_TO_CLICKHOUSE` + direct/outbox 写入；CH 行可 **双轨** 镜像到 Kafka（权威路径为进程内 Flusher）  
    - ✅ **Redis 热读缓存**：`GET /v1/snapshots/:id` 长 TTL；`GET /v1/topics/:slug/leaderboard` 独立短 TTL 聚合缓存；无 Redis 或失败时降级查库  
@@ -50,7 +50,7 @@ DATABASE_URL='postgresql://...' npm run prisma:deploy
 
 4. **P3 — Agents & UI**  
    - ✅ **管理前端**：`web/` — Next.js、快照图表、**搜索**（页眉 `GET /v1/search/health`；`/search?q=&limit=&entityIndex=&crawlIndex=&sourceId=&status=` 预填表单；**`limit` 前端钳制 1–30 与 DTO 一致**；**提交检索后地址栏与请求参数对齐**；**命中实体名可再点进同名检索**；**ES health 新标签 JSON**；**与表单一致的 GET /v1/search 新标签**、**复制 API URL**；**q 为空时主检索框 Enter 不提交**（与「搜索」按钮一致）；**limit/sourceId/status 在已有 q 时 Enter 触发搜索**（**sourceId 非空须十进制 ≤38 位**）/ **索引**（`POST /admin/reindex-*`；**`/reindex` 页脚 `GET /v1/search/health` 新标签**）/ **实体 / 爬虫**（`/entities?q=` 预填；列表 **q 最多 200 字符**（与聚合搜索一致）；**新标签打开当前 `GET /admin/entities`**；**新建/编辑 Enter 提交**；**canonicalName 为空时不 POST/PATCH**；**PATCH/DELETE 路径 id 须十进制（前端预校验）**；名称列→搜索；**爬虫**页 **数据源列表加载后自动选用首条**（避免空库误请求 id=1）、**新标签** `GET /v1/crawl/sources` / **当前 source urls**；**新建源 Enter**：**name/baseUrl 均非空**；**可选 trustTier 1–5（与 DTO 一致，表列 tier）、topicId（十进制，可空）**；**任务区**：**sourceId（十进制 ≤38 位）与 seedUrl 均非空**方可提交（与按钮一致）；**GET 任务列表**（全量或当前 source）可 **新标签打开 / 复制 URL**；异步 + 轮询 `GET /v1/crawl/tasks/:id`（**轮询前校验任务 id 为十进制**）、**话题**（热榜区 **复制 snapshotId / topicVersionId**；**新标签**当前 **versions / leaderboard**；**热榜 windowStart 非空时校验 ISO**；**slug/version/timeWindow/windowStart 框与 URL 预填截断（160/64/16/80）**）、**演示数据**（slug **Enter** · **复制**快照 ids / topicVersionId；成功写入后页脚 **首张快照**、**本批对比** 与 **索引/爬虫/Outbox** 等链）、**运行排行**（**topicVersionId** 未填不提交；**填写时校验十进制 id（≤38 位，与 BigInt 一致）**；**timeWindow / ISO 框 maxLength 16/80**；**提交前校验** `timeWindow` 枚举与 **ISO** 窗口时间；**演示数据**链至 **`/rankings/run?topicVersionId=`**；各框 **Enter** · **复制 POST 体**；**异步** **GET job / ranking status** 新标签与 **复制 id**）、**Outbox limit/type Enter**、根级 **loading / error**、快照 **Agent 简报**  
-   - ✅ **多 Agent 编排**：BullMQ 队列 **`ai-agent`**、`AgentRun` 审计；物化后流水线 **`RANKING_FOLLOWUP_AGENT_PIPELINE`**（统一走 `ai-agent`，替代内联 follow-up）。**快照类**：`post-snapshot-summary-v1` / `trend-v1` / `credibility-v1` / **`fact-check-v1`** / **`trend-analysis-v1`** / **`time-series-v1`** / **`ranking-agent-v1`**。**生命周期**：`topic-discovery-v1`、`topic-merge-v1`；**抓取**：`duplicate-detection-v1`。管理台 **`/agents`**（Agent 目录 + 快捷运行）；`GET /admin/agents/overview` 含 **`registry`**；`POST /admin/agents/trend-analysis|time-series|ranking/run`（见 `.env.example` **`AI_AGENT_*`** / **`RANKING_FOLLOWUP_AGENT_PIPELINE`**）
+   - ✅ **多 Agent 编排**：BullMQ 队列 **`ai-agent`**、`AgentRun` / `TopicProposal` / `TopicMergeAudit`；**`topic-discovery-v1`**（爬取标题聚类 → 提案）、**`topic-merge-v1`**（相似度 + 迁移 `Source`）、**`fact-check-v1`**（跨信源指标冲突 → `AiAnalysis`）、**`duplicate-detection-v1`**；管理台 **`/agents`**；`GET/POST /admin/agents/*`（见 `.env.example` **`AI_AGENT_*`**）
    - ✅ **Agent（最小）**：`POST /admin/snapshots/:id/analyze` → `AiAnalysis`；body 可选 **`agent`（≤120）**、**`topN`（1–50）**、**`chainContext`（≤8192，有 `OPENAI_API_KEY` 时写入 user 前缀）**；约定名 **`rules-v1`**（默认）、**`post-snapshot-summary-v1`** / **`trend-v1`** / **`credibility-v1`**（后两者可由 `ranking-followup` 选配，`detailJson.agentKind` 分别为 `followup` / `trend` / `credibility`）；`GET /v1/snapshots/:id/analyses` 返回 **`{ filter, total, analyses }`**，可选 **`agentKind`**、**`agent`**、**`limit`（1–200，默认 50）**、**`offset`**；可选 `OPENAI_API_KEY` 调 GPT；**`AI_ANALYSIS_DAILY_CAP`**（UTC 日 **`AiAnalysis` 条数**）；**`AI_EMBEDDING_DAILY_CAP`**（UTC 日 **成功 embedding 批次数**，一次 `embedMany` 计 1）、**`AI_EMBEDDING_AUDIT`**（默认开启；`false` 不写 **`AiAuditEvent`**）；**`GET /admin/ai/spectrum`** / **`GET /admin/ai/audit-events`**（可筛 `category`、`source`）；生产需正式鉴权；**`RANKING_FOLLOWUP_ANALYZE_PIPELINE`**（非空则**仅**按逗号顺序跑多步、后续步将前序摘要写入 user 前缀；见 `.env.example`）或 **`RANKING_FOLLOWUP_ANALYZE`** / **`RANKING_FOLLOWUP_ANALYZE_TREND`** / **`RANKING_FOLLOWUP_ANALYZE_CREDIBILITY`**；共用 **`RANKING_FOLLOWUP_ANALYZE_TOPN`**；返回体含 **`analyzePipeline`**、**`analyzedSummary`** / **`analyzedTrend`** / **`analyzedCredibility`**（流水线中含 **`rules-v1`** 等时仍可能 **`analyzed`** 为 true）；**`detailJson.usedChainContext`** 标记链式上文；管理台快照详情 **Agent 区**提供 **可选表单（与 DTO 一致）**、**新标签打开 analyses**、**复制 GET / POST URL**、`aria-live` 状态；得分分布图容器带 **简要 `aria-label`（读屏）**  
    - ✅ **热榜实时（SSE）**：`GET /v1/realtime/stream`（Redis Pub/Sub；管理台话题页 / 运行排行页订阅 **`topics`** 或 **`topicRankingIds`**；事件 **`snapshot_ready`** / **`ranking_failed`**）  
    - ✅ **Playwright 爬取**：`CRAWL_USE_PLAYWRIGHT` 或 `Source.kind=http-playwright`；依赖 `playwright` + `npx playwright install chromium`  
@@ -59,7 +59,7 @@ DATABASE_URL='postgresql://...' npm run prisma:deploy
 ## 微服务进程 / Kafka 事件网 / 多 AZ（已实现骨架）
 
 - **进程拆分**：`PROCESS_ROLE=api|worker|crawl|all`；`npm run start:platform-worker`、`start:crawl-worker`；见 `docs/architecture/SERVICE_BOUNDARIES.md`
-- **Kafka（仅生产者）**：6 类外发 + `ranking.followup.requested` 仅登记；**platform 进程内无 Consumer**；下游 MVP：**`consumers/snapshot-notify`** 订阅 `ranking.snapshot.completed`；`kafkaPublishedAt` 与 Flusher `publishedAt` 双轨；`GET /admin/kafka/events`；`docs/kafka/CONSUMER_BOUNDARY.md`
+- **Kafka（仅生产者）**：6 类外发 + `ranking.followup.requested` 仅登记；**本仓库无 Kafka Consumer**；`kafkaPublishedAt` 与 Flusher `publishedAt` 双轨；`GET /admin/kafka/events`；`docs/kafka/CONSUMER_BOUNDARY.md`
 - **Schema Registry**：`KAFKA_SCHEMA_REGISTRY_URL`（Redpanda `18081` / Confluent 兼容 REST）
 - **生产 Helm**：`deploy/helm/ranking/` 多 Deployment + PDB + topologySpread；`docs/ops/PRODUCTION.md`
 - **Dockerfile**：同镜像 `ranking-platform`，按 command 区分 API/Worker
@@ -68,7 +68,7 @@ DATABASE_URL='postgresql://...' npm run prisma:deploy
 
 **规模（Phase C）**
 
-- `DATABASE_READ_URL`：只读副本；`rank-history` / `trends/hot` / `hot-boards` 走 `PrismaReadService`
+- `DATABASE_READ_URL`：只读副本；`rank-history` / `trends/hot` 走 `PrismaReadService`
 - `GET /admin/scale/status`；`POST /admin/scale/validate`；ES **ILM** + benchmark；`POST /admin/scale/qdrant/benchmark`；`POST .../ensure-ilm` / `bootstrap-ilm-indices` / `rollover-*`
 - `CRAWL_PROXY_POOL`、`CRAWL_QUEUE_SHARD`、`CRAWL_SEMANTIC_DEDUP_CROSS_SOURCE`
 - 管理台 **`/scale`**
@@ -102,38 +102,13 @@ DATABASE_URL='postgresql://...' npm run prisma:deploy
 | **3** | Elasticsearch | ✅ 骨架 + Outbox + **检索高亮**；跨集群属运维/配置（多节点 `ELASTICSEARCH_NODE` 或 SLM 不在本仓库展开） |
 | **4** | 真爬取 | ✅ HTTP GET + **Playwright** + 摘要入 PG/ES；⏳ 更细 DOM 特征与反爬策略需按业务继续加 |
 
-## Web（C 端 + 管理台 `web/`）
-
-**用户站点（C 端）** — 根路径 `/`：
-
-| 路径 | 说明 |
-|------|------|
-| `/` | 首页：演示热榜 TOP10 + 热点涨榜 |
-| `/hot` | 多话题热榜索引（各话题 TOP 预览 + 涨榜速递） |
-| `/topics/:slug` | 话题排行榜、得分图、近期快照（含日/周/月窗口切换） |
-| `/entities/:id` | 实体详情、名次曲线、相似推荐 |
-| `/search` | 实体搜索 |
-| `/trends` | 热点涨榜 |
-| `/snapshots/:id` | 快照只读详情 + AI 简报 |
-
-**运营台** — 前缀 `/console`（原管理路径已迁移）：
+## Web 管理端 (`web/`)
 
 ```bash
 cd web
 cp .env.example .env.local   # NEXT_PUBLIC_API_URL=http://localhost:3000
-npm install
-npm run dev   # http://localhost:3001
-```
-
-生产若 `API_AUTH_REQUIRED=true`，C 端需配置 `NEXT_PUBLIC_READ_API_KEY`（read 作用域）。
-
-## Web 管理端（历史说明）
-
-```bash
-cd web
-cp .env.example .env.local   # NEXT_PUBLIC_API_URL=http://localhost:3000
-npm install
-npm run dev   # 默认 http://localhost:3001 — C 端 `/`，管理台 `/console`
+npm install`
+npm run dev   # 默认 http://localhost:3001
 ```
 
 根布局导出 **`viewport`**（`width=device-width`）以移动端缩放一致。
@@ -190,7 +165,7 @@ npm run dev   # 默认 http://localhost:3001 — C 端 `/`，管理台 `/console
 - 边界说明：**`docs/kafka/CONSUMER_BOUNDARY.md`**；路由表 **`src/kafka/event-registry.ts`**。  
 - Payload builder 总表见 **`src/outbox/outbox-admin.controller.ts`** 类注释。  
 - **运维排查**：`GET /admin/outbox?limit=50&pendingOnly=true&type=...` 只读列出积压行（无鉴权，勿暴露公网）。**接口契约**见源码 **`src/outbox/outbox-admin.controller.ts`** 类注释；**OpenAPI 3 片段**：**`docs/openapi/admin-outbox.yaml`**（可导入 Swagger UI）。管理台 Outbox 页提供 **五种主要 `type` 快捷按钮**（含 ES 两行、Kafka 排行、CH、**`ranking.followup.requested`**）、**清空 type**、**limit/type 框 Enter 加载**、**新标签打开与当前筛选一致的查询 URL**、**复制该 GET URL**（**无可复制文本时复制按钮禁用**；**limit 非法或非正按 40、超过 200 按 200**，与接口校验上限一致；**type 框 maxLength 120**，与 DTO `@MaxLength` 一致）；表格在存在对应行时展示 **Kafka / CH / ES 实体 / ES 爬取 / followup** 等 **`payload` 摘要列**，原始 JSON 区对契约键名 **浅色高亮**。  
-- **OpenAPI 片段**：目录 **`docs/openapi/`** — `admin-observability.yaml`、`admin-ops.yaml`、`entity-metrics.yaml`、`trends.yaml`、`admin-outbox.yaml`、`admin-entities.yaml` 等；**`npm test`** 中 **`src/openapi/docs-openapi.spec.ts`** 解析全部 **`.yaml`** 并断言路径契约。  
+- **OpenAPI 片段**：目录 **`docs/openapi/`**（另含 **`admin-entities.yaml`** → **`GET /admin/entities`**）；**`npm test`** 中 **`src/openapi/docs-openapi.spec.ts`** 会解析目录下全部 **`.yaml`** 并断言 **OpenAPI 3** 与 **`paths`** 非空。  
 - `OUTBOX_FLUSH_MS`：发布轮询间隔（毫秒，默认 2000）
 
 ## Run locally
@@ -285,13 +260,6 @@ curl -s 'http://localhost:3000/v1/topics/global-female-singers/snapshots?limit=2
 ```bash
 curl -s 'http://localhost:3000/v1/trends/hot?limit=12'
 # 可选 &timeWindow=WEEK
-```
-
-C 端多话题热榜索引（各话题最新榜 TOP 预览；`topicsLimit` 默认 12、`previewLimit` 默认 5）：
-
-```bash
-curl -s 'http://localhost:3000/v1/hot-boards?topicsLimit=12&previewLimit=5'
-# 可选 &timeWindow=DAY
 ```
 
 更新 **`TopicVersion.policyJson`**（`frozen=true` 时拒绝；body 须含 **`weights`**；可选 **`entityIds`**、`requiredSignalKeys`，服务端与物化路径一致）：

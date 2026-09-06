@@ -71,7 +71,7 @@ export default async function HomePage() {
   return (
     <div className="space-y-8">
       <section className="space-y-3">
-        <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
+        <h1 className="text-[28px] font-bold tracking-tight sm:text-[32px]">
           动态排行榜
         </h1>
         <p className="max-w-2xl text-muted-foreground">

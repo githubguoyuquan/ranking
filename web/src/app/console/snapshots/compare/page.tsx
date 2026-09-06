@@ -80,7 +80,7 @@ function snapshotAiBriefCaption(s: NonNullable<CompareResponse["snapshots"]>[num
   if (typeof s.aiAnalysisCount !== "number") return null;
   const kinds = compareSnapshotBriefKinds(s);
   return (
-    <div className="text-[10px] font-normal normal-case leading-snug opacity-90">
+    <div className="text-xs font-normal normal-case leading-snug opacity-90">
       Ai 简报 {s.aiAnalysisCount}
       {kinds.length > 0 ? ` · ${kinds.join(" · ")}` : ""}
     </div>
@@ -90,13 +90,13 @@ function snapshotAiBriefCaption(s: NonNullable<CompareResponse["snapshots"]>[num
 function snapshotScoreModelCaption(s: NonNullable<CompareResponse["snapshots"]>[number]) {
   if (s.hasScoreModel !== true) {
     return (
-      <div className="text-[10px] font-normal normal-case leading-snug text-muted-foreground">
+      <div className="text-xs font-normal normal-case leading-snug text-muted-foreground">
         ScoreModel —
       </div>
     );
   }
   return (
-    <div className="text-[10px] font-normal normal-case leading-snug text-muted-foreground">
+    <div className="text-xs font-normal normal-case leading-snug text-muted-foreground">
       ScoreModel 已接
     </div>
   );
@@ -213,7 +213,7 @@ function CompareSnapshotsInner() {
   return (
     <div className="w-full max-w-none space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">快照对比</h1>
+        <h1 className="text-[22px] font-semibold tracking-tight">快照对比</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           <code className="rounded bg-muted px-1">POST {NEST_V1.snapshotsCompare}</code>
           — 须为同一 <code className="rounded bg-muted px-1 text-xs">TopicRanking</code>{" "}
@@ -406,10 +406,10 @@ function CompareSnapshotsInner() {
                             <CopyAdminPageUrlButton
                               path={snapshotDetailAdminPath(s.id)}
                               idleLabel="复制"
-                              className="h-5 px-1.5 text-[10px]"
+                              className="h-5 px-1.5 text-xs"
                             />
                           </span>
-                          <div className="text-[10px] font-normal normal-case opacity-90">
+                          <div className="text-xs font-normal normal-case opacity-90">
                             {formatShortTime(s.snapshotTime)}
                           </div>
                           {snapshotScoreModelCaption(s)}
@@ -435,7 +435,7 @@ function CompareSnapshotsInner() {
                         >
                           {row.canonicalName}
                         </Link>
-                        <div className="mt-0.5 text-[11px] font-normal">
+                        <div className="mt-0.5 text-xs font-normal">
                           <Link
                             href={entitiesAdminPrefillPath(row.canonicalName)}
                             className="text-muted-foreground underline-offset-2 hover:text-primary hover:underline"
@@ -447,12 +447,12 @@ function CompareSnapshotsInner() {
                           <CopyTextButton
                             text={abs(unifiedSearchAdminPathFromQuery(row.canonicalName))}
                             idleLabel="复制搜索页"
-                            className="h-5 px-2 text-[10px]"
+                            className="h-5 px-2 text-xs"
                           />
                           <CopyTextButton
                             text={abs(entitiesAdminPrefillPath(row.canonicalName))}
                             idleLabel="复制实体页"
-                            className="h-5 px-2 text-[10px]"
+                            className="h-5 px-2 text-xs"
                           />
                         </div>
                       </th>
@@ -466,7 +466,7 @@ function CompareSnapshotsInner() {
                             {cell ? (
                               <>
                                 名次 {cell.rank}
-                                <div className="text-[10px] opacity-80">
+                                <div className="text-xs opacity-80">
                                   score {cell.popularityScore.toFixed(3)}
                                   {cell.rankChange != null ? (
                                     <> · Δ {cell.rankChange}</>
@@ -474,7 +474,7 @@ function CompareSnapshotsInner() {
                                 </div>
                                 {cell.scoreBreakdown &&
                                 Object.keys(cell.scoreBreakdown).length > 0 ? (
-                                  <div className="mt-1 text-[10px] text-muted-foreground">
+                                  <div className="mt-1 text-xs text-muted-foreground">
                                     <SnapshotScoreBreakdownCell
                                       raw={cell.scoreBreakdown}
                                     />

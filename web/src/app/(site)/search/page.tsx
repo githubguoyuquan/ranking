@@ -79,7 +79,7 @@ function SearchPageInner() {
   return (
     <div className="space-y-6">
       <header className="space-y-2">
-        <h1 className="text-3xl font-bold tracking-tight">搜索</h1>
+        <h1 className="text-[28px] font-bold tracking-tight">搜索</h1>
         <p className="text-muted-foreground">在全平台实体索引中查找人物、品牌或话题相关条目。</p>
       </header>
 

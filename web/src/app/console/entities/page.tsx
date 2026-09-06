@@ -309,7 +309,7 @@ function EntitiesPageInner() {
   return (
     <div className="w-full max-w-none space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">实体</h1>
+        <h1 className="text-[22px] font-semibold tracking-tight">实体</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           GET {BACKEND_ADMIN.entities} · POST {BACKEND_ADMIN.entities} · PATCH/DELETE{" "}
           {BACKEND_ADMIN_DOC.entitiesId}
@@ -340,7 +340,7 @@ function EntitiesPageInner() {
             字符）· <code className="text-xs">limit</code> 1–{ENTITY_ADMIN_LIST_LIMIT_MAX}（与后端列表钳制一致，默认{" "}
             {ENTITY_ADMIN_LIST_LIMIT_DEFAULT}）· 表格内编辑/删除 · URL 预填{" "}
             <code className="text-xs">?q=</code> / <code className="text-xs">?limit=</code>；点「刷新」或{" "}
-            <kbd className="rounded border border-border bg-muted px-1 text-[10px]">Enter</kbd>{" "}
+            <kbd className="rounded border border-border bg-muted px-1 text-xs">Enter</kbd>{" "}
             会写入地址栏并重新拉取 · 「排行 topicSlug」用于一行内打开的{" "}
             <code className="text-xs">rank-history</code> JSON（默认与 seed 演示一致）
           </CardDescription>
@@ -508,26 +508,26 @@ function EntitiesPageInner() {
                             href={entityRankHistoryApiUrl(r.id, entityRankTopicSlug)}
                             target="_blank"
                             rel="noreferrer"
-                            className="inline-flex h-5 items-center rounded-md border border-border bg-background px-2 text-[10px] font-medium text-primary underline-offset-2 hover:underline"
+                            className="inline-flex h-5 items-center rounded-md border border-border bg-background px-2 text-xs font-medium text-primary underline-offset-2 hover:underline"
                           >
                             rank-history
                           </a>
                           <CopyTextButton
                             text={entityRankHistoryApiUrl(r.id, entityRankTopicSlug)}
                             idleLabel="复制 rank-history"
-                            className="h-5 px-2 text-[10px]"
+                            className="h-5 px-2 text-xs"
                           />
                           <CopyTextButton
                             text={abs(
                               unifiedSearchAdminPathFromQuery(r.canonicalName),
                             )}
                             idleLabel="复制搜索页"
-                            className="h-5 px-2 text-[10px]"
+                            className="h-5 px-2 text-xs"
                           />
                           <CopyTextButton
                             text={abs(entitiesAdminPrefillPath(r.canonicalName))}
                             idleLabel="复制实体页"
-                            className="h-5 px-2 text-[10px]"
+                            className="h-5 px-2 text-xs"
                           />
                         </div>
                       </td>
@@ -549,7 +549,7 @@ function EntitiesPageInner() {
             <CardTitle className="text-base">编辑 #{edit.id}</CardTitle>
             <CardDescription className="text-xs">
               输入框内{" "}
-              <kbd className="rounded border border-border bg-muted px-1 text-[10px]">Enter</kbd>{" "}
+              <kbd className="rounded border border-border bg-muted px-1 text-xs">Enter</kbd>{" "}
               同「PATCH 保存」。
             </CardDescription>
           </CardHeader>
@@ -658,7 +658,7 @@ function EntitiesPageInner() {
           <CardTitle className="text-base">新建</CardTitle>
           <CardDescription>
             各字段按{" "}
-            <kbd className="rounded border border-border bg-muted px-1 text-[10px]">Enter</kbd>{" "}
+            <kbd className="rounded border border-border bg-muted px-1 text-xs">Enter</kbd>{" "}
             同「POST」。
           </CardDescription>
         </CardHeader>

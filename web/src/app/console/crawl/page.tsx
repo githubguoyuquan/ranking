@@ -473,7 +473,7 @@ export default function CrawlAdminPage() {
   return (
     <div className="w-full max-w-none space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">爬虫</h1>
+        <h1 className="text-[22px] font-semibold tracking-tight">爬虫</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           创建 Source、跑爬取任务（同步或 **BullMQ 异步** + 轮询
           <code className="rounded bg-muted px-1 text-xs">GET {NEST_V1_DOC.crawlTask}</code>
@@ -747,7 +747,7 @@ export default function CrawlAdminPage() {
             位，留空则不传）。<code className="text-xs">name</code> 最多{" "}
             <code className="text-xs">{CRAWL_SOURCE_NAME_INPUT_MAX_LEN}</code> 字符；<code className="text-xs">baseUrl</code> / 下方 <code className="text-xs">seedUrl</code> 各最多{" "}
             <code className="text-xs">{HTTP_URL_INPUT_MAX_LEN}</code> 字符（运营台防御性上限）。name / baseUrl 框内{" "}
-            <kbd className="rounded border border-border bg-muted px-1 text-[10px]">Enter</kbd>{" "}
+            <kbd className="rounded border border-border bg-muted px-1 text-xs">Enter</kbd>{" "}
             可提交创建。
           </CardDescription>
         </CardHeader>
@@ -888,7 +888,7 @@ export default function CrawlAdminPage() {
             </code>{" "}
             可按 <code className="text-xs">limit</code>、
             <code className="text-xs">sourceId</code> 列出近期任务。在 sourceId 或 seedUrl 按{" "}
-            <kbd className="rounded border border-border bg-muted px-1 text-[10px]">Enter</kbd>{" "}
+            <kbd className="rounded border border-border bg-muted px-1 text-xs">Enter</kbd>{" "}
             可提交任务。
           </CardDescription>
         </CardHeader>

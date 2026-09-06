@@ -170,7 +170,7 @@ export function SnapshotAnalyzeActions(props: SnapshotAnalyzeActionsProps) {
             "focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30",
           )}
         />
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-xs text-muted-foreground">
           {chainContext.length}/{CHAIN_CONTEXT_MAX}
         </p>
       </div>

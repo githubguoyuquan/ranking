@@ -1,0 +1,101 @@
+openapi: 3.0.3
+info:
+  title: Ranking page query aggregation (fragment)
+  version: 1.0.0
+  description: |
+    页面读取聚合；原有 API 保留。topic/snapshot 读取遵循当前租户及脱敏规则。
+    monitor 和 health-summary 需要 admin scope。query section 的失败不等同于空结果。
+paths:
+  /v1/topics/{slug}/overview:
+    get:
+      operationId: topicOverview
+      summary: 授权话题、同版本窗口排行榜与最近快照
+      security: [{ApiKeyAuth: []}]
+      parameters:
+        - {name: slug, in: path, required: true, schema: {type: string}}
+        - {name: version, in: query, schema: {type: string}}
+        - {name: timeWindow, in: query, schema: {type: string, enum: [REALTIME, DAY, WEEK, MONTH, YEAR, CUSTOM]}}
+        - {name: windowStart, in: query, description: 设置时必须同时指定 timeWindow, schema: {type: string, format: date-time}}
+        - {name: includeAiStats, in: query, schema: {type: boolean, default: false}}
+        - {name: recentLimit, in: query, schema: {type: integer, minimum: 1, maximum: 10, default: 5}}
+      responses:
+        '200':
+          description: topic 和 selection 加 leaderboard、recentSnapshots 分区；meta.partial 标明部分失败
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [topic, selection, leaderboard, recentSnapshots, meta]
+                properties:
+                  topic: {type: object}
+                  selection: {type: object}
+                  leaderboard: {$ref: '#/components/schemas/QuerySection'}
+                  recentSnapshots: {$ref: '#/components/schemas/QuerySection'}
+                  meta: {$ref: '#/components/schemas/QueryMeta'}
+        '400': {description: 非法筛选或超出限额}
+        '403': {description: 无权访问关联快照}
+        '404': {description: 当前租户下不存在该话题}
+  /v1/snapshots/{id}:
+    get:
+      operationId: snapshotWithOptionalNavigation
+      summary: 原快照 API 增加可选的同 ranking 相邻导航
+      security: [{ApiKeyAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, pattern: '^[0-9]+$'}}
+        - {name: includeNeighbors, in: query, schema: {type: boolean, default: false}}
+        - {name: includeAiStats, in: query, schema: {type: boolean, default: false}}
+      responses:
+        '200':
+          description: 原快照字段保持；includeNeighbors 时追加 navigation section，其 data 含 currentSnapshotId、previous、next。边界相邻项为 null；AI 统计独立读取，排名条目复用缓存。
+        '400': {description: 参数非法}
+        '403': {description: 当前租户无权访问快照}
+        '404': {description: 快照不存在}
+  /admin/crawl/monitor:
+    get:
+      operationId: crawlMonitor
+      summary: admin 当前信源 URL、任务与可选单任务状态
+      security: [{ApiKeyAuth: []}]
+      parameters:
+        - {name: sourceId, in: query, description: 省略时选择当前租户最新信源, schema: {type: string, pattern: '^[1-9][0-9]*$', maxLength: 18}}
+        - {name: watchTaskId, in: query, description: 独立验证任务所属租户；列表已有则复用, schema: {type: string, pattern: '^[1-9][0-9]*$', maxLength: 18}}
+        - {name: urlsLimit, in: query, schema: {type: integer, minimum: 1, maximum: 50, default: 20}}
+        - {name: tasksLimit, in: query, schema: {type: integer, minimum: 1, maximum: 30, default: 12}}
+      responses:
+        '200':
+          description: selectedSource、urls/tasks section、可选 watchedTask section 和 meta；无信源时列表为 empty；不含网页正文或代理凭据
+        '400': {description: 非法 ID 或超出限额}
+        '401': {description: 缺少管理员权限}
+        '404': {description: 显式指定的信源或任务不可见}
+  /admin/ops/health-summary:
+    get:
+      operationId: healthSummary
+      summary: admin 页面健康摘要，不替代部署探针
+      security: [{ApiKeyAuth: []}]
+      responses:
+        '200':
+          description: status 为 ok/degraded，services 含 api/postgresql/redis/kafka/elasticsearch/clickhouse。每个采样有 configured、ok、status、checkedAt、latencyMs。status 可为 healthy/unhealthy/unconfigured/timeout。共享 5 秒缓存，单服务响应等待上限 800ms；底层请求未完成前不重复启动。
+        '401': {description: 缺少管理员权限}
+components:
+  securitySchemes:
+    ApiKeyAuth: {type: apiKey, in: header, name: X-API-Key}
+  schemas:
+    QuerySection:
+      type: object
+      required: [status, data]
+      properties:
+        status: {type: string, enum: [ok, empty, unavailable]}
+        data: {nullable: true, description: 按分区分别为对象或数组；unavailable 时为 null}
+        sampledAt: {type: string, format: date-time}
+        error:
+          type: object
+          properties:
+            code: {type: string, enum: [QUERY_UNAVAILABLE]}
+            retryable: {type: boolean}
+    QueryMeta:
+      type: object
+      required: [schemaVersion, requestId, generatedAt, partial]
+      properties:
+        schemaVersion: {type: integer, enum: [1]}
+        requestId: {type: string, format: uuid}
+        generatedAt: {type: string, format: date-time}
+        partial: {type: boolean}

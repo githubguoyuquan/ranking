@@ -41,7 +41,7 @@ import {
 import { useAdminAppUrl } from "@/hooks/use-admin-app-url";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 
 type SearchEsHealth = {
   ok: boolean;
@@ -320,7 +320,13 @@ function SearchPageInner() {
     })();
   }, []);
 
+  const searchRequest = useRef<AbortController | null>(null);
+  useEffect(() => () => searchRequest.current?.abort(), []);
+
   async function runSearch() {
+    searchRequest.current?.abort();
+    const controller = new AbortController();
+    searchRequest.current = controller;
     setLoading(true);
     setResult(null);
     setRawError("");
@@ -337,17 +343,19 @@ function SearchPageInner() {
         scroll: false,
       });
 
-      const res = await fetch(nestSearchUrl(unifiedSearchParams), { cache: "no-store" });
+      const res = await fetch(nestSearchUrl(unifiedSearchParams), { cache: "no-store", signal: controller.signal });
       const text = await res.text();
+      if (controller.signal.aborted) return;
       if (!res.ok) {
         setRawError(`HTTP ${res.status}\n${text}`);
         return;
       }
       setResult(JSON.parse(text) as UnifiedSearchResponse);
     } catch (e) {
+      if (controller.signal.aborted) return;
       setRawError(e instanceof Error ? e.message : String(e));
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) setLoading(false);
     }
   }
 

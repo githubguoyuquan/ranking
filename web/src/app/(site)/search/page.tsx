@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,11 +32,17 @@ function SearchPageInner() {
   const [q, setQ] = useState(qInit);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
+  const request = useRef<AbortController | null>(null);
+  useEffect(() => () => request.current?.abort(), []);
   const [hits, setHits] = useState<SearchHit[]>([]);
 
   const runSearch = useCallback(async (query: string) => {
+    request.current?.abort();
+    const controller = new AbortController();
+    request.current = controller;
     const trimmed = query.trim();
     if (!trimmed) {
+      setLoading(false);
       setHits([]);
       setErr("");
       return;
@@ -47,9 +53,10 @@ function SearchPageInner() {
     try {
       const res = await fetch(apiUrl(`${NEST_V1.search}?${params}`), {
         headers: siteApiHeaders(),
-        cache: "no-store",
+        cache: "no-store", signal: controller.signal,
       });
       const text = await res.text();
+      if (controller.signal.aborted) return;
       if (!res.ok) {
         setErr(`HTTP ${res.status}`);
         setHits([]);
@@ -64,16 +71,17 @@ function SearchPageInner() {
         (Array.isArray(j.results) ? j.results : []);
       setHits(list);
     } catch (e) {
+      if (controller.signal.aborted) return;
       setErr(e instanceof Error ? e.message : String(e));
       setHits([]);
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     setQ(qInit);
-    if (qInit) void runSearch(qInit);
+    void runSearch(qInit);
   }, [qInit, runSearch]);
 
   return (

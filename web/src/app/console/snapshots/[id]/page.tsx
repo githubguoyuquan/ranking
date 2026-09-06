@@ -9,11 +9,9 @@ import { AdminFooterNav } from "@/components/admin-footer-nav";
 import { CopyAdminPageUrlButton } from "@/components/copy-admin-page-url-button";
 import { CopySnapshotIdButton, CopyTextButton } from "@/components/copy-snapshot-id-button";
 import {
-  SnapshotAnalysesSection,
   type SnapshotAnalysisListItem,
 } from "@/components/snapshot-analyses-section";
-import { SnapshotAnalysesFilter } from "@/components/snapshot-analyses-filter";
-import { SnapshotAnalysesPagination } from "@/components/snapshot-analyses-pagination";
+import { SnapshotAnalysesPanel } from "@/components/snapshot-analyses-panel";
 import { SnapshotAnalyzeActions } from "@/components/snapshot-analyze-actions";
 import { SnapshotScoreBreakdownCell } from "@/components/snapshot-score-breakdown-cell";
 import { SnapshotBarChart } from "@/components/snapshot-bar-chart";
@@ -32,7 +30,6 @@ import {
   nestSnapshotScoreBreakdownsUrl,
   nestSnapshotV1Url,
 } from "@/lib/nest-api-urls";
-import { compareIdsFromRankingSnapshots } from "@/lib/snapshot-compare-pair";
 import { parseSnapshotAnalysesApiResponse } from "@/lib/snapshot-analyses-api";
 import { parseSnapshotPageAnalysisKind } from "@/lib/snapshot-analysis-kind-query";
 import {
@@ -49,9 +46,11 @@ import {
 } from "@/lib/snapshot-detail-search-params";
 import { unifiedSearchAdminPathFromQuery } from "@/lib/unified-search-admin-path";
 import Link from "next/link";
+import { adminApiHeaders } from "@/lib/query-http";
 import { notFound } from "next/navigation";
 
 type SnapshotPayload = {
+  navigation?: { status: string; data?: { previous?: { id: string } | null; next?: { id: string } | null } | null };
   id?: string;
   snapshotVersion?: string;
   snapshotTime?: string;
@@ -157,16 +156,17 @@ export default async function SnapshotPage({
 
   const snapSummaryQs = new URLSearchParams();
   snapSummaryQs.set("includeAiStats", "1");
+  snapSummaryQs.set("includeNeighbors", "true");
   const [res, analysesRes] = await Promise.all([
-    fetch(nestSnapshotV1Url(id, snapSummaryQs), { cache: "no-store" }),
-    fetch(analysesFetchUrl, { cache: "no-store" }),
+    fetch(nestSnapshotV1Url(id, snapSummaryQs), { cache: "no-store", headers: adminApiHeaders() }).catch(() => null),
+    fetch(analysesFetchUrl, { cache: "no-store", headers: adminApiHeaders() }).catch(() => null),
   ]);
-  if (res.status === 404) notFound();
-  if (!res.ok) {
+  if (res?.status === 404) notFound();
+  if (!res?.ok) {
     return (
       <div className="w-full max-w-none">
         <p className="text-destructive">
-          加载失败 HTTP {res.status}，请确认 API 与 snapshot id。
+          加载失败 HTTP {res?.status ?? "连接失败"}，请确认 API 与 snapshot id。
         </p>
         <Link href={ADMIN_HREF.home} className="mt-4 block text-primary underline-offset-4 hover:underline">
           ← 返回概览
@@ -178,8 +178,8 @@ export default async function SnapshotPage({
   let analysisRows: SnapshotAnalysisListItem[] = [];
   let analysesTotal: number | null = null;
   let analysesLoadError: string | null = null;
-  if (!analysesRes.ok) {
-    analysesLoadError = `简报列表加载失败 HTTP ${analysesRes.status}`;
+  if (!analysesRes?.ok) {
+    analysesLoadError = `简报列表加载失败 HTTP ${analysesRes?.status ?? "连接失败"}`;
   } else {
     try {
       const parsed = parseSnapshotAnalysesApiResponse(await analysesRes.json());
@@ -190,21 +190,8 @@ export default async function SnapshotPage({
     }
   }
 
-  let compareSnapshotIds = [id];
-  const trId = data.topicRanking?.id;
-  if (trId != null && String(trId) !== "") {
-    try {
-      const stRes = await fetch(nestRankingStatusUrl(String(trId)), {
-        cache: "no-store",
-      });
-      if (stRes.ok) {
-        const stJson = (await stRes.json()) as { snapshots?: unknown };
-        compareSnapshotIds = compareIdsFromRankingSnapshots(id, stJson.snapshots);
-      }
-    } catch {
-      /* 忽略 status 失败，仍可用单 id 预填对比页 */
-    }
-  }
+  const neighbor = data.navigation?.data?.previous ?? data.navigation?.data?.next;
+  const compareSnapshotIds = neighbor ? [id, neighbor.id] : [id];
   const snapshotsCompareHref = snapshotsCompareAdminPath(compareSnapshotIds, {
     includeAiStats: true,
   });
@@ -507,28 +494,9 @@ export default async function SnapshotPage({
         </CardContent>
       </Card>
 
-      <SnapshotAnalysesSection
-        rows={analysisRows}
-        analysesJsonUrl={analysesFetchUrl}
-        loadError={analysesLoadError}
-        analysesTotal={analysesTotal}
-        filterSlot={
-          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-            <SnapshotAnalysesFilter
-              snapshotId={id}
-              currentKind={analysisKind}
-              listLimit={analysisLimit}
-            />
-            <SnapshotAnalysesPagination
-              snapshotId={id}
-              analysisKind={analysisKind}
-              page={analysisPage}
-              limit={analysisLimit}
-              total={analysesTotal}
-            />
-          </div>
-        }
-      />
+      <SnapshotAnalysesPanel key={JSON.stringify([id, analysisKind, analysisPage, analysisLimit, analysisRows, analysesLoadError])}
+        snapshotId={id} initial={{ kind: analysisKind, page: analysisPage, limit: analysisLimit }}
+        rows={analysisRows} total={analysesTotal} error={analysesLoadError} />
 
       <SnapshotAnalyzeActions snapshotId={id} analysesGetUrl={analysesFetchUrl} />
 

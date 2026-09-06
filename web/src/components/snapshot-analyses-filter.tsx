@@ -48,6 +48,7 @@ export function SnapshotAnalysesFilter(props: SnapshotAnalysesFilterProps) {
         const active = kind === currentKind;
         return (
           <Link
+            prefetch={false}
             key={kind || "all"}
             href={href}
             className={cn(

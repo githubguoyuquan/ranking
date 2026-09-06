@@ -1,5 +1,6 @@
+import { HealthSummaryQuery } from '../ops/queries/health-summary.query';
+import { OptionalQueryCache } from '../lib/query/optional-query-cache';
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
 import { ClickhouseService } from '../analytics/clickhouse.service';
 import { KafkaProducerService } from '../kafka/kafka-producer.service';
 import { toPlainJson } from '../lib/json';
@@ -15,6 +16,7 @@ import { TrendAnomalyService } from '../rankings/trend-anomaly.service';
 
 @Injectable()
 export class BiService {
+  private readonly optional = new OptionalQueryCache();
   constructor(
     private readonly prisma: PrismaService,
     private readonly readPrisma: PrismaReadService,
@@ -26,6 +28,7 @@ export class BiService {
     private readonly qdrant: QdrantSearchService,
     private readonly observability: ObservabilityService,
     private readonly trendAnomaly: TrendAnomalyService,
+    private readonly healthSummary: HealthSummaryQuery,
   ) {}
 
   async getTopicTimeseries(days: number) {
@@ -109,13 +112,11 @@ export class BiService {
       outboxByType,
       scheduleEnabledSources,
       scheduleRuns24h,
-      dbPing,
-      redisPing,
-      chPing,
-      kafkaStatus,
-      esHealth,
-      chTopicTrend,
-      chMvHealth,
+      health,
+      chTrendSection,
+      chMvSection,
+      opsSection,
+      trendSection,
     ] = await Promise.all([
       this.prisma.topic.count(),
       this.prisma.entity.count(),
@@ -197,13 +198,11 @@ export class BiService {
       this.prisma.crawlScheduleRun.count({
         where: { scheduledAt: { gte: since24h } },
       }),
-      this.prisma.$queryRaw<{ n: number }[]>(Prisma.sql`SELECT 1 AS n`),
-      this.redisHealth.ping(),
-      this.clickhouse.ping(),
-      this.kafka.ping(),
-      this.elastic.ping(),
-      this.clickhouse.queryTopicPopularityTrend(chartDays),
-      this.clickhouse.queryMvHealth(),
+      this.healthSummary.get(),
+      this.optional.get(`ch-topic-${chartDays}`, async () => { if (!this.clickhouse.isEnabled()) throw new Error('ClickHouse not configured'); return this.clickhouse.queryTopicPopularityTrend(chartDays); }, 60000),
+      this.optional.get('ch-mv', async () => { const value = await this.clickhouse.queryMvHealth(); if (!value.ok) throw new Error('ClickHouse unavailable'); return value; }, 60000),
+      this.optional.get('observability', () => this.observability.getSummary() as Promise<Record<string, unknown>>, 15000),
+      this.optional.get('trends', () => this.trendAnomaly.scanRecentAnomalies({ hours: 48 }), 30000),
     ]);
 
     const rankingQueue = Object.fromEntries(
@@ -211,8 +210,10 @@ export class BiService {
     );
 
     const primarySearch = resolveSearchPrimary(this.qdrant, this.elastic);
-    const opsSummary = (await this.observability.getSummary()) as Record<string, unknown>;
-    const trendScan = await this.trendAnomaly.scanRecentAnomalies({ hours: 48 });
+    const opsSummary = opsSection.data ?? { status: 'unavailable', alerts: [], outbox: null, crawl: null };
+    const trendScan = trendSection.data;
+    const chTopicTrend = chTrendSection.data ?? [];
+    const chMvHealth = chMvSection.data;
 
     const topicIds = [...new Set(chTopicTrend.map((r) => r.topic_id))];
     const topicMeta =
@@ -239,13 +240,10 @@ export class BiService {
         scheduleRuns24h,
         searchPrimary: primarySearch,
       },
-      health: {
-        postgresql: { ok: dbPing[0]?.n === 1 },
-        redis: redisPing,
-        clickhouse: chPing,
-        kafka: kafkaStatus,
-        elasticsearch: esHealth,
-      },
+      health: health.services,
+      sections: { clickhouseTrend: { status: chTrendSection.status, sampledAt: chTrendSection.sampledAt },
+        clickhouseMv: { status: chMvSection.status, sampledAt: chMvSection.sampledAt },
+        observability: { status: opsSection.status, sampledAt: opsSection.sampledAt }, trends: { status: trendSection.status, sampledAt: trendSection.sampledAt } },
       observability: {
         status: opsSummary.status,
         alerts: opsSummary.alerts,
@@ -253,11 +251,11 @@ export class BiService {
         crawl: opsSummary.crawl,
       },
       trends: {
-        status: trendScan.status,
-        alerts: trendScan.anomalies.slice(0, 20),
-        anomalyCount: trendScan.anomalies.length,
-        scannedAnalyses: trendScan.scannedAnalyses,
-        thresholds: trendScan.thresholds,
+        status: trendScan?.status ?? 'unavailable',
+        alerts: trendScan?.anomalies.slice(0, 20) ?? [],
+        anomalyCount: trendScan?.anomalies.length ?? null,
+        scannedAnalyses: trendScan?.scannedAnalyses ?? null,
+        thresholds: trendScan?.thresholds ?? null,
       },
       crawlGlobal: {
         ...(opsSummary.crawl as object),

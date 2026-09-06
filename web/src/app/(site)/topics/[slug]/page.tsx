@@ -12,11 +12,7 @@ import {
 } from "@/components/ui/card";
 import { SnapshotBarChart } from "@/components/snapshot-bar-chart";
 import { TopicTimeWindowTabs } from "@/components/topic-time-window-tabs";
-import {
-  nestV1TopicLeaderboardPath,
-  nestV1TopicPath,
-  nestV1TopicSnapshotsPath,
-} from "@/lib/nest-api-paths";
+import { nestV1TopicOverviewPath } from "@/lib/nest-api-paths";
 import { buildSiteMetadata } from "@/lib/site-metadata";
 import { siteFetchJson } from "@/lib/site-api";
 import { siteEntityPath, siteSnapshotPath } from "@/lib/site-web-paths";
@@ -53,40 +49,20 @@ export default async function TopicPage({
   const q = new URLSearchParams();
   if (sp.timeWindow?.trim()) q.set("timeWindow", sp.timeWindow.trim());
   if (sp.version?.trim()) q.set("version", sp.version.trim());
-  if (!q.has("includeAiStats")) q.set("includeAiStats", "1");
-
-  const [topicRes, lbRes] = await Promise.all([
-    siteFetchJson<{
-      title?: string;
-      slug?: string;
-      kind?: string;
-      kindStrategy?: { description?: string };
-    }>(nestV1TopicPath(slug)),
-    siteFetchJson<{
-      resolved?: {
-        topicTitle?: string;
-        timeWindow?: string;
-        topicVersion?: string;
-      };
-      snapshot?: {
-        id?: string;
-        snapshotTime?: string;
-        confidenceScore?: number;
-        items?: LeaderboardItem[];
-      };
-    }>(nestV1TopicLeaderboardPath(slug, q)),
-  ]);
-
-  if (!topicRes.ok && !lbRes.ok) notFound();
-
-  const topic = topicRes.ok ? topicRes.data : null;
-  const snapshot = lbRes.ok ? lbRes.data.snapshot : undefined;
-  const resolved = lbRes.ok ? lbRes.data.resolved : undefined;
-  const title = topic?.title ?? resolved?.topicTitle ?? slug;
-
-  const recentSnaps = await siteFetchJson<{
-    snapshots?: Array<{ id: string; snapshotTime?: string }>;
-  }>(nestV1TopicSnapshotsPath(slug, new URLSearchParams({ limit: "5" })));
+  const overview = await siteFetchJson<{
+    topic: { title: string; slug: string; kindStrategy?: { description?: string } };
+    leaderboard: { status: string; data: { resolved: { timeWindow?: string }; snapshot?: { id?: string; snapshotTime?: string; items?: LeaderboardItem[] } } | null };
+    recentSnapshots: { status: string; data: Array<{ id: string; snapshotTime?: string }> | null };
+  }>(nestV1TopicOverviewPath(slug, q));
+  if (!overview.ok) {
+    if (overview.status === 404) notFound();
+    return <p role="alert">话题加载失败，请稍后重试。</p>;
+  }
+  const { topic, leaderboard, recentSnapshots } = overview.data;
+  const snapshot = leaderboard.data?.snapshot;
+  const resolved = leaderboard.data?.resolved;
+  const title = topic.title;
+  const recentSnaps = { ok: recentSnapshots.status !== "unavailable", data: { snapshots: recentSnapshots.data ?? [] } };
 
   return (
     <div className="space-y-6">
@@ -124,7 +100,7 @@ export default async function TopicPage({
         </CardHeader>
         <CardContent>
           {!snapshot?.items?.length ? (
-            <p className="text-sm text-muted-foreground">该话题尚无排行快照。</p>
+            <p className="text-sm text-muted-foreground">{leaderboard.status === "unavailable" ? "排行榜暂时无法加载，请稍后重试。" : "该话题尚无排行快照。"}</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -193,6 +169,7 @@ export default async function TopicPage({
         </CardContent>
       </Card>
 
+      {recentSnapshots.status === "unavailable" ? <p role="alert">近期快照暂时无法加载。</p> : null}
       {recentSnaps.ok && recentSnaps.data.snapshots && recentSnaps.data.snapshots.length > 0 ? (
         <Card>
           <CardHeader>

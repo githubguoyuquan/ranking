@@ -1,4 +1,5 @@
 "use client";
+import { useResourcePolling } from "@/hooks/use-resource-polling";
 
 import { useAdminChrome } from "@/components/admin-chrome-context";
 import { Button } from "@/components/ui/button";
@@ -105,7 +106,7 @@ export function BiDashboard() {
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(true);
   const [lastFetch, setLastFetch] = useState<Date | null>(null);
-  const [clock, setClock] = useState(() => new Date());
+  const [clock, setClock] = useState<Date | null>(null);
   const [drill, setDrill] = useState<BiDrillTarget>(null);
 
   const lineRef = useRef<HTMLDivElement>(null);
@@ -114,34 +115,33 @@ export function BiDashboard() {
   const chRef = useRef<HTMLDivElement>(null);
   const outboxRef = useRef<HTMLDivElement>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (signal?: AbortSignal) => {
     try {
       const res = await fetch(adminBiOverviewUrl(), {
+        signal,
         cache: "no-store",
         headers: apiHeaders(),
       });
       const text = await res.text();
+      if (signal?.aborted) return;
       if (!res.ok) {
-        setErr(`HTTP ${res.status}: ${text.slice(0, 200)}`);
-        return;
+        throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
       }
       setData(JSON.parse(text) as BiOverview);
       setErr("");
       setLastFetch(new Date());
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      if (!signal?.aborted) setErr(e instanceof Error ? e.message : String(e));
+      throw e;
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   }, []);
 
-  useEffect(() => {
-    void load();
-    const t = setInterval(() => void load(), REFRESH_MS);
-    return () => clearInterval(t);
-  }, [load]);
+  const refreshOverview = useResourcePolling(signal => load(signal), { key: "bi-overview", enabled: true, intervalMs: REFRESH_MS });
 
   useEffect(() => {
+    setClock(new Date());
     const t = setInterval(() => setClock(new Date()), 1000);
     return () => clearInterval(t);
   }, []);
@@ -373,7 +373,7 @@ export function BiDashboard() {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-mono text-lg tabular-nums text-[#9cdcfe]">
-              {formatClock(clock)}
+              {clock ? formatClock(clock) : "—"}
             </span>
             <Button
               type="button"
@@ -382,7 +382,7 @@ export function BiDashboard() {
               className="border-white/15 bg-black/40 text-[#f0f0f0] hover:bg-white/10"
               onClick={() => {
                 setLoading(true);
-                void load();
+                refreshOverview();
               }}
               disabled={loading}
             >
@@ -418,6 +418,13 @@ export function BiDashboard() {
           </div>
         </header>
 
+        {data?.sections ? Object.entries(data.sections).filter(([, section]) => section.status !== "ok").map(([key, section]) => (
+          <p key={key} role="status" className="rounded-lg border border-amber-500/40 px-3 py-2 text-sm text-amber-100">
+            {({ clickhouseTrend: "趋势图", clickhouseMv: "分析存储", observability: "运维摘要", trends: "趋势告警" } as Record<string, string>)[key] ?? key}
+            ：{section.status === "stale" ? "暂时无法更新，显示上次采样" : "暂时不可用"}
+            {section.sampledAt ? `（${new Date(section.sampledAt).toLocaleTimeString()}）` : ""}
+          </p>
+        )) : null}
         {err ? (
           <p className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-100">
             {err}
@@ -610,7 +617,7 @@ export function BiDashboard() {
                   全球爬虫
                 </h2>
                 <p>
-                  调度 {data.crawlGlobal?.scheduler.enabled ? "开启" : "关闭"}
+                  调度 {data.crawlGlobal?.scheduler ? (data.crawlGlobal.scheduler.enabled ? "开启" : "关闭") : "暂时不可用"}
                 </p>
                 <ul className="mt-2 space-y-1 text-xs">
                   {(data.crawlGlobal?.sourcesByRegion ?? []).map((r) => (

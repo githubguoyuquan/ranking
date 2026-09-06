@@ -1,4 +1,7 @@
 "use client";
+import { useResourcePolling } from "@/hooks/use-resource-polling";
+import { queryJson, adminApiHeaders } from "@/lib/query-http";
+import { apiUrl } from "@/lib/api";
 
 import { useAdminChrome } from "@/components/admin-chrome-context";
 import { Button } from "@/components/ui/button";
@@ -14,9 +17,6 @@ import { adminCrawlOverviewUrl } from "@/lib/backend-api-urls";
 import { isDecimalBigIntIdString } from "@/lib/decimal-id";
 import {
   nestCrawlSourcesListUrl,
-  nestCrawlSourceUrlsUrl,
-  nestCrawlTasksListUrl,
-  nestCrawlTaskUrl,
   nestCrawlTasksUrl,
 } from "@/lib/nest-api-urls";
 import { cn } from "@/lib/utils";
@@ -67,8 +67,8 @@ type LogKind = "pulse" | "ingest" | "task" | "warn" | "ops";
 type LogLine = { id: string; t: number; kind: LogKind; msg: string };
 
 const MAX_LOG = 100;
-const POLL_HYPER_MS = 850;
-const POLL_CALM_MS = 2600;
+const POLL_HYPER_MS = 3000;
+const POLL_CALM_MS = 10000;
 
 function parseSourcesJson(text: string): SourceRow[] {
   try {
@@ -406,6 +406,8 @@ export function CrawlMonitorDashboard() {
   const [recentTasks, setRecentTasks] = useState<CrawlTaskBrief[]>([]);
   const [lastApiPulse, setLastApiPulse] = useState<number | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
+  const [overviewError, setOverviewError] = useState(false);
+  const [sourcesError, setSourcesError] = useState(false);
   const [overview, setOverview] = useState<CrawlOverview | null>(null);
 
   const [taskWatchId, setTaskWatchId] = useState("");
@@ -417,13 +419,9 @@ export function CrawlMonitorDashboard() {
   const [dispatchBusy, setDispatchBusy] = useState(false);
 
   const [log, setLog] = useState<LogLine[]>([]);
-  const logBoot = useRef(false);
+  const resolvedSourceId = useRef("");
   const seenUrlIds = useRef<Set<string>>(new Set());
   const prevTaskStatus = useRef<string | null>(null);
-  const idleStreak = useRef(0);
-  const noSourcePing = useRef(false);
-  const taskListStatusRef = useRef<Map<string, string>>(new Map());
-
   const pushLog = useCallback((msg: string, kind: LogKind = "pulse") => {
     setLog((prev) => {
       const row: LogLine = {
@@ -437,182 +435,70 @@ export function CrawlMonitorDashboard() {
     });
   }, []);
 
-  const pollMs = hyperSync ? POLL_HYPER_MS : POLL_CALM_MS;
+  const activeTasks = recentTasks.some(t => t.status === "queued" || t.status === "running");
+  const pollMs = hyperSync || activeTasks ? POLL_HYPER_MS : POLL_CALM_MS;
+  const selectedKey = selectedSourceId.trim();
+  const watchedKey = taskWatchId.trim();
+  const watchedComplete = taskView?.id === watchedKey && ["completed", "failed"].includes(taskView.status ?? "");
 
-  useEffect(() => {
-    if (sources.length === 0) return;
-    setSelectedSourceId((prev) => {
-      if (prev && sources.some((s) => s.id === prev)) return prev;
-      return sources[0].id;
-    });
-  }, [sources]);
-
-  const pulseTick = useCallback(async () => {
-    if (!liveRelay) return;
-    setApiError(null);
+  const refreshMonitor = useResourcePolling(async signal => {
+    const q = new URLSearchParams({ urlsLimit: String(Math.min(CRAWL_SOURCE_URLS_PREVIEW_LIMIT, 50)), tasksLimit: "12" });
+    const sid = selectedKey || resolvedSourceId.current;
+    if (sid) q.set("sourceId", sid);
+    if (isDecimalBigIntIdString(watchedKey) && !watchedComplete) q.set("watchTaskId", watchedKey);
     try {
-      const ovRes = await fetch(adminCrawlOverviewUrl(), { cache: "no-store" });
-      if (ovRes.ok) {
-        setOverview(parseOverviewJson(await ovRes.text()));
+      const result = await queryJson<{
+        selectedSource: { id: string; name: string } | null;
+        urls: { status: string; data: CrawledUrlRow[] | null };
+        tasks: { status: string; data: CrawlTaskBrief[] | null };
+        watchedTask?: { data: CrawlTaskRow | null };
+        meta: { partial: boolean };
+      }>(apiUrl(`/admin/crawl/monitor?${q}`), signal);
+      if (signal.aborted) return;
+      if (resolvedSourceId.current !== (result.selectedSource?.id ?? "")) {
+        setUrlRows([]); setRecentTasks([]); seenUrlIds.current = new Set();
       }
-
-      const sRes = await fetch(
-        nestCrawlSourcesListUrl(CRAWL_SOURCES_LIST_LIMIT_DEFAULT),
-        { cache: "no-store" },
-      );
-      const sText = await sRes.text();
-      if (!sRes.ok) {
-        setApiError(`sources HTTP ${sRes.status}`);
-        pushLog(`遥测异常 · sources ${sRes.status}`, "warn");
-        return;
-      }
-      const nextSources = parseSourcesJson(sText);
-      setSources(nextSources);
-
-      let sid = selectedSourceId.trim();
-      if (!sid && nextSources[0]) sid = nextSources[0].id;
-      if (
-        sid &&
-        nextSources.length > 0 &&
-        !nextSources.some((x) => x.id === sid)
-      ) {
-        sid = nextSources[0].id;
-        setSelectedSourceId(sid);
-      }
-
-      if (!sid) {
-        setUrlRows([]);
-        setRecentTasks([]);
-        setLastApiPulse(Date.now());
-        if (!noSourcePing.current) {
-          noSourcePing.current = true;
-          pushLog("遥测在线 · 当前无数据源（可在经典爬虫页登记 source）", "warn");
+      resolvedSourceId.current = result.selectedSource?.id ?? "";
+      setApiError(result.meta.partial ? "部分动态数据暂时不可用，保留上次结果。" : null);
+      if (result.urls.data) {
+        const nextIds = new Set(result.urls.data.map(r => r.id));
+        for (const row of result.urls.data) {
+          if (seenUrlIds.current.size && !seenUrlIds.current.has(row.id)) pushLog(`INGEST 新 URL #${row.id} · ${row.status ?? "?"}`, "ingest");
         }
-        return;
+        seenUrlIds.current = nextIds;
+        setUrlRows(result.urls.data);
       }
-      noSourcePing.current = false;
-
-      const uRes = await fetch(
-        nestCrawlSourceUrlsUrl(sid, CRAWL_SOURCE_URLS_PREVIEW_LIMIT),
-        { cache: "no-store" },
-      );
-      const uText = await uRes.text();
-      if (!uRes.ok) {
-        setApiError(`urls HTTP ${uRes.status}`);
-        pushLog(`遥测异常 · urls ${uRes.status}`, "warn");
-        return;
-      }
-      const rows = parseUrlsJson(uText);
-      setUrlRows(rows);
-
-      if (!logBoot.current) {
-        logBoot.current = true;
-        rows.forEach((r) => seenUrlIds.current.add(r.id));
-        pushLog(
-          `中继在线 · 同步 ${nextSources.length} 源 · 信道 ${sid}`,
-          "pulse",
-        );
-      } else {
-        let novel = 0;
-        for (const r of rows) {
-          if (!seenUrlIds.current.has(r.id)) {
-            seenUrlIds.current.add(r.id);
-            novel++;
-            pushLog(
-              `INGEST 新 URL #${r.id} · ${r.status ?? "?"} · ${r.url.slice(0, 72)}${r.url.length > 72 ? "…" : ""}`,
-              "ingest",
-            );
-          }
-        }
-        if (novel === 0) {
-          idleStreak.current += 1;
-          if (idleStreak.current % 5 === 0) {
-            pushLog(
-              `φ 信道稳态 · ${rows.length} 条样本 · ${formatClock(Date.now())}`,
-              "pulse",
-            );
-          }
-        } else {
-          idleStreak.current = 0;
-        }
-      }
-
-      const taskListUrl = nestCrawlTasksListUrl(12, sid);
-      const taskRes = await fetch(taskListUrl, { cache: "no-store" });
-      if (taskRes.ok) {
-        const tasks = parseTasksListJson(await taskRes.text());
-        setRecentTasks(tasks);
-        const allowTaskDiff = logBoot.current;
-        for (const t of tasks) {
-          const prev = taskListStatusRef.current.get(t.id);
-          if (
-            allowTaskDiff &&
-            prev !== undefined &&
-            prev !== t.status
-          ) {
-            pushLog(`TASK #${t.id} 状态 ${prev}→${t.status}`, "task");
-          }
-          taskListStatusRef.current.set(t.id, t.status);
-        }
-        const keep = new Set(tasks.map((x) => x.id));
-        for (const k of taskListStatusRef.current.keys()) {
-          if (!keep.has(k)) taskListStatusRef.current.delete(k);
-        }
-      } else {
-        setRecentTasks([]);
-      }
-
+      if (result.tasks.data) setRecentTasks(result.tasks.data);
+      if (result.watchedTask?.data) {
+        const task = result.watchedTask.data;
+        if (prevTaskStatus.current && prevTaskStatus.current !== task.status) pushLog(`TASK #${task.id} → ${task.status}`, "task");
+        prevTaskStatus.current = task.status;
+        setTaskView(task);
+      } else if (!watchedKey) setTaskView(null);
       setLastApiPulse(Date.now());
-    } catch (e) {
-      const m = e instanceof Error ? e.message : String(e);
-      setApiError(m);
-      pushLog(`链路抖动 · ${m}`, "warn");
-    }
-  }, [liveRelay, pushLog, selectedSourceId]);
-
-  useEffect(() => {
-    if (!liveRelay) return;
-    void pulseTick();
-    const id = window.setInterval(() => void pulseTick(), pollMs);
-    return () => clearInterval(id);
-  }, [liveRelay, pollMs, pulseTick]);
-
-  useEffect(() => {
-    const id = taskWatchId.trim();
-    if (!liveRelay || !id || !isDecimalBigIntIdString(id)) {
-      setTaskView(null);
-      prevTaskStatus.current = null;
-      return;
-    }
-    let cancelled = false;
-    const pollTask = async () => {
-      try {
-        const res = await fetch(nestCrawlTaskUrl(id), { cache: "no-store" });
-        const text = await res.text();
-        if (cancelled) return;
-        if (!res.ok) {
-          pushLog(`TASK 查询失败 ${res.status}`, "warn");
-          return;
-        }
-        const t = parseTaskJson(text);
-        setTaskView(t);
-        if (t && t.status !== prevTaskStatus.current) {
-          if (prevTaskStatus.current != null) {
-            pushLog(`TASK #${t.id.slice(-8)} 状态迁移 → ${t.status}`, "task");
-          }
-          prevTaskStatus.current = t.status;
-        }
-      } catch {
-        if (!cancelled) pushLog("TASK 查询异常", "warn");
+      if (result.meta.partial) throw new Error("部分动态数据暂时不可用，保留上次结果。");
+    } catch (error) {
+      if (!signal.aborted) {
+        if (!selectedKey && error instanceof Error && error.message.includes("404")) resolvedSourceId.current = "";
+        setApiError(error instanceof Error ? error.message : "动态数据加载失败");
       }
-    };
-    void pollTask();
-    const handle = window.setInterval(() => void pollTask(), pollMs);
-    return () => {
-      cancelled = true;
-      clearInterval(handle);
-    };
-  }, [liveRelay, taskWatchId, pollMs, pushLog]);
+      throw error;
+    }
+  }, { key: `monitor:${selectedKey}:${watchedKey}`, enabled: liveRelay, intervalMs: pollMs });
+
+  const refreshOverview = useResourcePolling(async signal => {
+    try {
+      const result = await queryJson<unknown>(adminCrawlOverviewUrl(), signal);
+      if (!signal.aborted) { setOverview(parseOverviewJson(JSON.stringify(result))); setOverviewError(false); }
+    } catch (error) { if (!signal.aborted) setOverviewError(true); throw error; }
+  }, { key: "crawl-overview", enabled: liveRelay, intervalMs: 20000 });
+
+  useResourcePolling(async signal => {
+    try {
+      const result = await queryJson<unknown>(nestCrawlSourcesListUrl(CRAWL_SOURCES_LIST_LIMIT_DEFAULT), signal);
+      if (!signal.aborted) { setSources(parseSourcesJson(JSON.stringify(result))); setSourcesError(false); }
+    } catch (error) { if (!signal.aborted) setSourcesError(true); throw error; }
+  }, { key: "crawl-sources", enabled: liveRelay, intervalMs: 60000 });
 
   useEffect(() => {
     if (sources.length && !dispatchSourceId.trim()) {
@@ -636,7 +522,7 @@ export function CrawlMonitorDashboard() {
     try {
       const res = await fetch(nestCrawlTasksUrl(), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { ...adminApiHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({
           sourceId: sid,
           async: dispatchAsync,
@@ -648,6 +534,8 @@ export function CrawlMonitorDashboard() {
         pushLog(`OPS 拒绝 · HTTP ${res.status} ${text.slice(0, 120)}`, "warn");
         return;
       }
+      refreshMonitor();
+      refreshOverview();
       const task = parseTaskJson(text);
       if (task?.id) {
         setTaskWatchId(task.id);
@@ -1037,8 +925,8 @@ export function CrawlMonitorDashboard() {
                 <div className="flex flex-wrap gap-2">
                   <Label className="sr-only">当前 source</Label>
                   <select
-                    value={selectedSourceId}
-                    onChange={(e) => setSelectedSourceId(e.target.value)}
+                    value={selectedSourceId || resolvedSourceId.current}
+                    onChange={(e) => { setSelectedSourceId(e.target.value); setUrlRows([]); setRecentTasks([]); seenUrlIds.current = new Set(); }}
                     className="min-w-[12rem] flex-1 rounded-md border border-white/15 bg-black/55 px-3 py-2 text-sm text-[#9cdcfe]"
                   >
                     {sources.length === 0 ? (
@@ -1052,6 +940,9 @@ export function CrawlMonitorDashboard() {
                     )}
                   </select>
                 </div>
+                {overviewError || sourcesError ? <p role="status" className="text-xs text-[#dcdcaa]">
+                  {overviewError ? "全局概要暂时无法更新。" : ""}{sourcesError ? "信源列表暂时无法更新。" : ""}
+                </p> : null}
                 {apiError ? (
                   <p className="text-xs text-[#dcdcaa]">{apiError}</p>
                 ) : null}

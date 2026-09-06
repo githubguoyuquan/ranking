@@ -1,3 +1,8 @@
+import { Prisma } from '@prisma/client';
+import { rankingHistorySummary } from '../domain/ranking-history-summary';
+import type { AuthenticatedRequestContext } from '../compliance/compliance-auth.types';
+import { entityWhereForAuth, topicWhereForAuth } from '../compliance/tenant-scope';
+import { redactEntityRecord } from '../compliance/entity-pii';
 import {
   BadRequestException,
   Injectable,
@@ -33,226 +38,74 @@ export class OpsAnalyticsService {
 
   async getEntityTimeline(
     entityId: bigint,
-    opts: {
-      topicSlugs?: string[];
-      timeWindow?: TimeWindow;
-      topicsLimit?: number;
-      pointsLimit?: number;
-      metricsLimit?: number;
-    } = {},
+    opts: { topicSlugs?: string[]; timeWindow?: TimeWindow; topicsLimit?: number; pointsLimit?: number; metricsLimit?: number } = {},
+    auth?: AuthenticatedRequestContext | null,
   ) {
-    const entity = await this.prisma.entity.findUnique({
-      where: { id: entityId },
-      select: { id: true, canonicalName: true, type: true },
+    const entity = await this.prisma.entity.findFirst({
+      where: { id: entityId, ...entityWhereForAuth(auth) },
+      select: { id: true, canonicalName: true, type: true, piiLevel: true },
     });
     if (!entity) throw new NotFoundException('entity not found');
-
     const topicsLimit = Math.min(Math.max(opts.topicsLimit ?? 5, 1), 10);
     const pointsLimit = Math.min(Math.max(opts.pointsLimit ?? 40, 1), 200);
     const metricsLimit = Math.min(Math.max(opts.metricsLimit ?? 30, 1), 100);
-
-    const slugFilter = opts.topicSlugs?.map((s) => s.trim()).filter(Boolean) ?? [];
-    let topicFilterIds: bigint[] | undefined;
-    if (slugFilter.length > 0) {
-      const topics = await this.prisma.topic.findMany({
-        where: { slug: { in: slugFilter } },
-        select: { id: true, slug: true },
+    const slugFilter = [...new Set(opts.topicSlugs?.map(s => s.trim()).filter(Boolean) ?? [])];
+    if (slugFilter.length > 10) throw new BadRequestException('at most 10 topicSlugs');
+    if (slugFilter.length) {
+      const visible = await this.prisma.topic.findMany({
+        where: { ...topicWhereForAuth(auth), slug: { in: slugFilter } }, select: { id: true },
       });
-      topicFilterIds = topics.map((t) => t.id);
-      if (topicFilterIds.length === 0) {
-        throw new BadRequestException('no topics matched topicSlugs filter');
-      }
+      if (visible.length !== slugFilter.length) throw new NotFoundException('topic not found');
     }
-
-    const historyWhere = {
-      entityId,
-      ...(opts.timeWindow ? { timeWindow: opts.timeWindow } : {}),
-      ...(topicFilterIds ? { topicId: { in: topicFilterIds } } : {}),
-    };
-
-    const topicCountsRaw = await this.readPrisma.rankingItemHistory.groupBy({
-      by: ['topicId'],
-      where: historyWhere,
-      _count: { _all: true },
-    });
-    const topicCounts = topicCountsRaw
-      .slice()
-      .sort((a, b) => {
-        const ca =
-          typeof a._count === 'object' && a._count != null && '_all' in a._count
-            ? (a._count._all ?? 0)
-            : 0;
-        const cb =
-          typeof b._count === 'object' && b._count != null && '_all' in b._count
-            ? (b._count._all ?? 0)
-            : 0;
-        return cb - ca;
-      })
-      .slice(0, topicsLimit);
-
-    const topicIds = topicCounts.map((r) => r.topicId);
-    const topics =
-      topicIds.length === 0
-        ? []
-        : await this.prisma.topic.findMany({
-            where: { id: { in: topicIds } },
-            select: { id: true, slug: true, title: true },
-          });
-    const topicById = new Map(topics.map((t) => [t.id.toString(), t]));
-
-    const statsRows =
-      topicIds.length === 0
-        ? []
-        : await this.readPrisma.entityTopicStats.findMany({
-            where: {
-              entityId,
-              topicId: { in: topicIds },
-              ...(opts.timeWindow ? { timeWindow: opts.timeWindow } : {}),
-            },
-          });
-    const statsByTopic = new Map(
-      statsRows.map((s) => [`${s.topicId.toString()}:${s.timeWindow}`, s]),
-    );
-
-    const series: Array<{
-      topicId: string;
-      topicSlug: string;
-      topicTitle: string;
-      pointCount: number;
-      timeWindow: TimeWindow | null;
-      summary: Record<string, unknown> | null;
-      points: Array<{
-        asOf: string;
-        rank: number;
-        score: number;
-        snapshotId: string;
-        timeWindow: TimeWindow;
-      }>;
-    }> = [];
-
+    // Bound topic discovery too: never load the tenant's entire topic catalogue into Node.
+    const topics = await this.readPrisma.$queryRaw<Array<{ id: bigint; slug: string; title: string; pointCount: number }>>(Prisma.sql`
+      SELECT t.id, t.slug, t.title, COUNT(h.id)::int AS "pointCount"
+      FROM "Topic" t LEFT JOIN "RankingItemHistory" h ON h."topicId" = t.id AND h."entityId" = ${entityId}
+        ${opts.timeWindow ? Prisma.sql`AND h."timeWindow" = ${opts.timeWindow}::"TimeWindow"` : Prisma.empty}
+      WHERE true
+        ${auth?.tenantId ? Prisma.sql`AND t."tenantId" = ${auth.tenantId}` : Prisma.empty}
+        ${slugFilter.length ? Prisma.sql`AND t.slug IN (${Prisma.join(slugFilter)})` : Prisma.empty}
+      GROUP BY t.id, t.slug, t.title
+      ${slugFilter.length ? Prisma.empty : Prisma.sql`HAVING COUNT(h.id) > 0`}
+      ORDER BY COUNT(h.id) DESC, t.slug ASC LIMIT ${topicsLimit}
+    `);
+    const ids = topics.map(t => t.id);
+    type Point = { id: bigint; topicId: bigint; asOf: Date; rank: number; score: number; snapshotId: bigint; timeWindow: TimeWindow };
+    // A single bounded LATERAL query retrieves the last N points of every selected topic.
+    const [rows, statsRows, metrics] = await Promise.all([
+      ids.length ? this.readPrisma.$queryRaw<Point[]>(Prisma.sql`
+        SELECT h.* FROM unnest(ARRAY[${Prisma.join(ids)}]::bigint[]) AS t("topicId")
+        CROSS JOIN LATERAL (
+          SELECT id, "topicId", "asOf", rank, score, "snapshotId", "timeWindow"
+          FROM "RankingItemHistory"
+          WHERE "entityId" = ${entityId} AND "topicId" = t."topicId"
+          ${opts.timeWindow ? Prisma.sql`AND "timeWindow" = ${opts.timeWindow}::"TimeWindow"` : Prisma.empty}
+          ORDER BY "asOf" DESC, id DESC LIMIT ${pointsLimit}
+        ) h ORDER BY h."topicId", h."asOf", h.id
+      `) : Promise.resolve([] as Point[]),
+      ids.length ? this.readPrisma.entityTopicStats.findMany({ where: { entityId, topicId: { in: ids }, ...(opts.timeWindow ? { timeWindow: opts.timeWindow } : {}) } }) : Promise.resolve([]),
+      this.prisma.entityMetric.findMany({ where: { entityId }, orderBy: [{ observedAt: 'desc' }, { id: 'desc' }], take: metricsLimit }),
+    ]);
     const events: EntityTimelineEvent[] = [];
-
-    for (const tc of topicCounts) {
-      const topic = topicById.get(tc.topicId.toString());
-      if (!topic) continue;
-
-      const rows = await this.readPrisma.rankingItemHistory.findMany({
-        where: {
-          entityId,
-          topicId: tc.topicId,
-          ...(opts.timeWindow ? { timeWindow: opts.timeWindow } : {}),
-        },
-        orderBy: { asOf: 'desc' },
-        take: pointsLimit,
-        select: {
-          asOf: true,
-          rank: true,
-          score: true,
-          snapshotId: true,
-          timeWindow: true,
-        },
-      });
-      const pointsAsc = rows.slice().reverse();
-      const tw = opts.timeWindow ?? rows[0]?.timeWindow ?? null;
-      const statsKey = tw ? `${tc.topicId.toString()}:${tw}` : null;
-      const stats = statsKey ? statsByTopic.get(statsKey) : undefined;
-
-      const points = pointsAsc.map((p) => ({
-        asOf: p.asOf.toISOString(),
-        rank: p.rank,
-        score: p.score,
-        snapshotId: p.snapshotId.toString(),
-        timeWindow: p.timeWindow,
-      }));
-
-      for (const p of points) {
-        events.push({
-          type: 'rank',
-          at: p.asOf,
-          topicId: topic.id.toString(),
-          topicSlug: topic.slug,
-          label: `${topic.slug} 名次 #${p.rank}`,
-          meta: {
-            rank: p.rank,
-            score: p.score,
-            snapshotId: p.snapshotId,
-            timeWindow: p.timeWindow,
-          },
-        });
-      }
-
-      series.push({
-        topicId: topic.id.toString(),
-        topicSlug: topic.slug,
-        topicTitle: topic.title,
-        pointCount:
-          typeof tc._count === 'object' && tc._count != null && '_all' in tc._count
-            ? (tc._count._all ?? 0)
-            : 0,
-        timeWindow: tw,
-        summary: stats
-          ? {
-              bestRank: stats.bestRank,
-              worstRank: stats.worstRank,
-              currentStreakUp: stats.currentStreakUp,
-              currentStreakDown: stats.currentStreakDown,
-              lastRank: stats.lastRank,
-              lastAsOf: stats.lastAsOf?.toISOString() ?? null,
-              materialized: true,
-            }
-          : null,
-        points,
-      });
-    }
-
-    const metrics = await this.prisma.entityMetric.findMany({
-      where: { entityId },
-      orderBy: [{ observedAt: 'desc' }, { id: 'desc' }],
-      take: metricsLimit,
+    const topicSeries = topics.map(topic => {
+      const points = rows.filter(p => p.topicId === topic.id);
+      const window = opts.timeWindow ?? points[0]?.timeWindow ?? null;
+      const stats = statsRows.find(s => s.topicId === topic.id && s.timeWindow === window);
+      const summary = rankingHistorySummary(points, stats);
+      for (const p of points) events.push({ type: 'rank', at: p.asOf.toISOString(), topicId: String(topic.id), topicSlug: topic.slug,
+        label: `${topic.slug} 名次 #${p.rank}`, meta: { rank: p.rank, score: p.score, snapshotId: String(p.snapshotId) } });
+      return { topicId: String(topic.id), topicSlug: topic.slug, topicTitle: topic.title, pointCount: topic.pointCount,
+        timeWindow: window, summary: summary ? { ...summary, currentStreakUp: summary.endStreakRankImproving, currentStreakDown: summary.endStreakRankDeclining,
+          lastRank: stats?.lastRank ?? points.at(-1)?.rank ?? null, lastAsOf: stats?.lastAsOf ?? points.at(-1)?.asOf ?? null } : null,
+        points: points.map(p => ({ asOf: p.asOf, rank: p.rank, score: p.score, snapshotId: p.snapshotId, timeWindow: p.timeWindow })),
+      };
     });
-
-    for (const m of metrics) {
-      events.push({
-        type: 'metric',
-        at: m.observedAt.toISOString(),
-        label: `信号 ${m.metricKey} = ${m.value}`,
-        meta: {
-          metricKey: m.metricKey,
-          value: m.value,
-          unit: m.unit,
-          sourceTier: m.sourceTier,
-        },
-      });
-    }
-
-    events.sort((a, b) => b.at.localeCompare(a.at));
-
-    return toPlainJson({
-      entity: {
-        id: entity.id.toString(),
-        canonicalName: entity.canonicalName,
-        type: entity.type,
-      },
-      generatedAt: new Date().toISOString(),
-      filter: {
-        topicSlugs: slugFilter.length ? slugFilter : null,
-        timeWindow: opts.timeWindow ?? null,
-        topicsLimit,
-        pointsLimit,
-        metricsLimit,
-      },
-      topicSeries: series,
-      metrics: metrics.map((m) => ({
-        id: m.id.toString(),
-        metricKey: m.metricKey,
-        value: m.value,
-        unit: m.unit,
-        sourceTier: m.sourceTier,
-        observedAt: m.observedAt.toISOString(),
-      })),
-      events: events.slice(0, 150),
-      eventCount: events.length,
-    });
+    for (const m of metrics) events.push({ type: 'metric', at: m.observedAt.toISOString(), label: `信号 ${m.metricKey} = ${m.value}`,
+      meta: { metricKey: m.metricKey, value: m.value, unit: m.unit, sourceTier: m.sourceTier } });
+    events.sort((a,b) => b.at.localeCompare(a.at));
+    return toPlainJson({ entity: redactEntityRecord(entity, auth?.scopes ?? ['read']), generatedAt: new Date().toISOString(),
+      filter: { topicSlugs: slugFilter.length ? slugFilter : null, timeWindow: opts.timeWindow ?? null, topicsLimit, pointsLimit, metricsLimit },
+      topicSeries, metrics, events: events.slice(0,150), eventCount: events.length });
   }
 
   async compareTopicVersions(
@@ -435,6 +288,7 @@ export class OpsAnalyticsService {
       timeWindow?: TimeWindow;
       useLlm?: boolean;
     } = {},
+    auth?: AuthenticatedRequestContext | null,
   ) {
     const timeline = await this.getEntityTimeline(entityId, {
       topicSlugs: opts.topicSlugs,
@@ -442,7 +296,7 @@ export class OpsAnalyticsService {
       topicsLimit: 5,
       pointsLimit: 30,
       metricsLimit: 15,
-    }) as {
+    }, auth) as {
       entity: { id: string; canonicalName: string };
       topicSeries: Array<{
         topicSlug: string;

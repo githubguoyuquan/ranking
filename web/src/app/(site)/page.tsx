@@ -10,7 +10,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { nestV1TopicLeaderboardPath, nestV1TopicPath, nestV1TrendsHotPath } from "@/lib/nest-api-paths";
+import { nestV1TopicLeaderboardPath, nestV1TrendsHotPath } from "@/lib/nest-api-paths";
 import { buildSiteMetadata } from "@/lib/site-metadata";
 import { siteFetchJson } from "@/lib/site-api";
 import { SiteDevicePersonalization } from "@/components/site-device-personalization";
@@ -44,7 +44,7 @@ export const metadata: Metadata = buildSiteMetadata({
 });
 
 export default async function HomePage() {
-  const [hotRes, lbRes, topicRes] = await Promise.all([
+  const [hotRes, lbRes] = await Promise.all([
     siteFetchJson<{ items?: HotItem[] }>(
       nestV1TrendsHotPath(new URLSearchParams({ limit: "8" })),
     ),
@@ -56,15 +56,11 @@ export default async function HomePage() {
         items?: LeaderboardItem[];
       };
     }>(nestV1TopicLeaderboardPath(DEFAULT_TOPIC_SLUG)),
-    siteFetchJson<{ title?: string; slug?: string; kind?: string }>(
-      nestV1TopicPath(DEFAULT_TOPIC_SLUG),
-    ),
   ]);
 
   const hotItems = hotRes.ok && Array.isArray(hotRes.data.items) ? hotRes.data.items : [];
   const snapshot = lbRes.ok ? lbRes.data.snapshot : undefined;
   const topicTitle =
-    (topicRes.ok && topicRes.data.title) ||
     (lbRes.ok && lbRes.data.resolved?.topicTitle) ||
     "演示榜单";
 

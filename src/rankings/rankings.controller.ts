@@ -1,3 +1,5 @@
+import { TopicOverviewQuery } from './queries/topic-overview.query';
+import { SnapshotContextQuery } from './queries/snapshot-context.query';
 import {
   BadRequestException,
   Body,
@@ -76,15 +78,35 @@ export class CompareSnapshotsDto {
 
   /** 为每个快照列合并 `aiAnalysisCount` / `hasFollowupBrief` / `hasTrendBrief` / `hasCredibilityBrief` */
   @IsOptional()
-  @Transform(({ value }) => value === true || value === 'true' || value === '1')
+  @Transform(({ obj, key }) => {
+    const value: unknown = obj[key];
+    if (value === true || value === 'true' || value === '1') return true;
+    if (value === false || value === 'false' || value === '0') return false;
+    return value;
+  })
   @IsBoolean()
   includeAiStats?: boolean;
 }
 
 export class SnapshotQueryDto {
-  /** 合并 `AiAnalysis` 条数与 `hasFollowupBrief` / `hasTrendBrief` / `hasCredibilityBrief`（跳过快照 Redis 缓存读且本条响应不回写缓存） */
   @IsOptional()
-  @Transform(({ value }) => value === true || value === 'true' || value === '1')
+  @Transform(({ obj, key }) => {
+    const value: unknown = obj[key];
+    if (value === true || value === 'true' || value === '1') return true;
+    if (value === false || value === 'false' || value === '0') return false;
+    return value;
+  })
+  @IsBoolean()
+  includeNeighbors?: boolean;
+
+  /** 合并 `AiAnalysis` 条数与 `hasFollowupBrief` / `hasTrendBrief` / `hasCredibilityBrief`（复用快照缓存，独立读取当前 AI 统计） */
+  @IsOptional()
+  @Transform(({ obj, key }) => {
+    const value: unknown = obj[key];
+    if (value === true || value === 'true' || value === '1') return true;
+    if (value === false || value === 'false' || value === '0') return false;
+    return value;
+  })
   @IsBoolean()
   includeAiStats?: boolean;
 }
@@ -104,7 +126,12 @@ export class LeaderboardQueryDto {
 
   /** 嵌套 `snapshot` 合并 `aiAnalysisCount` / `has*Brief`（与 `GET /v1/snapshots/:id?includeAiStats=1` 行为一致） */
   @IsOptional()
-  @Transform(({ value }) => value === true || value === 'true' || value === '1')
+  @Transform(({ obj, key }) => {
+    const value: unknown = obj[key];
+    if (value === true || value === 'true' || value === '1') return true;
+    if (value === false || value === 'false' || value === '0') return false;
+    return value;
+  })
   @IsBoolean()
   includeAiStats?: boolean;
 }
@@ -256,10 +283,21 @@ export class RankingFollowupDispatchDto {
   timeWindow!: TimeWindow;
 }
 
+export class TopicOverviewQueryDto extends LeaderboardQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(10)
+  recentLimit?: number;
+}
+
 @Controller()
 export class RankingsController {
   constructor(
     private readonly rankings: RankingsService,
+    private readonly topicOverview: TopicOverviewQuery,
+    private readonly snapshotContext: SnapshotContextQuery,
     private readonly trendAnomaly: TrendAnomalyService,
   ) {}
 
@@ -356,6 +394,10 @@ export class RankingsController {
       auth: getAuthFromRequest(req),
     });
     if (!snap) throw new NotFoundException();
+    if (query.includeNeighbors) {
+      const navigation = await this.snapshotContext.neighbors(sid, getAuthFromRequest(req));
+      return { ...(snap as Record<string, unknown>), navigation };
+    }
     return snap;
   }
 
@@ -395,6 +437,11 @@ export class RankingsController {
   @Get('v1/rankings/realtime-window')
   realtimeWindow() {
     return toPlainJson(resolveRealtimeRankingWindow());
+  }
+
+  @Get('v1/topics/:slug/overview')
+  async overview(@Param('slug') slug: string, @Query() query: TopicOverviewQueryDto, @Req() req: Request) {
+    return this.topicOverview.get(slug, query, getAuthFromRequest(req));
   }
 
   @Get('v1/topics/:slug/leaderboard')

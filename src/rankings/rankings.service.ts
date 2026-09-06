@@ -1,3 +1,8 @@
+import { rankingHistorySummary } from '../domain/ranking-history-summary';
+import { entityWhereForAuth } from '../compliance/tenant-scope';
+import { redactEntityRecord } from '../compliance/entity-pii';
+import { resolveRealtimeRankingWindow } from '../domain/realtime-ranking-window';
+import { TopicRankingQuery, leaderboardResolved } from './queries/topic-ranking.query';
 import { BadRequestException, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -14,14 +19,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { PrismaReadService } from '../scale/prisma-read.service';
 import { RealtimePublisherService } from '../realtime/realtime-publisher.service';
 import {
-  isRealtimeTimeWindow,
-  resolveRealtimeRankingWindow,
-} from '../domain/realtime-ranking-window';
-import {
   aiConfidence,
   classifyTrend,
-  endStreakRankDeclining,
-  endStreakRankImproving,
   leastSquaresSlope,
   robustMinMaxNormalize,
   scoreEntity,
@@ -464,47 +463,27 @@ export class RankingsService {
     });
   }
 
-  /**
-   * HTTP API 用：优先读 Redis（与 DB 相同的 toPlainJson 形状）；缓存未命中再查库并回填。
-   * `includeAiStats` 时跳过缓存读且**不回写**缓存，并在 payload 上合并当前 `AiAnalysis` 统计（简报计数与跟进类标记）。
-   */
+  /** Cache immutable snapshot data; attach current AI statistics and redact only the response. */
   async getSnapshotForApi(
     id: bigint,
     opts?: { includeAiStats?: boolean; scopes?: ApiKeyScope[] },
   ): Promise<unknown | null> {
-    if (!opts?.includeAiStats) {
-      const cached = await this.rankingCache.getSnapshotJson(id);
-      if (cached) {
-        try {
-          const parsed = JSON.parse(cached) as unknown;
-          if (opts?.scopes?.length) {
-            redactSnapshotPlainForScopes(parsed, opts.scopes);
-          }
-          return parsed;
-        } catch {
-          /* 损坏条目，改走 DB */
-        }
-      }
+    let plain: unknown;
+    const cached = await this.rankingCache.getSnapshotJson(id);
+    if (cached) {
+      try { plain = JSON.parse(cached); } catch { /* Reload corrupt entries. */ }
     }
-
-    const snap = await this.loadSnapshotFull(id);
-    if (!snap) return null;
-    const plain = toPlainJson(snap);
-    if (opts?.scopes?.length) {
-      redactSnapshotPlainForScopes(plain, opts.scopes);
-    }
-
-    if (!opts?.includeAiStats) {
+    if (!plain) {
+      const snapshot = await this.loadSnapshotFull(id);
+      if (!snapshot) return null;
+      plain = toPlainJson(snapshot);
       await this.rankingCache.setSnapshotJson(id, JSON.stringify(plain));
-      return plain;
     }
-
-    const stats = await this.aiAnalysisQuickStatsForSnapshot(id);
-    const merged = { ...(plain as Record<string, unknown>), ...stats };
-    if (opts?.scopes?.length) {
-      redactSnapshotPlainForScopes(merged, opts.scopes);
-    }
-    return merged;
+    const payload = opts?.includeAiStats
+      ? { ...(plain as Record<string, unknown>), ...await this.aiAnalysisQuickStatsForSnapshot(id) }
+      : plain;
+    if (opts?.scopes?.length) redactSnapshotPlainForScopes(payload, opts.scopes);
+    return payload;
   }
 
   /** 带租户校验的快照 GET（API 密钥上下文） */
@@ -512,14 +491,15 @@ export class RankingsService {
     id: bigint,
     opts?: { includeAiStats?: boolean; auth?: AuthenticatedRequestContext | null },
   ): Promise<unknown | null> {
-    const snap = await this.loadSnapshotFull(id);
-    if (!snap) return null;
-    await assertTopicAccessible(snap.topicRanking.topicVersion.topic, opts?.auth);
-    const scopes = opts?.auth?.scopes ?? ['read'];
-    return this.getSnapshotForApi(id, {
-      includeAiStats: opts?.includeAiStats,
-      scopes,
-    });
+    // Authorize with a small current row, not a second full snapshot/items load.
+    const head = await this.prisma.topicRankSnapshot.findUnique({ where: { id }, select: {
+      confidenceScore: true, trendSummary: true, generatedByAi: true,
+      topicRanking: { select: { topicVersion: { select: { topic: { select: { tenantId: true } } } } } },
+    } });
+    if (!head) return null;
+    await assertTopicAccessible(head.topicRanking.topicVersion.topic, opts?.auth);
+    const payload = await this.getSnapshotForApi(id, { includeAiStats: opts?.includeAiStats, scopes: opts?.auth?.scopes ?? ['read'] });
+    return payload ? { ...(payload as Record<string, unknown>), confidenceScore: head.confidenceScore, trendSummary: head.trendSummary, generatedByAi: head.generatedByAi } : null;
   }
 
   private snapshotInclude() {
@@ -613,114 +593,16 @@ export class RankingsService {
     },
     auth?: AuthenticatedRequestContext | null,
   ): Promise<unknown | null> {
-    if (query.windowStart !== undefined && query.timeWindow === undefined) {
-      throw new BadRequestException('timeWindow is required when windowStart is set');
+    let context;
+    try {
+      context = await new TopicRankingQuery(this.prisma).resolve(slug, query, auth);
+    } catch (error) {
+      if (error instanceof NotFoundException) return null;
+      throw error;
     }
-
-    const qKey = {
-      version: query.version,
-      timeWindow: query.timeWindow,
-      windowStart: query.windowStart,
-      includeAiStats: query.includeAiStats === true,
-    };
-    const cacheKey = this.rankingCache.leaderboardKey(slug, qKey);
-    const cached = await this.rankingCache.getLeaderboardJson(cacheKey);
-    if (cached) {
-      try {
-        return JSON.parse(cached) as unknown;
-      } catch {
-        /* 损坏则重算 */
-      }
-    }
-
-    const topic = await this.prisma.topic.findFirst({
-      where: { slug, ...topicWhereForAuth(auth ?? undefined) },
-    });
-    if (!topic) return null;
-    await assertTopicAccessible(topic, auth ?? undefined);
-
-    const topicVersion = query.version
-      ? await this.prisma.topicVersion.findUnique({
-          where: { topicId_version: { topicId: topic.id, version: query.version } },
-        })
-      : await this.prisma.topicVersion.findFirst({
-          where: { topicId: topic.id },
-          orderBy: { effectiveFrom: 'desc' },
-        });
-    if (!topicVersion) return null;
-
-    let topicRanking: TopicRanking | null = null;
-
-    if (query.timeWindow !== undefined && query.windowStart !== undefined) {
-      topicRanking = await this.prisma.topicRanking.findFirst({
-        where: {
-          topicVersionId: topicVersion.id,
-          timeWindow: query.timeWindow,
-          windowStart: new Date(query.windowStart),
-          snapshots: { some: {} },
-        },
-      });
-    } else if (query.timeWindow !== undefined) {
-      topicRanking = await this.prisma.topicRanking.findFirst({
-        where: {
-          topicVersionId: topicVersion.id,
-          timeWindow: query.timeWindow,
-          status: 'completed',
-          snapshots: { some: {} },
-        },
-        orderBy: { windowStart: 'desc' },
-      });
-    } else {
-      topicRanking = await this.prisma.topicRanking.findFirst({
-        where: {
-          topicVersionId: topicVersion.id,
-          status: 'completed',
-          snapshots: { some: {} },
-        },
-        orderBy: { windowStart: 'desc' },
-      });
-    }
-
-    if (!topicRanking) return null;
-
-    const snapshot = await this.prisma.topicRankSnapshot.findFirst({
-      where: { topicRankingId: topicRanking.id },
-      orderBy: { snapshotTime: 'desc' },
-    });
-    if (!snapshot) return null;
-
-    const snapshotPayload = await this.getSnapshotForApiWithAuth(snapshot.id, {
-      includeAiStats: query.includeAiStats === true,
-      auth: auth ?? undefined,
-    });
-    if (!snapshotPayload) return null;
-
-    const body = {
-      resolved: {
-        topicSlug: topic.slug,
-        topicTitle: topic.title,
-        topicVersionId: topicVersion.id.toString(),
-        version: topicVersion.version,
-        timeWindow: topicRanking.timeWindow,
-        windowStart: topicRanking.windowStart.toISOString(),
-        windowEnd: topicRanking.windowEnd.toISOString(),
-        topicRankingId: topicRanking.id.toString(),
-        snapshotId: snapshot.id.toString(),
-        snapshotTime: snapshot.snapshotTime.toISOString(),
-        hasScoreModel: snapshot.scoreModelId != null,
-        ...(isRealtimeTimeWindow(topicRanking.timeWindow)
-          ? {
-              realtimeSemantics: resolveRealtimeRankingWindow(
-                topicRanking.windowEnd,
-              ).semantics,
-            }
-          : {}),
-      },
-      snapshot: snapshotPayload,
-    };
-
-    await this.rankingCache.setLeaderboardJson(cacheKey, JSON.stringify(body));
-    return body;
+    if (!context.snapshot) return null;
+    const snapshot = await this.getSnapshotForApiWithAuth(context.snapshot.id, { auth, includeAiStats: query.includeAiStats });
+    return snapshot ? { resolved: leaderboardResolved(context), snapshot } : null;
   }
 
   async getTopicRankingStatus(topicRankingId: bigint) {
@@ -1995,93 +1877,48 @@ export class RankingsService {
       },
     };
 
+    // Batched relation projection: only the requested preview and count, not full snapshots.
     const [totalMatching, topics] = await Promise.all([
       this.readPrisma.topic.count({ where: topicWhere }),
       this.readPrisma.topic.findMany({
-        where: topicWhere,
-        orderBy: { updatedAt: 'desc' },
-        skip: offset,
-        take: topicsLimit + 12,
-        select: { id: true, slug: true, title: true, kind: true, tenantId: true },
+        where: topicWhere, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }], skip: offset, take: topicsLimit + 12,
+        select: { id: true, slug: true, title: true, kind: true, tenantId: true,
+          versions: { orderBy: [{ effectiveFrom: 'desc' }, { id: 'desc' }], take: 1, select: { id: true, version: true,
+            rankings: { where: { status: 'completed', snapshots: { some: {} }, ...(opts.timeWindow ? { timeWindow: opts.timeWindow } : {}) },
+              orderBy: [{ windowStart: 'desc' }, { id: 'desc' }], take: 1,
+              select: { id: true, timeWindow: true, windowStart: true, windowEnd: true,
+                snapshots: { orderBy: [{ snapshotTime: 'desc' }, { id: 'desc' }], take: 1,
+                  select: { id: true, snapshotTime: true, scoreModelId: true, _count: { select: { items: true } },
+                    items: { orderBy: { rank: 'asc' }, take: previewLimit,
+                      select: { rank: true, rankChange: true, popularityScore: true, entity: { select: { id: true, canonicalName: true, piiLevel: true } } } },
+                  },
+                },
+              },
+            },
+          } },
+        },
       }),
     ]);
-
-    type PreviewItem = {
-      rank: number;
-      rankChange: number | null;
-      popularityScore: number;
-      entity: { id: string; canonicalName: string };
-    };
-
-    const boards: Array<{
-      topic: { id: string; slug: string; title: string; kind: string };
-      resolved: Record<string, unknown> | null;
-      snapshot: {
-        id: string;
-        snapshotTime: string;
-        itemCount: number;
-        preview: PreviewItem[];
-      };
-    }> = [];
-
+    const boards = [];
+    let scanned = 0;
     for (const topic of topics) {
       if (boards.length >= topicsLimit) break;
-      try {
-        await assertTopicAccessible(topic, auth);
-      } catch {
-        continue;
-      }
-
-      const lb = (await this.getLeaderboardForApi(
-        topic.slug,
-        { timeWindow: opts.timeWindow, includeAiStats: false },
-        auth,
-      )) as {
-        resolved?: Record<string, unknown>;
-        snapshot?: {
-          id?: string | bigint;
-          snapshotTime?: string | Date;
-          items?: Array<{
-            rank: number;
-            rankChange?: number | null;
-            popularityScore?: number;
-            entity?: { id?: string | bigint; canonicalName?: string | null };
-          }>;
-        };
-      } | null;
-
-      const snap = lb?.snapshot;
-      const items = snap?.items ?? [];
-      if (!snap?.id || items.length === 0) continue;
-
-      boards.push({
-        topic: {
-          id: topic.id.toString(),
-          slug: topic.slug,
-          title: topic.title,
-          kind: topic.kind,
+      scanned++;
+      const version = topic.versions[0], ranking = version?.rankings[0], snap = ranking?.snapshots[0];
+      if (!snap?.items.length || !version || !ranking) continue;
+      boards.push({ topic: { id: String(topic.id), slug: topic.slug, title: topic.title, kind: topic.kind },
+        resolved: { topicSlug: topic.slug, topicTitle: topic.title, topicVersionId: String(version.id), version: version.version,
+          topicRankingId: String(ranking.id), timeWindow: ranking.timeWindow, windowStart: ranking.windowStart.toISOString(), windowEnd: ranking.windowEnd.toISOString(),
+          snapshotId: String(snap.id), snapshotTime: snap.snapshotTime.toISOString(), hasScoreModel: snap.scoreModelId != null,
+          ...(ranking.timeWindow === 'REALTIME' ? { realtimeSemantics: resolveRealtimeRankingWindow(ranking.windowEnd).semantics } : {}),
         },
-        resolved: lb?.resolved ?? null,
-        snapshot: {
-          id: String(snap.id),
-          snapshotTime:
-            snap.snapshotTime instanceof Date
-              ? snap.snapshotTime.toISOString()
-              : String(snap.snapshotTime ?? ''),
-          itemCount: items.length,
-          preview: items.slice(0, previewLimit).map((row) => ({
-            rank: row.rank,
-            rankChange: row.rankChange ?? null,
-            popularityScore: row.popularityScore ?? 0,
-            entity: {
-              id: row.entity?.id != null ? String(row.entity.id) : '',
-              canonicalName: row.entity?.canonicalName ?? '',
-            },
-          })),
+        snapshot: { id: String(snap.id), snapshotTime: snap.snapshotTime.toISOString(), itemCount: snap._count.items,
+          preview: snap.items.map(row => ({ rank: row.rank, rankChange: row.rankChange, popularityScore: row.popularityScore,
+            entity: { id: String(row.entity.id), canonicalName: redactEntityRecord(row.entity, auth?.scopes ?? ['read']).canonicalName } })),
         },
       });
     }
-
+    const nextOffset = offset + scanned;
     return toPlainJson({
       filter: {
         topicsLimit,
@@ -2095,8 +1932,8 @@ export class RankingsService {
         offset,
         count: boards.length,
         totalMatching,
-        hasMore: offset + topicsLimit < totalMatching,
-        nextOffset: offset + topicsLimit < totalMatching ? offset + topicsLimit : null,
+        hasMore: scanned > 0 && nextOffset < totalMatching,
+        nextOffset: scanned > 0 && nextOffset < totalMatching ? nextOffset : null,
       },
       count: boards.length,
       boards,
@@ -2120,9 +1957,9 @@ export class RankingsService {
     });
     if (!topic) throw new NotFoundException('topic not found');
     await assertTopicAccessible(topic, auth);
-    const entity = await this.prisma.entity.findUnique({
-      where: { id: entityId },
-      select: { id: true, canonicalName: true, type: true },
+    const entity = await this.prisma.entity.findFirst({
+      where: { id: entityId, ...entityWhereForAuth(auth) },
+      select: { id: true, canonicalName: true, type: true, piiLevel: true },
     });
     if (!entity) throw new NotFoundException('entity not found');
 
@@ -2145,56 +1982,15 @@ export class RankingsService {
     });
     const points = rowsDesc.slice().reverse();
 
-    let summary:
-      | {
-          bestRank: number;
-          worstRank: number;
-          endStreakRankImproving: number;
-          endStreakRankDeclining: number;
-          pointCount: number;
-          materialized?: boolean;
-        }
-      | null = null;
-
     const twForStats = timeWindow ?? points[0]?.timeWindow;
-    if (twForStats) {
-      const statsRow = await this.readPrisma.entityTopicStats.findUnique({
-        where: {
-          entityId_topicId_timeWindow: {
-            entityId,
-            topicId: topic.id,
-            timeWindow: twForStats,
-          },
-        },
-      });
-      if (statsRow) {
-        summary = {
-          bestRank: statsRow.bestRank,
-          worstRank: statsRow.worstRank,
-          endStreakRankImproving: statsRow.currentStreakUp,
-          endStreakRankDeclining: statsRow.currentStreakDown,
-          pointCount: points.length,
-          materialized: true,
-        };
-      }
-    }
-
-    if (points.length > 0 && !summary) {
-      const ranks = points.map((p) => p.rank);
-      summary = {
-        bestRank: Math.min(...ranks),
-        worstRank: Math.max(...ranks),
-        endStreakRankImproving: endStreakRankImproving(points),
-        endStreakRankDeclining: endStreakRankDeclining(points),
-        pointCount: points.length,
-        materialized: false,
-      };
-    }
-
+    const stats = twForStats ? await this.readPrisma.entityTopicStats.findUnique({ where: {
+      entityId_topicId_timeWindow: { entityId, topicId: topic.id, timeWindow: twForStats },
+    } }) : null;
+    const summary = rankingHistorySummary(points, stats);
     return toPlainJson({
       entity: {
         id: entity.id.toString(),
-        canonicalName: entity.canonicalName,
+        canonicalName: redactEntityRecord(entity, auth?.scopes ?? ['read']).canonicalName,
         type: entity.type,
       },
       topic: { id: topic.id.toString(), slug: topic.slug },

@@ -67,6 +67,7 @@ export function SnapshotAnalysesPagination(props: SnapshotAnalysesPaginationProp
             </span>
           ) : (
             <Link
+            prefetch={false}
               key={n}
               href={hrefForLimit(n)}
               className={cn(
@@ -81,6 +82,7 @@ export function SnapshotAnalysesPagination(props: SnapshotAnalysesPaginationProp
       </span>
       {hasPrev ? (
         <Link
+            prefetch={false}
           href={hrefFor(page - 1)}
           className={cn(
             "rounded-md border border-border px-2 py-0.5",
@@ -96,6 +98,7 @@ export function SnapshotAnalysesPagination(props: SnapshotAnalysesPaginationProp
       )}
       {hasNext ? (
         <Link
+            prefetch={false}
           href={hrefFor(page + 1)}
           className={cn(
             "rounded-md border border-border px-2 py-0.5",

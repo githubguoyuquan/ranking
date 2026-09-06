@@ -178,9 +178,10 @@ export class IngestionService {
     });
   }
 
-  async listSources(limit = 50) {
+  async listSources(limit = 50, tenantId?: bigint) {
     const take = Math.min(Math.max(limit, 1), 100);
     return this.prisma.source.findMany({
+      where: tenantId !== undefined ? { tenantId } : {},
       orderBy: { id: 'desc' },
       take,
     });

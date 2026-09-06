@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -12,7 +13,6 @@ import {
 } from "@/components/ui/card";
 import { EntityRankLineChart } from "@/components/entity-rank-line-chart";
 import {
-  nestV1EntityRankHistoryPath,
   nestV1EntityTimelinePath,
   nestV1RecommendationsSimilarEntitiesPath,
 } from "@/lib/nest-api-paths";
@@ -48,45 +48,23 @@ export default async function EntityPage({
   const sp = (await searchParams) ?? {};
   const topicSlug = sp.topicSlug?.trim() || DEFAULT_TOPIC_SLUG;
 
-  const historyQ = new URLSearchParams();
-  historyQ.set("topicSlug", topicSlug);
-  historyQ.set("timeWindow", "WEEK");
-  historyQ.set("limit", "40");
-
-  const historyRes = await siteFetchJson<{
-    entity?: { id?: string; canonicalName?: string | null };
-    topic?: { slug?: string; title?: string };
-    points?: Array<{ asOf: string; rank: number }>;
-    summary?: {
-      bestRank?: number | null;
-      worstRank?: number | null;
-      endStreakRankImproving?: number | null;
-      endStreakRankDeclining?: number | null;
-    };
-  }>(nestV1EntityRankHistoryPath(id, historyQ));
-
-  const timelineQ = new URLSearchParams();
-  timelineQ.set("topicSlugs", topicSlug);
-  timelineQ.set("timeWindow", "WEEK");
-  timelineQ.set("pointsLimit", "20");
-
+  const timelineQ = new URLSearchParams({ topicSlugs: topicSlug, timeWindow: "WEEK", pointsLimit: "40", metricsLimit: "20" });
   const timelineRes = await siteFetchJson<{
+    entity: { id: string; canonicalName: string };
+    topicSeries: Array<{ topicSlug: string; topicTitle: string; points: Array<{ asOf: string; rank: number }>;
+      summary: { bestRank: number; worstRank: number; endStreakRankImproving: number; endStreakRankDeclining: number; summaryScope: string } | null }>;
     events?: Array<{ type: string; at: string; label: string }>;
     metrics?: Array<{ metricKey: string; value: number; observedAt: string }>;
   }>(nestV1EntityTimelinePath(id, timelineQ));
-
-  if (!historyRes.ok) notFound();
-
-  const { entity, topic, points = [], summary } = historyRes.data;
-
-  const similarRes = await siteFetchJson<{
-    items?: Array<{ entityId: string; canonicalName: string; score?: number }>;
-  }>(
-    nestV1RecommendationsSimilarEntitiesPath(
-      id,
-      new URLSearchParams({ limit: "6" }),
-    ),
-  );
+  if (!timelineRes.ok) {
+    if (timelineRes.status === 404) notFound();
+    return <p role="alert">实体数据加载失败，请稍后重试。</p>;
+  }
+  const entity = timelineRes.data.entity;
+  const series = timelineRes.data.topicSeries.find(s => s.topicSlug === topicSlug);
+  const topic = { title: series?.topicTitle };
+  const points = series?.points ?? [];
+  const summary = series?.summary;
 
   return (
     <div className="space-y-6">
@@ -123,7 +101,7 @@ export default async function EntityPage({
       {points.length > 0 ? (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">名次曲线（近一周）</CardTitle>
+            <CardTitle className="text-base">名次曲线（WEEK 窗口，最近 40 点）</CardTitle>
             <CardDescription>数值越小排名越高</CardDescription>
           </CardHeader>
           <CardContent>
@@ -167,6 +145,19 @@ export default async function EntityPage({
         </Card>
       ) : null}
 
+      <Suspense fallback={<p className="text-sm text-muted-foreground">加载相似实体…</p>}>
+        <SimilarEntities id={id} />
+      </Suspense>
+    </div>
+  );
+}
+
+async function SimilarEntities({ id }: { id: string }) {
+  const similarRes = await siteFetchJson<{ items?: Array<{ entityId: string; canonicalName: string; score?: number }> }>(
+    nestV1RecommendationsSimilarEntitiesPath(id, new URLSearchParams({ limit: "6" })),
+  );
+  if (!similarRes.ok) return <p className="text-sm text-muted-foreground">相似推荐暂时不可用。</p>;
+  return <>
       {similarRes.ok && similarRes.data.items && similarRes.data.items.length > 0 ? (
         <Card>
           <CardHeader>
@@ -188,6 +179,5 @@ export default async function EntityPage({
           </CardContent>
         </Card>
       ) : null}
-    </div>
-  );
+  </>;
 }

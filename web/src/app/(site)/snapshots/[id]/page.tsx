@@ -46,7 +46,7 @@ export default async function SnapshotPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const q = new URLSearchParams({ includeAiStats: "1" });
+  const q = new URLSearchParams();
 
   const [snapRes, analysesRes] = await Promise.all([
     siteFetchJson<SnapshotPayload>(nestV1SnapshotPath(id, q)),

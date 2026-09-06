@@ -1,3 +1,6 @@
+import { TopicRankingQuery } from './queries/topic-ranking.query';
+import { TopicOverviewQuery } from './queries/topic-overview.query';
+import { SnapshotContextQuery } from './queries/snapshot-context.query';
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { runsRankingWorkers } from '../config/process-role';
@@ -38,6 +41,7 @@ import { TrendAnomalyService } from './trend-anomaly.service';
   ],
   controllers: [RankingsController, EntityMetricsController, OpsAnalyticsController],
   providers: [
+    TopicRankingQuery, TopicOverviewQuery, SnapshotContextQuery,
     RankingsService,
     EntityMetricsService,
     OpsAnalyticsService,

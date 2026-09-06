@@ -1,4 +1,6 @@
-import { BadRequestException, Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Post, Query, Req } from '@nestjs/common';
+import { getAuthFromRequest } from '../compliance/request-auth';
+import type { Request } from 'express';
 import { Type } from 'class-transformer';
 import { IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 import { toPlainJson } from '../lib/json';
@@ -86,6 +88,7 @@ export class AgentController {
   async listAnalyses(
     @Param('snapshotId') snapshotId: string,
     @Query() query: ListAnalysesQueryDto,
+    @Req() req: Request,
   ) {
     const sid = parseSnapshotId(snapshotId);
     return toPlainJson(
@@ -94,7 +97,7 @@ export class AgentController {
         agent: query.agent,
         limit: query.limit,
         offset: query.offset,
-      }),
+      }, getAuthFromRequest(req)),
     );
   }
 }

@@ -47,7 +47,7 @@ export class RankingCacheService implements OnModuleDestroy {
 
   /** 与缓存 JSON 模式对齐：结构变更时递增版本前缀，避免旧条目长期占用 TTL */
   private keySnapshot(id: bigint): string {
-    return `ranking:v2:snap:${id.toString()}`;
+    return `ranking:v3:snap:${id.toString()}`;
   }
 
   private ttlSeconds(): number {

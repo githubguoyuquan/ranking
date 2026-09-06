@@ -29,7 +29,7 @@ paths:
         - name: topicSlugs
           in: query
           required: false
-          description: 逗号分隔话题 slug 过滤
+          description: 逗号分隔话题 slug 过滤，最多 10 个；显式指定不可见话题返回 404
           schema:
             type: string
         - name: timeWindow
@@ -59,7 +59,7 @@ paths:
             default: 30
       responses:
         "200":
-          description: 成功
+          description: 成功；entity 按 scope 脱敏，topicSeries.summary 复用 rank-history 统计，并标记 summaryScope 为 materialized_history 或 returned_points；空序列无统计时为 null
           content:
             application/json:
               schema:

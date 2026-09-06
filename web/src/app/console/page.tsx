@@ -1,3 +1,4 @@
+import { adminApiHeaders } from "@/lib/query-http";
 import { AdminFooterNav } from "@/components/admin-footer-nav";
 import { AdminPage } from "@/components/admin-page";
 import { AdminQuickEntryRow } from "@/components/admin-quick-entry-row";
@@ -36,7 +37,7 @@ type FetchResult<T> = FetchOk<T> | FetchErr;
 
 async function fetchJsonUrl<T>(url: string): Promise<FetchResult<T>> {
   try {
-    const res = await fetch(url, { cache: "no-store" });
+    const res = await fetch(url, { cache: "no-store", headers: adminApiHeaders() });
     const text = await res.text();
     if (!res.ok) {
       return {
@@ -82,24 +83,13 @@ function kafkaConfiguredBadge(data: {
 }
 
 export default async function HomePage() {
-  const [apiRes, dbRes, redisRes, kafkaRes, esRes, chRes] = await Promise.all([
-    fetchJson<{ status?: string }>(BACKEND_HEALTH.root),
-    fetchJson<{ ok: boolean; detail?: string }>(BACKEND_HEALTH.db),
-    fetchJson<{
-      ok: boolean;
-      detail?: string;
-      cacheReadsEnabled?: boolean;
-    }>(BACKEND_HEALTH.redis),
-    fetchJson<{
-      ok: boolean;
-      configured: boolean;
-      detail?: string;
-    }>(BACKEND_HEALTH.kafka),
-    fetchJsonUrl<{ ok: boolean; clusterName?: string; detail?: string }>(
-      nestSearchHealthUrl(),
-    ),
-    fetchJsonUrl<{ ok: boolean; detail?: string }>(nestClickhouseHealthUrl()),
-  ]);
+  type Sample = { ok: boolean; configured: boolean; detail?: string; cacheReadsEnabled?: boolean; clusterName?: string };
+  const health = await fetchJson<{ status: string; services: Record<string, Sample> }>("/admin/ops/health-summary");
+  const result = (name: string): FetchResult<Sample> => health.ok
+    ? { ok: true, data: health.data.services[name] }
+    : health;
+  const apiRes: FetchResult<{ status: string }> = health.ok ? { ok: true, data: { status: "ok" } } : health;
+  const dbRes = result("postgresql"), redisRes = result("redis"), kafkaRes = result("kafka"), esRes = result("elasticsearch"), chRes = result("clickhouse");
 
   const apiOk =
     apiRes.ok && apiRes.data.status === "ok";

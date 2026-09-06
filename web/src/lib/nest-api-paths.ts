@@ -248,3 +248,9 @@ export const NEST_V1_DOC = {
   snapshotsScoreBreakdowns: "/v1/snapshots/:id/score-breakdowns",
   realtimeStream: "/v1/realtime/stream",
 } as const;
+
+/** Topic page core read model; history pagination remains a separate resource. */
+export function nestV1TopicOverviewPath(slug: string, query?: URLSearchParams): string {
+  const q = query?.toString();
+  return `/v1/topics/${encodeURIComponent(slug)}/overview${q ? `?${q}` : ""}`;
+}

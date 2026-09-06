@@ -1,3 +1,5 @@
+import { CrawlMonitorController } from './crawl-monitor.controller';
+import { CrawlMonitorQuery } from './queries/crawl-monitor.query';
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { runsCrawlScheduler, runsCrawlWorkers } from '../config/process-role';
@@ -24,8 +26,9 @@ import { CrawlSignalExtractService } from './crawl-signal-extract.service';
     AgentOrchestrationModule,
     ObservabilityModule,
   ],
-  controllers: [IngestionController, CrawlSchedulerAdminController, CrawlAdminController],
+  controllers: [CrawlMonitorController, IngestionController, CrawlSchedulerAdminController, CrawlAdminController],
   providers: [
+    CrawlMonitorQuery,
     IngestionService,
     CrawlSignalExtractService,
     CrawlRegionalQueueService,

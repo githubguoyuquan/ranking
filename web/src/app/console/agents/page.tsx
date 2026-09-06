@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { AdminFooterNav } from "@/components/admin-footer-nav";
 import { AdminPage } from "@/components/admin-page";
@@ -71,60 +71,37 @@ export default function AgentsPage() {
     "post-snapshot-summary-v1,trend-v1,credibility-v1,fact-check-v1,trend-analysis-v1",
   );
 
-  const load = useCallback(async () => {
-    setMsg("");
-    try {
-      const [ov, runRes, propRes] = await Promise.all([
-        fetch(apiUrl("/admin/agents/overview"), { headers: apiHeaders() }),
-        fetch(apiUrl("/admin/agents/runs?limit=30"), { headers: apiHeaders() }),
-        fetch(apiUrl("/admin/agents/proposals?status=pending&limit=30"), {
-          headers: apiHeaders(),
-        }),
-      ]);
-      if (ov.ok) {
-        const j = (await ov.json()) as {
-          registry?: AgentDefinition[];
-          snapshotPostProcessPipeline?: string[];
-        };
-        setRegistry(j.registry ?? []);
-        setSnapshotPipeline(j.snapshotPostProcessPipeline ?? []);
-      }
-      if (runRes.ok) {
-        const j = (await runRes.json()) as {
-          runs?: Array<AgentRunRow & { outputJson?: unknown }>;
-        };
-        setRuns(
-          (j.runs ?? []).map((r) => ({
-            id: String(r.id),
-            agent: r.agent,
-            status: r.status,
-            correlationId: r.correlationId,
-            createdAt: r.createdAt,
-            error: r.error,
-            outputSummary: outputSummaryFromJson(r.outputJson),
-          })),
-        );
-      }
-      if (propRes.ok) {
-        const j = (await propRes.json()) as { proposals?: ProposalRow[] };
-        setProposals(
-          (j.proposals ?? []).map((p) => ({
-            id: String(p.id),
-            status: p.status,
-            suggestedSlug: p.suggestedSlug,
-            suggestedTitle: p.suggestedTitle,
-            confidence: p.confidence,
-            clusterKey: p.clusterKey,
-          })),
-        );
-      }
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : String(e));
+  const requests = useRef(new Map<string, AbortController>());
+  const load = useCallback(async (scope: "all" | "runs" | "proposals" = "all") => {
+    async function read<T>(key: string, path: string, apply: (data: T) => void) {
+      requests.current.get(key)?.abort();
+      const controller = new AbortController(); requests.current.set(key, controller);
+      try {
+        const response = await fetch(apiUrl(path), { headers: apiHeaders(), signal: controller.signal, cache: "no-store" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json() as T;
+        if (!controller.signal.aborted) apply(data);
+      } catch (error) {
+        if (!controller.signal.aborted) setMsg(`${key} 加载失败：${String(error)}`);
+      } finally { if (requests.current.get(key) === controller) requests.current.delete(key); }
     }
+    await Promise.all([
+      scope === "all" ? read<{ registry?: AgentDefinition[]; snapshotPostProcessPipeline?: string[] }>("overview", "/admin/agents/overview", data => {
+        setRegistry(data.registry ?? []); setSnapshotPipeline(data.snapshotPostProcessPipeline ?? []);
+      }) : null,
+      scope !== "proposals" ? read<{ runs?: Array<AgentRunRow & { outputJson?: unknown }> }>("runs", "/admin/agents/runs?limit=30", data => {
+        setRuns((data.runs ?? []).map(row => ({ ...row, id: String(row.id), outputSummary: outputSummaryFromJson(row.outputJson) })));
+      }) : null,
+      scope !== "runs" ? read<{ proposals?: ProposalRow[] }>("proposals", "/admin/agents/proposals?status=pending&limit=30", data => {
+        setProposals((data.proposals ?? []).map(row => ({ ...row, id: String(row.id) })));
+      }) : null,
+    ]);
   }, []);
 
   useEffect(() => {
+    const active = requests.current;
     void load();
+    return () => { for (const controller of active.values()) controller.abort(); };
   }, [load]);
 
   async function post(path: string, body?: unknown) {
@@ -136,7 +113,7 @@ export default function AgentsPage() {
     });
     const text = await res.text();
     setMsg(res.ok ? `OK ${path}: ${text.slice(0, 500)}` : `${res.status} ${text.slice(0, 800)}`);
-    if (res.ok) void load();
+    if (res.ok) void load(path.includes("/proposals/") ? "proposals" : "runs");
   }
 
   const snapshotAgents = registry.filter((r) => r.category === "snapshot");

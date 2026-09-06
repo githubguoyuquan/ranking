@@ -1,3 +1,5 @@
+import type { Request } from 'express';
+import { getAuthFromRequest } from '../compliance/request-auth';
 import {
   BadRequestException,
   Body,
@@ -6,6 +8,7 @@ import {
   Param,
   Post,
   Query,
+  Req,
 } from '@nestjs/common';
 import { Transform, Type } from 'class-transformer';
 import {
@@ -90,7 +93,7 @@ export class OpsAnalyticsController {
   constructor(private readonly opsAnalytics: OpsAnalyticsService) {}
 
   @Get('v1/entities/:id/timeline')
-  async entityTimeline(@Param('id') id: string, @Query() query: EntityTimelineQueryDto) {
+  async entityTimeline(@Param('id') id: string, @Query() query: EntityTimelineQueryDto, @Req() req: Request) {
     const entityId = parseBigIntId(id, 'entity id');
     const topicSlugs = query.topicSlugs
       ?.split(',')
@@ -102,7 +105,7 @@ export class OpsAnalyticsController {
       topicsLimit: query.topicsLimit,
       pointsLimit: query.pointsLimit,
       metricsLimit: query.metricsLimit,
-    });
+    }, getAuthFromRequest(req));
   }
 
   @Post('v1/topic-versions/compare')
@@ -118,7 +121,7 @@ export class OpsAnalyticsController {
   }
 
   @Post('v1/entities/:id/timeline/report')
-  async entityTimelineReport(@Param('id') id: string, @Query() query: EntityTimelineQueryDto) {
+  async entityTimelineReport(@Param('id') id: string, @Query() query: EntityTimelineQueryDto, @Req() req: Request) {
     const entityId = parseBigIntId(id, 'entity id');
     const topicSlugs = query.topicSlugs
       ?.split(',')
@@ -127,7 +130,7 @@ export class OpsAnalyticsController {
     return this.opsAnalytics.generateEntityTimelineReport(entityId, {
       topicSlugs,
       timeWindow: query.timeWindow,
-    });
+    }, getAuthFromRequest(req));
   }
 
   @Post('v1/topic-versions/compare/report')

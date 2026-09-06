@@ -11,6 +11,8 @@ import { outboxLagThresholds } from './outbox-lag.config';
 
 @Injectable()
 export class CrawlOpsService {
+  private cached?: { until: number; data: CrawlOpsMetrics };
+  private running?: Promise<CrawlOpsMetrics>;
   constructor(private readonly prisma: PrismaService) {}
 
   async buildOverviewResponse(): Promise<Record<string, unknown>> {
@@ -38,6 +40,15 @@ export class CrawlOpsService {
   }
 
   async collectMetrics(): Promise<CrawlOpsMetrics> {
+    if (this.cached && this.cached.until > Date.now()) return this.cached.data;
+    if (!this.running) {
+      this.running = this.collectFresh().then(data => { this.cached = { until: Date.now() + 10000, data }; return data; });
+      void this.running.then(() => { this.running = undefined; }, () => { this.running = undefined; });
+    }
+    return this.running;
+  }
+
+  private async collectFresh(): Promise<CrawlOpsMetrics> {
     const now = new Date();
     const since1h = new Date(now.getTime() - 3_600_000);
     const since24h = new Date(now.getTime() - 86_400_000);

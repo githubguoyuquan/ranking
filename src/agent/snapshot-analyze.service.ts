@@ -1,4 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import type { AuthenticatedRequestContext } from '../compliance/compliance-auth.types';
+import { assertTopicAccessible } from '../compliance/tenant-scope';
 import type { Prisma } from '@prisma/client';
 import {
   AI_AUDIT_SOURCE_API,
@@ -40,7 +42,14 @@ export class SnapshotAnalyzeService {
       limit?: number;
       offset?: number;
     },
+    auth?: AuthenticatedRequestContext | null,
   ) {
+    const snapshot = await this.prisma.topicRankSnapshot.findUnique({
+      where: { id: snapshotId },
+      select: { topicRanking: { select: { topicVersion: { select: { topic: { select: { tenantId: true } } } } } } },
+    });
+    if (!snapshot) throw new NotFoundException('TopicRankSnapshot not found');
+    await assertTopicAccessible(snapshot.topicRanking.topicVersion.topic, auth);
     const where = this.buildListAnalysesWhere(snapshotId, filters);
     const take = Math.min(Math.max(filters?.limit ?? 50, 1), 200);
     const skip = Math.min(Math.max(filters?.offset ?? 0, 0), 100_000);

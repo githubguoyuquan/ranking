@@ -1,3 +1,4 @@
+import { HealthQueryModule } from '../ops/health-query.module';
 import { Module } from '@nestjs/common';
 import { AnalyticsModule } from '../analytics/analytics.module';
 import { CacheModule } from '../cache/cache.module';
@@ -11,6 +12,7 @@ import { BiService } from './bi.service';
 
 @Module({
   imports: [
+    HealthQueryModule,
     RankingsModule,
     AnalyticsModule,
     CacheModule,

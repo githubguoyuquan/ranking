@@ -7,6 +7,7 @@ const OPENAPI_DIR = join(__dirname, '../../docs/openapi');
 
 /** Fragment → minimum path keys that must exist (contract smoke). */
 const REQUIRED_PATHS: Record<string, string[]> = {
+  'page-queries.yaml': ['/v1/topics/{slug}/overview', '/v1/snapshots/{id}', '/admin/crawl/monitor', '/admin/ops/health-summary'],
   'admin-ops.yaml': [
     '/admin/ops/dr/readiness',
     '/admin/ops/k8s/probes',

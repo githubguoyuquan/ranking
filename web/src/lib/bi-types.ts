@@ -21,17 +21,18 @@ export type TrendAlert = {
 
 export type BiOverview = {
   generatedAt: string;
+  sections?: Record<string, { status: "ok" | "stale" | "unavailable"; sampledAt: string | null }>;
   observability?: {
-    status: "ok" | "warn" | "critical";
+    status: "ok" | "warn" | "critical" | "unavailable";
     alerts: OpsAlert[];
     outbox?: unknown;
     crawl?: unknown;
   };
   trends?: {
-    status: "ok" | "warn" | "critical";
+    status: "ok" | "warn" | "critical" | "unavailable";
     alerts: TrendAlert[];
-    anomalyCount: number;
-    scannedAnalyses: number;
+    anomalyCount: number | null;
+    scannedAnalyses: number | null;
     thresholds?: Record<string, number>;
   };
   kpis: {
@@ -48,7 +49,7 @@ export type BiOverview = {
     searchPrimary?: string;
   };
   crawlGlobal?: {
-    scheduler: {
+    scheduler?: {
       enabled: boolean;
       region: string | null;
       enabledSources: number;

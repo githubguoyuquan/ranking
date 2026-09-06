@@ -1,3 +1,4 @@
+import { HealthSummaryQuery } from './queries/health-summary.query';
 import { Controller, Get } from '@nestjs/common';
 import { RequireScopes } from '../compliance/api-key.guard';
 import { toPlainJson } from '../lib/json';
@@ -10,7 +11,10 @@ import { DrReadinessService } from './dr-readiness.service';
 @Controller('admin/ops')
 @RequireScopes('admin')
 export class OpsAdminController {
-  constructor(private readonly dr: DrReadinessService) {}
+  constructor(private readonly dr: DrReadinessService, private readonly health: HealthSummaryQuery) {}
+
+  @Get('health-summary')
+  healthSummary() { return this.health.get(); }
 
   /** DR 演练 /  failover 前检查清单（PG/Redis/Kafka/Outbox/爬虫 checkpoint） */
   @Get('dr/readiness')

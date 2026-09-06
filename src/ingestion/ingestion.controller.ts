@@ -1,3 +1,5 @@
+import type { Request } from 'express';
+import { getAuthFromRequest } from '../compliance/request-auth';
 import {
   BadRequestException,
   Body,
@@ -9,6 +11,7 @@ import {
   Post,
   Put,
   Query,
+  Req,
 } from '@nestjs/common';
 import {
   IsArray,
@@ -252,10 +255,10 @@ export class IngestionController {
   }
 
   @Get('sources')
-  async listSources(@Query('limit') limitRaw?: string) {
+  async listSources(@Req() req: Request, @Query('limit') limitRaw?: string) {
     const limit = limitRaw !== undefined ? Number(limitRaw) : 50;
     const lim = Number.isFinite(limit) ? limit : 50;
-    return toPlainJson(await this.ingestion.listSources(lim));
+    return toPlainJson(await this.ingestion.listSources(lim, getAuthFromRequest(req)?.tenantId));
   }
 
   @Get('sources/:sourceId/urls')

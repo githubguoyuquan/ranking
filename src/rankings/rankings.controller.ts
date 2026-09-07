@@ -28,6 +28,7 @@ import {
   IsString,
   Max,
   MaxLength,
+  Matches,
   Min,
   MinLength,
 } from 'class-validator';
@@ -197,6 +198,47 @@ export class PatchTopicBodyDto {
   title?: string;
 }
 
+export class CreateTopicAdminDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(160)
+  @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, {
+    message: 'slug must use lowercase letters, numbers, and single hyphens',
+  })
+  slug!: string;
+
+  @IsString()
+  @MinLength(1)
+  @MaxLength(200)
+  title!: string;
+
+  @IsEnum(TopicKind)
+  kind!: TopicKind;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  @MaxLength(35)
+  locale?: string;
+}
+
+export class CreateTopicVersionAdminDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(64)
+  version!: string;
+
+  @IsDateString()
+  effectiveFrom!: string;
+
+  @IsOptional()
+  @IsDateString()
+  effectiveTo?: string;
+
+  @IsObject()
+  policyJson!: Record<string, unknown>;
+}
+
 export class TrendsHotQueryDto {
   @IsOptional()
   @IsEnum(TimeWindow)
@@ -304,6 +346,46 @@ export class RankingsController {
   @Post('admin/seed-demo')
   async seedDemo(@Body() body: SeedDemoDto) {
     return this.rankings.seedDemo(body.slug);
+  }
+
+  /** 运营台手工创建话题；正式写操作要求 admin scope。 */
+  @Post('admin/topics')
+  @RequireScopes('admin')
+  async createTopic(
+    @Body() body: CreateTopicAdminDto,
+    @Req() req: Request,
+  ) {
+    return this.rankings.createTopic(
+      {
+        slug: body.slug,
+        title: body.title,
+        kind: body.kind,
+        locale: body.locale,
+      },
+      getAuthFromRequest(req),
+    );
+  }
+
+  /** 运营台为已有话题创建不可重名的新版本。 */
+  @Post('admin/topics/:slug/versions')
+  @RequireScopes('admin')
+  async createTopicVersion(
+    @Param('slug') slug: string,
+    @Body() body: CreateTopicVersionAdminDto,
+    @Req() req: Request,
+  ) {
+    return this.rankings.createTopicVersion(
+      slug,
+      {
+        version: body.version,
+        effectiveFrom: new Date(body.effectiveFrom),
+        effectiveTo: body.effectiveTo
+          ? new Date(body.effectiveTo)
+          : undefined,
+        policyJson: body.policyJson,
+      },
+      getAuthFromRequest(req),
+    );
   }
 
   /** 浏览器会发 GET；真正跑榜必须用 POST + JSON body */

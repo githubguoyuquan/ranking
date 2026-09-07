@@ -3,7 +3,14 @@ import { entityWhereForAuth } from '../compliance/tenant-scope';
 import { redactEntityRecord } from '../compliance/entity-pii';
 import { resolveRealtimeRankingWindow } from '../domain/realtime-ranking-window';
 import { TopicRankingQuery, leaderboardResolved } from './queries/topic-ranking.query';
-import { BadRequestException, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import {
@@ -110,6 +117,20 @@ export type RunRankingArgs = {
   asOf?: Date;
 };
 
+export type CreateTopicArgs = {
+  slug: string;
+  title: string;
+  kind: TopicKind;
+  locale?: string;
+};
+
+export type CreateTopicVersionArgs = {
+  version: string;
+  effectiveFrom: Date;
+  effectiveTo?: Date;
+  policyJson: unknown;
+};
+
 @Injectable()
 export class RankingsService {
   private readonly logger = new Logger(RankingsService.name);
@@ -185,6 +206,113 @@ export class RankingsService {
       this.logger.warn(
         `realtime ranking_failed: ${e instanceof Error ? e.message : String(e)}`,
       );
+    }
+  }
+
+  /** 运营台手工创建话题；slug 全局唯一，租户来自当前鉴权上下文。 */
+  async createTopic(
+    args: CreateTopicArgs,
+    auth?: AuthenticatedRequestContext,
+  ) {
+    const slug = args.slug.trim();
+    const title = args.title.trim();
+    const locale = args.locale?.trim() || 'en';
+    if (!slug) throw new BadRequestException('topic slug is required');
+    if (!title) throw new BadRequestException('topic title is required');
+
+    try {
+      const topic = await this.prisma.topic.create({
+        data: {
+          slug,
+          title,
+          kind: args.kind,
+          locale,
+          ...(auth?.tenantId != null
+            ? { tenant: { connect: { id: auth.tenantId } } }
+            : {}),
+        },
+      });
+      return toPlainJson({
+        ...topic,
+        kindStrategy: topicKindStrategyPublic(topic.kind),
+      });
+    } catch (e) {
+      if (
+        e instanceof Prisma.PrismaClientKnownRequestError &&
+        e.code === 'P2002'
+      ) {
+        throw new ConflictException(`topic slug already exists: ${slug}`);
+      }
+      throw e;
+    }
+  }
+
+  /**
+   * 为已有话题创建新规则版本。运营入口要求显式 entityIds，避免把全库实体意外带入正式榜单。
+   */
+  async createTopicVersion(
+    slug: string,
+    args: CreateTopicVersionArgs,
+    auth?: AuthenticatedRequestContext,
+  ) {
+    const topic = await this.prisma.topic.findFirst({
+      where: { slug: slug.trim(), ...topicWhereForAuth(auth) },
+    });
+    if (!topic) throw new NotFoundException('topic not found');
+    await assertTopicAccessible(topic, auth);
+
+    let policy: RankingPolicyJson;
+    try {
+      policy = parseRankingPolicyJson(args.policyJson);
+    } catch (e) {
+      throw new BadRequestException(
+        e instanceof Error ? e.message : 'invalid policyJson',
+      );
+    }
+
+    if (!policy.entityIds?.length) {
+      throw new BadRequestException(
+        'entityIds must contain at least one entity for an admin-created version',
+      );
+    }
+    await this.assertPolicyEntityIdsExist(policy.entityIds, auth);
+
+    if (
+      !Number.isFinite(args.effectiveFrom.getTime()) ||
+      (args.effectiveTo != null && !Number.isFinite(args.effectiveTo.getTime()))
+    ) {
+      throw new BadRequestException('invalid effective date');
+    }
+    if (
+      args.effectiveTo != null &&
+      args.effectiveTo.getTime() <= args.effectiveFrom.getTime()
+    ) {
+      throw new BadRequestException('effectiveTo must be after effectiveFrom');
+    }
+
+    const version = args.version.trim();
+    if (!version) throw new BadRequestException('topic version is required');
+    try {
+      const row = await this.prisma.topicVersion.create({
+        data: {
+          topicId: topic.id,
+          version,
+          effectiveFrom: args.effectiveFrom,
+          effectiveTo: args.effectiveTo ?? null,
+          policyJson: policy as unknown as Prisma.InputJsonValue,
+        },
+      });
+      return toPlainJson(row);
+    } catch (e) {
+      if (
+        e instanceof Prisma.PrismaClientKnownRequestError &&
+        e.code === 'P2002'
+      ) {
+        throw new ConflictException(
+          `topic version already exists for ${topic.slug}: ${version}`,
+        );
+      }
+      throw e;
     }
   }
 
@@ -903,11 +1031,14 @@ export class RankingsService {
     if (ids.length === 0) throw new BadRequestException('no entities to rank');
   }
 
-  private async assertPolicyEntityIdsExist(entityIds: string[]) {
+  private async assertPolicyEntityIdsExist(
+    entityIds: string[],
+    auth?: AuthenticatedRequestContext,
+  ) {
     const unique = [...new Set(entityIds)];
     const ids = unique.map((s) => BigInt(s));
     const found = await this.prisma.entity.findMany({
-      where: { id: { in: ids } },
+      where: { id: { in: ids }, ...entityWhereForAuth(auth) },
       select: { id: true },
     });
     if (found.length !== ids.length) {

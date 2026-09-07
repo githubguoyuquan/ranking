@@ -9,6 +9,7 @@ import {
   backendAdminEntityMetricsPath,
   backendAdminOutboxPath,
   backendAdminSnapshotAnalyzePath,
+  backendAdminTopicVersionsPath,
 } from "@/lib/backend-api-paths";
 
 export function backendAbs(path: string): string {
@@ -49,6 +50,14 @@ export function adminReindexCrawlDocsUrl(): string {
 
 export function adminSeedDemoUrl(): string {
   return backendAbs(BACKEND_ADMIN.seedDemo);
+}
+
+export function adminTopicsUrl(): string {
+  return backendAbs(BACKEND_ADMIN.topics);
+}
+
+export function adminTopicVersionsUrl(topicSlug: string): string {
+  return backendAbs(backendAdminTopicVersionsPath(topicSlug));
 }
 
 export function adminSnapshotAnalyzeUrl(snapshotId: string): string {

@@ -2,6 +2,7 @@
 
 import { AdminFooterNav } from "@/components/admin-footer-nav";
 import { CopyTextButton } from "@/components/copy-snapshot-id-button";
+import { TopicCreatePanel } from "@/components/topic-create-panel";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -47,7 +48,7 @@ import { isIsoDateString } from "@/lib/iso-date";
 import { TIME_WINDOW_SET } from "@/lib/time-window";
 import { useRankingRealtimeSse } from "@/hooks/use-ranking-realtime-sse";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const POLICY_METRIC_KEYS = ["streams", "mentions", "social", "news"] as const;
@@ -347,6 +348,7 @@ function parseTrendPayloadPreview(payload: unknown): {
 
 function TopicsPageInner() {
   const { abs } = useAdminAppUrl();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const [slug, setSlug] = useState("global-female-singers");
   const [topicMeta, setTopicMeta] = useState<TopicMeta | null>(null);
@@ -826,6 +828,38 @@ function TopicsPageInner() {
           <code className="rounded bg-muted px-1">PATCH {NEST_V1_DOC.topicVersionPolicy}</code>
         </p>
       </div>
+
+      <TopicCreatePanel
+        currentTopic={topicMeta}
+        existingVersions={versionRows}
+        onTopicCreated={(created) => {
+          const meta: TopicMeta = {
+            id: created.id,
+            slug: created.slug,
+            title: created.title,
+            kind: created.kind,
+            locale: created.locale,
+            kindStrategy: parseKindStrategy(created.kindStrategy),
+          };
+          setSlug(created.slug);
+          router.replace(topicsAdminPath(created.slug), { scroll: false });
+          setTopicMeta(meta);
+          setTopicKindDraft(created.kind);
+          setTopicTitleDraft(created.title);
+          setVersionRows([]);
+          setPolicyTargetId(null);
+          setResult("");
+          setTopicMsg("");
+        }}
+        onVersionCreated={(created) => {
+          setVersionRows((rows) => [
+            created,
+            ...rows.filter((row) => row.id !== created.id),
+          ]);
+          setPolicyTargetId(created.id);
+          setPolicyMsg("新版本已选中，可在下方继续检查或微调规则。");
+        }}
+      />
 
       <Card>
         <CardHeader>

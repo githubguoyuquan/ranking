@@ -14,6 +14,7 @@ export const BACKEND_ADMIN = {
   reindexEntities: "/admin/reindex-entities",
   reindexCrawlDocs: "/admin/reindex-crawl-docs",
   seedDemo: "/admin/seed-demo",
+  topics: "/admin/topics",
   outbox: "/admin/outbox",
   entities: "/admin/entities",
   entityMetrics: "/admin/entities/:id/metrics",
@@ -63,6 +64,10 @@ export function backendAdminEntityMetricsPath(entityId: string): string {
   return `${BACKEND_ADMIN.entities}/${encodeURIComponent(entityId)}/metrics`;
 }
 
+export function backendAdminTopicVersionsPath(topicSlug: string): string {
+  return `${BACKEND_ADMIN.topics}/${encodeURIComponent(topicSlug)}/versions`;
+}
+
 export function backendAdminBiDrillEntityPath(entityId: string, days = 30): string {
   return `${BACKEND_ADMIN.biDrillEntity}/${encodeURIComponent(entityId)}?days=${days}`;
 }
@@ -73,6 +78,8 @@ export function backendAdminBiDrillTopicPath(topicId: string, days = 14): string
 
 /** 文档 / 界面展示用（含 `:id` 占位），勿用于实际请求 path。 */
 export const BACKEND_ADMIN_DOC = {
+  topics: "/admin/topics",
+  topicVersions: "/admin/topics/:slug/versions",
   entitiesId: "/admin/entities/:id",
   entityMetrics: "/admin/entities/:id/metrics",
   snapshotAnalyze: "/admin/snapshots/:id/analyze",

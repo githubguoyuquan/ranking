@@ -140,6 +140,7 @@ model Topic {
   embedding   TopicEmbedding?
   fingerprint TopicFingerprint?
   entityStats EntityTopicStats[]
+  entityAutofill TopicEntityAutofill?
   agentRuns   AgentRun[]
   approvedProposals TopicProposal[] @relation("TopicProposalApproved")
   mergesAsSource    TopicMergeAudit[] @relation("TopicMergeSource")
@@ -157,6 +158,23 @@ model TopicEmbedding {
   updatedAt DateTime @updatedAt
 
   topic Topic @relation(fields: [topicId], references: [id], onDelete: Cascade)
+}
+
+/// 创建话题时的自动实体收集；进度和来源持久保存，不依赖浏览器会话。
+model TopicEntityAutofill {
+  topicId        BigInt   @id
+  requestedCount Int
+  status         String   @default("queued")
+  runToken       String
+  strategy       String?
+  message        String?
+  entities       Json     @default("[]")
+  startedAt      DateTime?
+  updatedAt      DateTime @updatedAt
+
+  topic Topic @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  @@index([status, updatedAt])
 }
 
 model TopicVersion {
@@ -270,6 +288,8 @@ model Entity {
   tenantId      BigInt?
   type          String
   canonicalName String
+  /// 来源身份 + 租户，用于重复收集/跨话题复用，同名对象不自动合并。
+  externalKey   String?  @unique
   aliases       Json?
   piiLevel      PiiLevel @default(NONE)
   createdAt     DateTime @default(now())

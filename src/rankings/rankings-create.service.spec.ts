@@ -2,6 +2,9 @@ import { BadRequestException } from '@nestjs/common';
 import { TopicKind } from '@prisma/client';
 import { describe, expect, it, vi } from 'vitest';
 import { RankingsService } from './rankings.service';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
+import { CreateTopicAdminDto } from './rankings.controller';
 
 function makeService(prisma: Record<string, unknown>): RankingsService {
   return new RankingsService(
@@ -17,6 +20,28 @@ function makeService(prisma: Record<string, unknown>): RankingsService {
 }
 
 describe('RankingsService admin topic creation', () => {
+  it.each([0, -1, 51, 1.5, true, '10'])('rejects invalid entityCount %j at the API boundary', async (entityCount) => {
+    const dto = plainToInstance(CreateTopicAdminDto, {
+      slug: 'football', title: '足球球星榜', kind: 'SEMI_OBJECTIVE', entityCount,
+    }, { enableImplicitConversion: true });
+    expect((await validate(dto)).some((error) => error.property === 'entityCount')).toBe(true);
+  });
+
+  it('persists requested count with the topic before enqueueing', async () => {
+    const create = vi.fn().mockResolvedValue({ id: 11n, kind: TopicKind.SEMI_OBJECTIVE });
+    const enqueue = vi.fn().mockResolvedValue({ status: 'queued', requestedCount: 5, entities: [] });
+    const service = new RankingsService(
+      { topic: { create } } as never, {} as never, {} as never, {} as never,
+      {} as never, {} as never, {} as never, {} as never,
+      undefined, undefined, { enqueue } as never,
+    );
+    const result = await service.createTopic({ slug: 'football', title: '足球球星榜', kind: TopicKind.SEMI_OBJECTIVE, entityCount: 5 });
+    const population = create.mock.calls[0][0].data.entityAutofill.create;
+    expect(population.requestedCount).toBe(5);
+    expect(enqueue).toHaveBeenCalledWith(11n, population.runToken);
+    expect(result).toMatchObject({ id: '11', entityAutofill: { requestedCount: 5 } });
+  });
+
   it('creates a topic in the authenticated tenant', async () => {
     const create = vi.fn().mockResolvedValue({
       id: 11n,

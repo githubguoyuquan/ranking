@@ -68,6 +68,14 @@ export function backendAdminTopicVersionsPath(topicSlug: string): string {
   return `${BACKEND_ADMIN.topics}/${encodeURIComponent(topicSlug)}/versions`;
 }
 
+export function backendTopicEntitiesPath(topicSlug: string): string {
+  return `/v1/topics/${encodeURIComponent(topicSlug)}/entities`;
+}
+
+export function backendAdminTopicEntitiesRetryPath(topicSlug: string): string {
+  return `${BACKEND_ADMIN.topics}/${encodeURIComponent(topicSlug)}/entities/retry`;
+}
+
 export function backendAdminBiDrillEntityPath(entityId: string, days = 30): string {
   return `${BACKEND_ADMIN.biDrillEntity}/${encodeURIComponent(entityId)}?days=${days}`;
 }

@@ -38,6 +38,7 @@ import { toPlainJson } from '../lib/json';
 import { resolveRealtimeRankingWindow } from '../domain/realtime-ranking-window';
 import { RankingsService } from './rankings.service';
 import { TrendAnomalyService } from './trend-anomaly.service';
+import { TopicEntityAutofillService } from './topic-entity-autofill.service';
 
 export class RunRankingDto {
   @IsString()
@@ -220,6 +221,13 @@ export class CreateTopicAdminDto {
   @MinLength(2)
   @MaxLength(35)
   locale?: string;
+
+  @IsOptional()
+  @Transform(({ obj, key }) => obj[key])
+  @IsInt()
+  @Min(1)
+  @Max(50)
+  entityCount?: number;
 }
 
 export class CreateTopicVersionAdminDto {
@@ -341,6 +349,7 @@ export class RankingsController {
     private readonly topicOverview: TopicOverviewQuery,
     private readonly snapshotContext: SnapshotContextQuery,
     private readonly trendAnomaly: TrendAnomalyService,
+    private readonly entityAutofill: TopicEntityAutofillService,
   ) {}
 
   @Post('admin/seed-demo')
@@ -361,6 +370,7 @@ export class RankingsController {
         title: body.title,
         kind: body.kind,
         locale: body.locale,
+        entityCount: body.entityCount,
       },
       getAuthFromRequest(req),
     );
@@ -386,6 +396,17 @@ export class RankingsController {
       },
       getAuthFromRequest(req),
     );
+  }
+
+  @Get('v1/topics/:slug/entities')
+  async topicEntities(@Param('slug') slug: string, @Req() req: Request) {
+    return this.entityAutofill.get(slug, getAuthFromRequest(req));
+  }
+
+  @Post('admin/topics/:slug/entities/retry')
+  @RequireScopes('admin')
+  async retryTopicEntities(@Param('slug') slug: string, @Req() req: Request) {
+    return this.entityAutofill.retry(slug, getAuthFromRequest(req));
   }
 
   /** 浏览器会发 GET；真正跑榜必须用 POST + JSON body */

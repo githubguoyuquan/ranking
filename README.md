@@ -2,6 +2,8 @@
 
 完整产品愿景、与当前实现的**差距对照**、目标架构（DDD/消息/规模演进）见 **[docs/PLATFORM_ARCHITECTURE.md](docs/PLATFORM_ARCHITECTURE.md)**。
 
+创建话题时可指定参榜对象数量，后台自动从公开资料收集候选名单。操作、来源策略、支持范围和部署说明见 [话题实体自动填充](docs/ops/TOPIC_ENTITY_AUTOFILL.md)。本功能不修改指标权重、不自动采集指标或跑榜。
+
 ## 生产可观测
 
 - **API**：`GET /admin/observability/summary`、`/prometheus`；BI `overview` 含 `observability.alerts`

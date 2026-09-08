@@ -23,6 +23,10 @@ import { OpsAnalyticsController } from './ops-analytics.controller';
 import { OpsAnalyticsService } from './ops-analytics.service';
 import { TrendAnomalyAlertCronService } from './trend-anomaly-alert-cron.service';
 import { TrendAnomalyService } from './trend-anomaly.service';
+import { TopicEntityDiscoveryService } from './topic-entity-discovery.service';
+import { TopicEntityAutofillService } from './topic-entity-autofill.service';
+import { TopicEntityAutofillProcessor } from './topic-entity-autofill.processor';
+import { TOPIC_ENTITY_AUTOFILL_QUEUE } from './topic-entity-autofill-job';
 
 @Module({
   imports: [
@@ -38,17 +42,21 @@ import { TrendAnomalyService } from './trend-anomaly.service';
     BullModule.registerQueue({
       name: RANKING_FOLLOWUP_QUEUE,
     }),
+    BullModule.registerQueue({ name: TOPIC_ENTITY_AUTOFILL_QUEUE }),
   ],
   controllers: [RankingsController, EntityMetricsController, OpsAnalyticsController],
   providers: [
     TopicRankingQuery, TopicOverviewQuery, SnapshotContextQuery,
     RankingsService,
+    TopicEntityDiscoveryService,
+    TopicEntityAutofillService,
     EntityMetricsService,
     OpsAnalyticsService,
     TrendAnomalyService,
     ...(runsRankingWorkers()
       ? [
           RankingProcessor,
+          TopicEntityAutofillProcessor,
           RankingFollowupProcessor,
           TrendAnalysisSchedulerService,
           TrendAnomalyAlertCronService,

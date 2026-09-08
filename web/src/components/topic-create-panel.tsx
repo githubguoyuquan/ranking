@@ -13,6 +13,8 @@ import { Label } from "@/components/ui/label";
 import {
   adminTopicsUrl,
   adminTopicVersionsUrl,
+  adminTopicEntitiesRetryUrl,
+  topicEntitiesUrl,
 } from "@/lib/backend-api-urls";
 import { adminApiHeaders } from "@/lib/query-http";
 import {
@@ -29,7 +31,13 @@ import {
   TOPIC_KIND_OPTIONS,
   type TopicKindValue,
 } from "@/lib/topic-kind";
-import { useEffect, useState, type FormEvent } from "react";
+import {
+  ENTITY_AUTOFILL_STATUS_LABELS,
+  entityAutofillSelection,
+  parseTopicEntityAutofill,
+  type TopicEntityAutofill,
+} from "@/lib/topic-entity-autofill";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 
 const selectClass =
   "flex h-10 w-full rounded-md border border-input bg-transparent px-3 py-2 text-base leading-6 shadow-xs outline-none focus-visible:ring-2 focus-visible:ring-ring";
@@ -126,6 +134,7 @@ export function TopicCreatePanel({
   const [newTitle, setNewTitle] = useState("");
   const [newKind, setNewKind] = useState<TopicKindValue>("SEMI_OBJECTIVE");
   const [newLocale, setNewLocale] = useState("zh-CN");
+  const [newEntityCount, setNewEntityCount] = useState("10");
   const [topicSubmitting, setTopicSubmitting] = useState(false);
   const [topicFeedback, setTopicFeedback] = useState("");
   const [topicSucceeded, setTopicSucceeded] = useState(false);
@@ -139,15 +148,116 @@ export function TopicCreatePanel({
   const [versionSubmitting, setVersionSubmitting] = useState(false);
   const [versionFeedback, setVersionFeedback] = useState("");
   const [versionSucceeded, setVersionSucceeded] = useState(false);
+  const [populationState, setPopulationState] = useState<{
+    slug: string;
+    data: TopicEntityAutofill | null;
+    loading: boolean;
+    error: string;
+  } | null>(null);
+  const [populationRefresh, setPopulationRefresh] = useState(0);
+  const [retryingSlug, setRetryingSlug] = useState<string | null>(null);
+  const entityInputMode = useRef<"automatic" | "manual" | "template">("automatic");
+  const topicSlug = currentTopic?.slug ?? "";
+  const topicId = currentTopic?.id;
+  const topicKind = currentTopic?.kind;
+  const population = populationState?.slug === topicSlug ? populationState.data : null;
+  const populationError = populationState?.slug === topicSlug ? populationState.error : "";
+  const populationLoading = !!topicSlug && (populationState?.slug !== topicSlug || populationState.loading);
+  const populationWaiting = population?.status === "queued" || population?.status === "running";
+  const populationStalled = populationWaiting && !!population?.updatedAt &&
+    Date.now() - new Date(population.updatedAt).getTime() > 180_000;
+  const selectedEntityIds = new Set(versionForm.entityIdsInput.split(/[\s,，]+/).filter(Boolean));
 
   useEffect(() => {
-    if (!currentTopic) return;
+    entityInputMode.current = "automatic";
     setTemplateId("default");
-    setVersionForm(defaultTopicVersionPolicyForm(currentTopic.kind));
+    setVersionForm(defaultTopicVersionPolicyForm(topicKind ?? "SEMI_OBJECTIVE"));
     setVersionName("");
+    setEffectiveFrom("");
     setVersionFeedback("");
     setVersionSucceeded(false);
-  }, [currentTopic]);
+  }, [topicId, topicSlug, topicKind]);
+
+  useEffect(() => {
+    if (!topicSlug) return;
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let disposed = false;
+    setPopulationState((previous) => ({
+      slug: topicSlug,
+      data: previous?.slug === topicSlug ? previous.data : null,
+      loading: true,
+      error: "",
+    }));
+    async function loadPopulation() {
+      try {
+        const response = await fetch(topicEntitiesUrl(topicSlug), {
+          headers: adminApiHeaders(), cache: "no-store", signal: controller.signal,
+        });
+        const text = await response.text();
+        if (!response.ok) throw new Error(responseMessage(response.status, text));
+        // Nest responds with an empty body for null on legacy topics without a task.
+        const raw = text.trim() ? JSON.parse(text) as unknown : null;
+        const data = parseTopicEntityAutofill(raw);
+        if (raw !== null && !data) throw new Error("无法识别实体填充结果，请稍后重新加载。");
+        if (disposed) return;
+        setPopulationState({ slug: topicSlug, data, loading: false, error: "" });
+        if (data && entityInputMode.current === "automatic") {
+          const selection = entityAutofillSelection(data);
+          if (selection) setVersionForm((current) => ({ ...current, entityIdsInput: selection }));
+        }
+        if (data?.status === "queued" || data?.status === "running") {
+          timer = setTimeout(loadPopulation, 3000);
+        }
+      } catch (error) {
+        if (disposed) return;
+        setPopulationState((previous) => ({
+          slug: topicSlug,
+          data: previous?.slug === topicSlug ? previous.data : null,
+          loading: false,
+          error: error instanceof Error ? error.message : String(error),
+        }));
+        timer = setTimeout(loadPopulation, 10000);
+      }
+    }
+    void loadPopulation();
+    return () => {
+      disposed = true;
+      controller.abort();
+      if (timer) clearTimeout(timer);
+    };
+  }, [topicSlug, topicKind, populationRefresh]);
+
+  async function retryPopulation() {
+    if (!topicSlug) return;
+    const retrySlug = topicSlug;
+    setRetryingSlug(retrySlug);
+    try {
+      const response = await fetch(adminTopicEntitiesRetryUrl(retrySlug), {
+        method: "POST", headers: adminApiHeaders(),
+      });
+      const text = await response.text();
+      if (!response.ok) throw new Error(responseMessage(response.status, text));
+      setPopulationRefresh((value) => value + 1);
+    } catch (error) {
+      setPopulationState((previous) => previous?.slug === retrySlug ? {
+        ...previous,
+        error: error instanceof Error ? error.message : String(error),
+      } : previous);
+    } finally {
+      setRetryingSlug((value) => value === retrySlug ? null : value);
+    }
+  }
+
+  function useFoundEntities() {
+    if (!population) return;
+    const selection = entityAutofillSelection(population, true);
+    if (!selection) return;
+    entityInputMode.current = "manual";
+    setVersionForm((current) => ({ ...current, entityIdsInput: selection }));
+    setVersionFeedback(`已选择 ${population.entities.length} 个参榜对象，请继续填写版本名称和生效时间。`);
+    setVersionSucceeded(true);
+  }
 
   async function submitTopic(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -167,6 +277,11 @@ export function TopicCreatePanel({
       setTopicFeedback("请填写语言地区，例如 zh-CN。");
       return;
     }
+    const entityCount = Number(newEntityCount);
+    if (!Number.isInteger(entityCount) || entityCount < 1 || entityCount > 50) {
+      setTopicFeedback("参榜对象数量请填写 1 到 50 之间的整数。");
+      return;
+    }
 
     setTopicSubmitting(true);
     setTopicFeedback("");
@@ -174,7 +289,7 @@ export function TopicCreatePanel({
       const response = await fetch(adminTopicsUrl(), {
         method: "POST",
         headers: { ...adminApiHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify({ slug, title, kind: newKind, locale }),
+        body: JSON.stringify({ slug, title, kind: newKind, locale, entityCount }),
       });
       const text = await response.text();
       if (!response.ok) {
@@ -187,7 +302,7 @@ export function TopicCreatePanel({
         return;
       }
       setTopicSucceeded(true);
-      setTopicFeedback(`已新建“${topic.title}”，并切换到这个话题。现在可以新建首个版本。`);
+      setTopicFeedback(`已新建“${topic.title}”，正在自动查找 ${entityCount} 个参榜对象。可在“参榜对象”中查看进度，刷新后仍可继续。`);
       onTopicCreated(topic);
       setNewSlug("");
       setNewTitle("");
@@ -202,11 +317,15 @@ export function TopicCreatePanel({
     setTemplateId(nextTemplateId);
     setVersionFeedback("");
     if (!currentTopic || nextTemplateId === "default") {
-      setVersionForm(
-        defaultTopicVersionPolicyForm(currentTopic?.kind ?? "SEMI_OBJECTIVE"),
-      );
+      const selection = population ? entityAutofillSelection(population) : null;
+      setVersionForm((current) => ({
+        ...defaultTopicVersionPolicyForm(currentTopic?.kind ?? "SEMI_OBJECTIVE"),
+        entityIdsInput: entityInputMode.current === "manual" ? current.entityIdsInput : selection ?? "",
+      }));
+      if (entityInputMode.current !== "manual") entityInputMode.current = "automatic";
       return;
     }
+    entityInputMode.current = "template";
     const template = existingVersions.find((row) => row.id === nextTemplateId);
     setVersionForm(
       topicVersionPolicyFormFromTemplate(
@@ -221,6 +340,12 @@ export function TopicCreatePanel({
     setVersionSucceeded(false);
     if (!currentTopic) {
       setVersionFeedback("请先查询或新建一个话题。");
+      return;
+    }
+    if (population && entityInputMode.current === "automatic" && !entityAutofillSelection(population)) {
+      setVersionFeedback(population.status === "partial"
+        ? "找到的对象少于期望数量。请先查看名单，点击“使用已找到的对象”，或重试自动填充。"
+        : "参榜对象尚未准备好，请先等待查找完成，或重试自动填充。");
       return;
     }
     const version = versionName.trim();
@@ -285,7 +410,7 @@ export function TopicCreatePanel({
         <CardHeader>
           <CardTitle className="text-base">新建话题</CardTitle>
           <CardDescription>
-            先建立一个榜单主题。内部标识创建后不能修改；展示名称和榜单类型以后仍可调整。
+            填写榜单主题和期望数量，系统会从 Wikidata 公开知识库查找真实对象并保留来源。
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -296,10 +421,13 @@ export function TopicCreatePanel({
                 <Input
                   id="new-topic-title"
                   maxLength={200}
-                  placeholder="例如：全球 AI 工具热度榜"
+                  placeholder="例如：足球球星榜、全球女歌手榜"
                   value={newTitle}
                   onChange={(event) => setNewTitle(event.target.value)}
                 />
+                <p className="text-xs text-muted-foreground">
+                  请写清参榜对象，例如“足球球星榜”；“球星榜”可能无法区分足球与篮球。
+                </p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="new-topic-slug">内部标识</Label>
@@ -346,6 +474,22 @@ export function TopicCreatePanel({
                   onChange={(event) => setNewLocale(event.target.value)}
                 />
               </div>
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="new-topic-entity-count">参榜对象数量</Label>
+                <Input
+                  id="new-topic-entity-count"
+                  type="number"
+                  min="1"
+                  max="50"
+                  step="1"
+                  required
+                  value={newEntityCount}
+                  onChange={(event) => setNewEntityCount(event.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  填写 1–50。系统自动查找对象，无需准备实体编号；找不到足量对象时会显示实际名单，由你决定是否使用。
+                </p>
+              </div>
             </div>
             <div className="flex flex-wrap items-center gap-3">
               <Button type="submit" disabled={topicSubmitting}>
@@ -374,6 +518,82 @@ export function TopicCreatePanel({
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {currentTopic ? (
+            <section className="mb-5 space-y-3 rounded-lg border bg-muted/30 p-4" aria-label="参榜对象">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="font-medium">参榜对象</h3>
+                <p className="text-sm" role="status">
+                  {population
+                    ? `${ENTITY_AUTOFILL_STATUS_LABELS[population.status]} · 已找到 ${population.entities.length} / ${population.requestedCount} 个`
+                    : populationLoading ? "正在加载参榜对象…" : "尚无自动填充记录"}
+                </p>
+              </div>
+              {population ? (
+                <>
+                  {population.strategy ? <p className="text-sm text-muted-foreground">查找范围：{population.strategy}</p> : null}
+                  {population.message ? <p className="text-sm text-muted-foreground">{population.message}</p> : null}
+                  {populationWaiting ? (
+                    <p className="text-sm text-muted-foreground">
+                      系统正在后台查找，名单会自动更新。可以离开或刷新页面，稍后查询这个话题即可继续。
+                      {populationStalled ? "等待已超过 3 分钟，可以重试；话题已保存，无需重复创建。" : ""}
+                    </p>
+                  ) : null}
+                  {population.entities.length > 0 ? (
+                    <>
+                      <ul className="max-h-64 space-y-3 overflow-y-auto pr-2" aria-label="已找到的对象名单">
+                        {population.entities.map((entity) => (
+                          <li key={entity.id}>
+                            <div className="flex flex-wrap items-baseline gap-2">
+                              <span className="font-medium">{entity.name}</span>
+                              {entity.sourceUrl ? (
+                                <a className="text-sm text-primary underline-offset-2 hover:underline" href={entity.sourceUrl} target="_blank" rel="noopener noreferrer">
+                                  查看来源<span className="sr-only">：{entity.name}</span>
+                                </a>
+                              ) : null}
+                            </div>
+                            {entity.description ? <p className="text-sm text-muted-foreground">{entity.description}</p> : null}
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="text-xs text-muted-foreground">
+                        以上为候选对象名单，顺序不代表排名。本次只填充对象资料；指标数据和榜单计算仍需后续操作。
+                      </p>
+                    </>
+                  ) : null}
+                  {population.status === "partial" ? (
+                    <p className="text-sm text-amber-700 dark:text-amber-300">
+                      期望 {population.requestedCount} 个，实际找到 {population.entities.length} 个。确认名单后，可以按已有数量创建版本，或重试继续查找。
+                    </p>
+                  ) : null}
+                  {population.status === "failed" ? (
+                    <p className="text-sm text-muted-foreground">
+                      话题已保存。请按提示处理后重试；如主题不明确，可在下方修改展示名称，使参榜对象更明确。
+                    </p>
+                  ) : null}
+                  <div className="flex flex-wrap gap-2">
+                    {(population.status === "completed" || population.status === "partial") && population.entities.length > 0 ? (
+                      <Button type="button" variant="outline" size="sm" onClick={useFoundEntities}>
+                        使用已找到的对象（{population.entities.length} 个）
+                      </Button>
+                    ) : null}
+                    {(population.status === "partial" || population.status === "failed" || populationStalled) ? (
+                      <Button type="button" variant="outline" size="sm" disabled={retryingSlug === topicSlug} onClick={() => void retryPopulation()}>
+                        {retryingSlug === topicSlug ? "正在重试…" : "重试自动填充"}
+                      </Button>
+                    ) : null}
+                  </div>
+                </>
+              ) : !populationLoading && !populationError ? (
+                <p className="text-sm text-muted-foreground">这个话题尚无自动填充记录，可继续使用原有版本或手动填写实体编号。</p>
+              ) : null}
+              {populationError ? (
+                <div className="space-y-2">
+                  <p className="text-sm text-destructive" role="alert">读取或更新名单失败：{populationError}。话题及已保存的数据不会丢失。</p>
+                  <Button type="button" variant="outline" size="sm" onClick={() => setPopulationRefresh((value) => value + 1)}>重新加载名单</Button>
+                </div>
+              ) : null}
+            </section>
+          ) : null}
           <form className="space-y-4" onSubmit={submitVersion}>
             <fieldset className="space-y-4" disabled={!currentTopic || versionSubmitting}>
               <div className="grid gap-3 sm:grid-cols-2">
@@ -426,21 +646,32 @@ export function TopicCreatePanel({
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="new-version-entity-ids">参榜实体编号</Label>
-                <Input
-                  id="new-version-entity-ids"
-                  placeholder="例如：12, 18, 25"
-                  value={versionForm.entityIdsInput}
-                  onChange={(event) =>
-                    setVersionForm((current) => ({
-                      ...current,
-                      entityIdsInput: event.target.value,
-                    }))
-                  }
-                />
-                <p className="text-xs text-muted-foreground">
-                  多个编号用逗号或空格分隔。系统会校验这些实体是否存在。
-                </p>
+                {population ? (
+                  <>
+                    <p className="text-sm" role="status">
+                      {selectedEntityIds.size > 0
+                        ? `当前版本已选择 ${selectedEntityIds.size} 个参榜对象。`
+                        : "等待选择参榜对象。足量找到后会自动填入；数量不足时请先确认上方名单。"}
+                    </p>
+                    {selectedEntityIds.size > 0 ? <p className="text-sm text-muted-foreground">{population.entities.filter((entity) => selectedEntityIds.has(entity.id)).map((entity) => entity.name).join("、")}</p> : null}
+                  </>
+                ) : null}
+                <details open={!population}>
+                  <summary className="cursor-pointer text-sm text-muted-foreground">{population ? "手动调整实体编号（可选）" : "参榜实体编号"}</summary>
+                  <div className="mt-2 space-y-2">
+                    <Label htmlFor="new-version-entity-ids">参榜实体编号</Label>
+                    <Input
+                      id="new-version-entity-ids"
+                      placeholder="例如：12, 18, 25"
+                      value={versionForm.entityIdsInput}
+                      onChange={(event) => {
+                        entityInputMode.current = "manual";
+                        setVersionForm((current) => ({ ...current, entityIdsInput: event.target.value }));
+                      }}
+                    />
+                    <p className="text-xs text-muted-foreground">多个编号用逗号或空格分隔。手动调整或复制旧版本后，自动更新名单不会覆盖你的选择。</p>
+                  </div>
+                </details>
               </div>
 
               <div className="space-y-2">

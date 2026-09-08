@@ -83,6 +83,8 @@ import {
 import { toRankingSnapshotPlainJson } from './snapshot-plain-json';
 import { buildClickhouseRankingSnapshotOutboxPayload } from './clickhouse-ranking-snapshot-outbox-payload';
 import { buildRankingSnapshotCompletedOutboxPayload } from './ranking-snapshot-completed-outbox-payload';
+import { randomUUID } from 'node:crypto';
+import { TopicEntityAutofillService, publicEntityAutofill } from './topic-entity-autofill.service';
 
 const defaultWeights: Record<string, number> = {
   streams: 0.35,
@@ -122,6 +124,7 @@ export type CreateTopicArgs = {
   title: string;
   kind: TopicKind;
   locale?: string;
+  entityCount?: number;
 };
 
 export type CreateTopicVersionArgs = {
@@ -147,6 +150,7 @@ export class RankingsService {
     private readonly realtime: RealtimePublisherService,
     @Optional() private readonly clickhouse?: ClickhouseService,
     @Optional() private readonly prismaRead?: PrismaReadService,
+    @Optional() private readonly entityAutofill?: TopicEntityAutofillService,
   ) {}
 
   /** 读多路径优先只读副本（`DATABASE_READ_URL`） */
@@ -219,6 +223,13 @@ export class RankingsService {
     const locale = args.locale?.trim() || 'en';
     if (!slug) throw new BadRequestException('topic slug is required');
     if (!title) throw new BadRequestException('topic title is required');
+    if (args.entityCount !== undefined && (!Number.isInteger(args.entityCount) || args.entityCount < 1 || args.entityCount > 50)) {
+      throw new BadRequestException('自动填充实体数量必须是 1 到 50 的整数。');
+    }
+    if (args.entityCount !== undefined && !this.entityAutofill) {
+      throw new BadRequestException('自动填充服务尚未启用。');
+    }
+    const runToken = args.entityCount !== undefined ? randomUUID() : undefined;
 
     try {
       const topic = await this.prisma.topic.create({
@@ -227,14 +238,19 @@ export class RankingsService {
           title,
           kind: args.kind,
           locale,
+          ...(runToken ? { entityAutofill: { create: { requestedCount: args.entityCount!, runToken } } } : {}),
           ...(auth?.tenantId != null
             ? { tenant: { connect: { id: auth.tenantId } } }
             : {}),
         },
       });
+      const entityAutofill = runToken
+        ? await this.entityAutofill!.enqueue(topic.id, runToken)
+        : null;
       return toPlainJson({
         ...topic,
         kindStrategy: topicKindStrategyPublic(topic.kind),
+        entityAutofill,
       });
     } catch (e) {
       if (
@@ -527,6 +543,7 @@ export class RankingsService {
         tenantId: true,
         createdAt: true,
         updatedAt: true,
+        entityAutofill: true,
       },
     });
     if (!topic) throw new NotFoundException('topic not found');
@@ -541,6 +558,7 @@ export class RankingsService {
       tenantId: topic.tenantId?.toString() ?? null,
       createdAt: topic.createdAt.toISOString(),
       updatedAt: topic.updatedAt.toISOString(),
+      entityAutofill: publicEntityAutofill(topic.entityAutofill),
     });
   }
 

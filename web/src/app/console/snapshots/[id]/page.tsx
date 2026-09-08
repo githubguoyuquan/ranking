@@ -219,10 +219,11 @@ export default async function SnapshotPage({
     <div className="w-full max-w-none space-y-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
+          <p className="mb-1 text-sm font-medium text-muted-foreground">快照详情</p>
           <h1 className="text-[22px] font-semibold tracking-tight">{title}</h1>
           <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
             <span>
-              id <code className="rounded bg-muted px-1 text-xs">{data.id}</code>
+              snapshot id <code className="rounded bg-muted px-1 text-xs">{data.id}</code>
             </span>
             {data.id != null && data.id !== "" ? (
               <CopySnapshotIdButton id={String(data.id)} />

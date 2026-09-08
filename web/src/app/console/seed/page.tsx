@@ -25,12 +25,22 @@ import {
   topicsAdminPath,
 } from "@/lib/admin-web-paths";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+
+const SEED_DEMO_STORAGE_KEY = "ranking.console.seed-demo.last-success.v1";
 
 type SeedDemoResponse = {
   topicId?: string;
   topicVersionId?: string;
   snapshots?: Array<{ id?: string | number | bigint }>;
+};
+
+type PersistedSeedDemo = {
+  result: string;
+  quickLinks: {
+    topicVersionId?: string;
+    snapshotIds: string[];
+  };
 };
 
 export default function SeedPage() {
@@ -43,10 +53,42 @@ export default function SeedPage() {
     snapshotIds: string[];
   } | null>(null);
 
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(SEED_DEMO_STORAGE_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw) as Partial<PersistedSeedDemo>;
+      if (
+        typeof saved.result !== "string" ||
+        !saved.quickLinks ||
+        !Array.isArray(saved.quickLinks.snapshotIds) ||
+        !saved.quickLinks.snapshotIds.every((id) => typeof id === "string")
+      ) {
+        window.localStorage.removeItem(SEED_DEMO_STORAGE_KEY);
+        return;
+      }
+      setResult(saved.result);
+      setQuickLinks({
+        topicVersionId:
+          typeof saved.quickLinks.topicVersionId === "string"
+            ? saved.quickLinks.topicVersionId
+            : undefined,
+        snapshotIds: saved.quickLinks.snapshotIds,
+      });
+    } catch {
+      // Ignore unavailable or malformed browser storage; the page still works.
+    }
+  }, []);
+
   async function runSeed() {
     setLoading(true);
     setResult("");
     setQuickLinks(null);
+    try {
+      window.localStorage.removeItem(SEED_DEMO_STORAGE_KEY);
+    } catch {
+      // Ignore unavailable browser storage; the request itself is unaffected.
+    }
     try {
       const body =
         slug.trim() === "" ? {} : { slug: slug.trim() };
@@ -68,13 +110,22 @@ export default function SeedPage() {
                 s.id != null && s.id !== "" ? String(s.id) : null,
               )
               .filter((x): x is string => x != null) ?? [];
-          setQuickLinks({
+          const nextQuickLinks = {
             topicVersionId:
               parsed.topicVersionId != null
                 ? String(parsed.topicVersionId)
                 : undefined,
             snapshotIds: ids,
-          });
+          };
+          setQuickLinks(nextQuickLinks);
+          try {
+            window.localStorage.setItem(
+              SEED_DEMO_STORAGE_KEY,
+              JSON.stringify({ result: formatted, quickLinks: nextQuickLinks }),
+            );
+          } catch {
+            // Ignore storage quota/privacy-mode errors; keep the in-memory result.
+          }
         }
       } catch {
         formatted = text;
@@ -123,7 +174,7 @@ export default function SeedPage() {
         <CardHeader>
           <CardTitle className="text-base">执行</CardTitle>
           <CardDescription>
-            成功后在下方 JSON 中取快照 id；可选 slug，空则使用后端默认{" "}
+            成功后下方会显示快照 id 和快捷入口；最近一次成功结果会在刷新页面后保留。可选 slug，空则使用后端默认{" "}
             <code className="text-xs">global-female-singers</code>
             。slug 框内{" "}
             <kbd className="rounded border border-border bg-muted px-1 text-xs">Enter</kbd>{" "}

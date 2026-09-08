@@ -17,8 +17,10 @@ export class RedisHealthService {
       maxRetriesPerRequest: 1,
       connectTimeout: 3000,
       enableOfflineQueue: false,
+      lazyConnect: true,
     });
     try {
+      await redis.connect();
       const pong = await redis.ping();
       return {
         ok: pong === 'PONG',

@@ -42,7 +42,7 @@ export function HotBoardFilters({
   return (
     <form onSubmit={submit} className="flex flex-wrap items-end gap-2">
       <div className="min-w-[12rem] flex-1">
-        <label className="mb-1 block text-xs text-muted-foreground">话题筛选</label>
+        <label className="mb-1 block text-sm text-muted-foreground">话题筛选</label>
         <Input
           value={q}
           onChange={(e) => setQ(e.target.value)}
@@ -51,11 +51,11 @@ export function HotBoardFilters({
         />
       </div>
       <div>
-        <label className="mb-1 block text-xs text-muted-foreground">类型</label>
+        <label className="mb-1 block text-sm text-muted-foreground">类型</label>
         <select
           value={kind}
           onChange={(e) => setKind(e.target.value)}
-          className="h-9 rounded-lg border border-input bg-background px-2 text-sm"
+          className="h-10 rounded-lg border border-input bg-background px-3 text-base"
         >
           {TOPIC_KINDS.map((k) => (
             <option key={k.value || "all"} value={k.value}>

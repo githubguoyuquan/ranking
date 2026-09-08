@@ -64,7 +64,7 @@ const EMPTY_QUICK_WEIGHTS: QuickWeightsState = {
 };
 
 const selectClass =
-  "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-xs outline-none focus-visible:ring-2 focus-visible:ring-ring";
+  "flex h-10 w-full rounded-md border border-input bg-transparent px-3 py-2 text-base leading-6 shadow-xs outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 type KindStrategy = {
   kind: string;

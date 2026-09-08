@@ -275,19 +275,18 @@ export default function SeedPage() {
                 </ul>
               ) : null}
               {quickLinks.snapshotIds.length >= 2 ? (
-                <p className="mt-3 flex flex-wrap items-center gap-x-2 text-xs">
-                  <Link
-                    href={snapshotsCompareAdminPath(quickLinks.snapshotIds)}
-                    className="text-primary underline-offset-4 hover:underline"
-                  >
-                    并列对比本批 {quickLinks.snapshotIds.length} 张快照 →
-                  </Link>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <Button asChild variant="outline" size="sm">
+                    <Link href={snapshotsCompareAdminPath(quickLinks.snapshotIds)}>
+                      对比本批 {quickLinks.snapshotIds.length} 张快照
+                    </Link>
+                  </Button>
                   <CopyTextButton
                     text={appUrl(snapshotsCompareAdminPath(quickLinks.snapshotIds))}
                     idleLabel="复制"
                     className="h-5 px-1.5 text-xs"
                   />
-                </p>
+                </div>
               ) : null}
               {quickLinks.topicVersionId ? (
                 <p

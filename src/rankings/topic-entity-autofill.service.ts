@@ -116,35 +116,47 @@ export class TopicEntityAutofillService {
         result.warning,
         '候选顺序不代表榜单名次；尚未自动采集排名指标。',
       ].filter(Boolean).join(' ');
-      await this.prisma.$transaction(async (tx) => {
-        // Lock/check the current run BEFORE writing entities; a superseded job
-        // cannot create orphan candidates or overwrite a more recent selection.
-        const current = await tx.topicEntityAutofill.updateMany({
-          where: { topicId, runToken: payload.runToken, status: 'running' },
-          data: { status, strategy: result.strategy, message },
-        });
-        if (current.count === 0) return;
-        const entities = [];
-        for (const candidate of candidates) {
-          const externalKey = `wikidata:${record.topic.tenantId?.toString() ?? 'public'}:${candidate.externalId}`;
-          const entity = await tx.entity.upsert({
-            where: { externalKey },
-            create: {
-              externalKey, tenantId: record.topic.tenantId,
-              type: candidate.type, canonicalName: candidate.name,
-            },
-            update: {}, // Keep any operator edits to an existing entity.
+      const entities = [];
+      // Persist in bounded transactions so a large operator-requested roster does
+      // not make one database transaction grow with the requested count.
+      for (let start = 0; start < candidates.length; start += 100) {
+        const chunk = candidates.slice(start, start + 100);
+        const saved = await this.prisma.$transaction(async (tx) => {
+          const current = await tx.topicEntityAutofill.findUnique({
+            where: { topicId }, select: { runToken: true, status: true },
           });
-          if (entity.tenantId !== record.topic.tenantId) throw new Error('Entity source identity tenant mismatch');
-          entities.push({ ...candidate, id: entity.id.toString(), name: entity.canonicalName });
-          if (this.elastic.isEnabled() || this.qdrant.isEnabled()) {
-            await tx.outboxEvent.create({ data: elasticEntitySyncOutboxCreate(entity.id, 'upsert') });
+          if (current?.runToken !== payload.runToken || current.status !== 'running') return null;
+          const rows = [];
+          for (const candidate of chunk) {
+            const externalKey = `wikidata:${record.topic.tenantId?.toString() ?? 'public'}:${candidate.externalId}`;
+            const entity = await tx.entity.upsert({
+              where: { externalKey },
+              create: {
+                externalKey, tenantId: record.topic.tenantId,
+                type: candidate.type, canonicalName: candidate.name,
+              },
+              update: {}, // Keep any operator edits to an existing entity.
+            });
+            if (entity.tenantId !== record.topic.tenantId) throw new Error('Entity source identity tenant mismatch');
+            rows.push({ ...candidate, id: entity.id.toString(), name: entity.canonicalName });
+            if (this.elastic.isEnabled() || this.qdrant.isEnabled()) {
+              await tx.outboxEvent.create({ data: elasticEntitySyncOutboxCreate(entity.id, 'upsert') });
+            }
           }
-        }
-        await tx.topicEntityAutofill.update({
-          where: { topicId }, data: { entities: entities as unknown as Prisma.InputJsonValue },
-        });
-      }, { timeout: 20_000 });
+          return rows;
+        }, { timeout: 20_000 });
+        if (!saved) return;
+        entities.push(...saved);
+      }
+      await this.prisma.topicEntityAutofill.updateMany({
+        where: { topicId, runToken: payload.runToken, status: 'running' },
+        data: {
+          status,
+          strategy: result.strategy,
+          message,
+          entities: entities as unknown as Prisma.InputJsonValue,
+        },
+      });
     } catch (error) {
       // Keep prior successful candidates on a failed retry, with a visible failure.
       this.logger.warn(`Entity autofill failed for topic ${topicId}: ${error instanceof Error ? error.message : 'unknown failure'}`);

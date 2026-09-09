@@ -226,7 +226,6 @@ export class CreateTopicAdminDto {
   @Transform(({ obj, key }) => obj[key])
   @IsInt()
   @Min(1)
-  @Max(50)
   entityCount?: number;
 }
 

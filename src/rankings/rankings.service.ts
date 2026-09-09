@@ -225,8 +225,8 @@ export class RankingsService {
     const locale = args.locale?.trim() || 'en';
     if (!slug) throw new BadRequestException('topic slug is required');
     if (!title) throw new BadRequestException('topic title is required');
-    if (args.entityCount !== undefined && (!Number.isInteger(args.entityCount) || args.entityCount < 1 || args.entityCount > 50)) {
-      throw new BadRequestException('自动填充实体数量必须是 1 到 50 的整数。');
+    if (args.entityCount !== undefined && (!Number.isInteger(args.entityCount) || args.entityCount < 1)) {
+      throw new BadRequestException('自动填充实体数量必须是正整数。');
     }
     if (args.entityCount !== undefined && !this.entityAutofill) {
       throw new BadRequestException('自动填充服务尚未启用。');

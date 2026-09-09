@@ -20,11 +20,18 @@ function makeService(prisma: Record<string, unknown>): RankingsService {
 }
 
 describe('RankingsService admin topic creation', () => {
-  it.each([0, -1, 51, 1.5, true, '10'])('rejects invalid entityCount %j at the API boundary', async (entityCount) => {
+  it.each([0, -1, 1.5, true, '10'])('rejects invalid entityCount %j at the API boundary', async (entityCount) => {
     const dto = plainToInstance(CreateTopicAdminDto, {
       slug: 'runtime-topic', title: '运行时业务对象榜', kind: 'SEMI_OBJECTIVE', entityCount,
     }, { enableImplicitConversion: true });
     expect((await validate(dto)).some((error) => error.property === 'entityCount')).toBe(true);
+  });
+
+  it.each([51, 1_000, 100_000])('accepts entityCount %i without a business upper limit', async (entityCount) => {
+    const dto = plainToInstance(CreateTopicAdminDto, {
+      slug: 'runtime-topic', title: '运行时业务对象榜', kind: 'SEMI_OBJECTIVE', entityCount,
+    }, { enableImplicitConversion: true });
+    expect((await validate(dto)).some((error) => error.property === 'entityCount')).toBe(false);
   });
 
   it('persists requested count with the topic before enqueueing', async () => {

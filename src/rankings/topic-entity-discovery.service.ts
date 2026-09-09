@@ -46,8 +46,8 @@ export class TopicEntityDiscoveryService {
     locale: string;
     count: number;
   }): Promise<EntityDiscoveryResult> {
-    if (!Number.isInteger(args.count) || args.count < 1 || args.count > 50) {
-      throw new BadRequestException('自动填充实体数量必须为 1 到 50 的整数。');
+    if (!Number.isInteger(args.count) || args.count < 1) {
+      throw new BadRequestException('自动填充实体数量必须为正整数。');
     }
     const title = args.title.trim();
     if (!title || title.length > 200) {
@@ -63,54 +63,62 @@ export class TopicEntityDiscoveryService {
       value: await this.resolveIdentity(constraint.value, 'item', sourceLanguage),
     })));
 
-    const query = this.buildQuery({
-      categoryId: category.id,
-      membership: plan.membership,
-      constraints: constraints.map((constraint) => ({
-        propertyId: constraint.property.id,
-        valueId: constraint.value.id,
-      })),
-      languages,
-      limit: Math.min(Math.max(args.count * 5, 20), 150),
-    });
-    const url = new URL(QUERY_ENDPOINT);
-    url.searchParams.set('query', query);
-    url.searchParams.set('format', 'json');
-    const payload = await entitySourceJson(url);
-    const bindings = sourceRecord(sourceRecord(payload)?.results)?.bindings;
-    if (!Array.isArray(bindings)) {
-      throw new ServiceUnavailableException('实体来源返回了无法识别的数据，请稍后重试。');
-    }
-
     const seen = new Set<string>();
-    const candidates: DiscoveredTopicEntity[] = [];
-    for (const binding of bindings) {
-      const row = sourceRecord(binding);
-      const uri = sourceRecord(row?.item)?.value;
-      const label = sourceRecord(row?.itemLabel)?.value;
-      const description = sourceRecord(row?.itemDescription)?.value;
-      const qid = typeof uri === 'string'
-        ? /^https?:\/\/www\.wikidata\.org\/entity\/(Q[1-9]\d*)$/.exec(uri)?.[1]
-        : undefined;
-      if (!qid || seen.has(qid) || typeof label !== 'string'
-        || !label.trim() || /^Q\d+$/.test(label)) continue;
-      seen.add(qid);
-      candidates.push({
-        externalId: qid,
-        name: label.trim().slice(0, 300),
-        description: typeof description === 'string' ? description.trim().slice(0, 2000) : '',
-        type: plan.membership === 'occupation' ? 'PERSON' : 'ENTITY',
-        sourceUrl: `https://www.wikidata.org/wiki/${qid}`,
+    const entities: DiscoveredTopicEntity[] = [];
+    const pageSize = 100;
+    let offset = 0;
+    let sourceExhausted = false;
+    while (entities.length < args.count && !sourceExhausted) {
+      const query = this.buildQuery({
+        categoryId: category.id,
+        membership: plan.membership,
+        constraints: constraints.map((constraint) => ({
+          propertyId: constraint.property.id,
+          valueId: constraint.value.id,
+        })),
+        languages,
+        limit: pageSize,
+        offset,
       });
+      const url = new URL(QUERY_ENDPOINT);
+      url.searchParams.set('query', query);
+      url.searchParams.set('format', 'json');
+      const payload = await entitySourceJson(url);
+      const bindings = sourceRecord(sourceRecord(payload)?.results)?.bindings;
+      if (!Array.isArray(bindings)) {
+        throw new ServiceUnavailableException('实体来源返回了无法识别的数据，请稍后重试。');
+      }
+      sourceExhausted = bindings.length < pageSize;
+      offset += pageSize;
+
+      const candidates: DiscoveredTopicEntity[] = [];
+      for (const binding of bindings) {
+        const row = sourceRecord(binding);
+        const uri = sourceRecord(row?.item)?.value;
+        const label = sourceRecord(row?.itemLabel)?.value;
+        const description = sourceRecord(row?.itemDescription)?.value;
+        const qid = typeof uri === 'string'
+          ? /^https?:\/\/www\.wikidata\.org\/entity\/(Q[1-9]\d*)$/.exec(uri)?.[1]
+          : undefined;
+        if (!qid || seen.has(qid) || typeof label !== 'string'
+          || !label.trim() || /^Q\d+$/.test(label)) continue;
+        seen.add(qid);
+        candidates.push({
+          externalId: qid,
+          name: label.trim().slice(0, 300),
+          description: typeof description === 'string' ? description.trim().slice(0, 2000) : '',
+          type: plan.membership === 'occupation' ? 'PERSON' : 'ENTITY',
+          sourceUrl: `https://www.wikidata.org/wiki/${qid}`,
+        });
+      }
+      if (!candidates.length) continue;
+      const accepted = await this.intent.review(title, candidates);
+      for (const candidate of candidates) {
+        if (accepted.has(candidate.externalId)) entities.push(candidate);
+        if (entities.length === args.count) break;
+      }
     }
 
-    if (!candidates.length) {
-      throw new BadRequestException(`“${args.title}”没有找到有公开身份的候选实体。`);
-    }
-    const accepted = await this.intent.review(title, candidates);
-    const entities = candidates
-      .filter((candidate) => accepted.has(candidate.externalId))
-      .slice(0, args.count);
     if (!entities.length) {
       throw new BadRequestException(
         `“${args.title}”没有找到能确认符合完整话题范围的公开实体；请调整名称后重试。`,
@@ -178,6 +186,7 @@ export class TopicEntityDiscoveryService {
     constraints: Array<{ propertyId: string; valueId: string }>;
     languages: string[];
     limit: number;
+    offset: number;
   }): string {
     // These are provider vocabulary relations. Business classes/properties are resolved at runtime.
     const instance = `?item wdt:P31/wdt:P279* wd:${args.categoryId} .`;
@@ -199,7 +208,7 @@ SELECT ?item ?itemLabel ?itemDescription WHERE {
       ${membership}
       ${constraints}
       ?item wikibase:sitelinks ?sitelinks . FILTER(?sitelinks > 0)
-    } ORDER BY DESC(?sitelinks) ?item LIMIT ${args.limit}
+    } ORDER BY DESC(?sitelinks) ?item LIMIT ${args.limit} OFFSET ${args.offset}
   }
   SERVICE wikibase:label { bd:serviceParam wikibase:language "${args.languages.join(',')}" . }
 } ORDER BY DESC(?sitelinks) ?item`;

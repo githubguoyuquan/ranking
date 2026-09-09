@@ -41,7 +41,7 @@ export function parseTopicEntityAutofill(raw: unknown): TopicEntityAutofill | nu
   const value = raw as Record<string, unknown>;
   if (
     !Number.isInteger(value.requestedCount) ||
-    Number(value.requestedCount) < 1 || Number(value.requestedCount) > 50 ||
+    Number(value.requestedCount) < 1 ||
     typeof value.status !== "string" || !STATUSES.has(value.status) ||
     !Array.isArray(value.entities)
   ) return null;

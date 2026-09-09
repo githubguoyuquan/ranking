@@ -43,5 +43,6 @@ describe("topic entity autofill", () => {
     expect(parseTopicEntityAutofill(null)).toBeNull();
     expect(parseTopicEntityAutofill({ ...population, status: "invented" })).toBeNull();
     expect(parseTopicEntityAutofill({ ...population, requestedCount: 0 })).toBeNull();
+    expect(parseTopicEntityAutofill({ ...population, requestedCount: 500 })).not.toBeNull();
   });
 });

@@ -272,8 +272,8 @@ export function TopicCreatePanel({
       return;
     }
     const entityCount = Number(newEntityCount);
-    if (!Number.isInteger(entityCount) || entityCount < 1 || entityCount > 50) {
-      setTopicFeedback("参榜对象数量请填写 1 到 50 之间的整数。");
+    if (!Number.isSafeInteger(entityCount) || entityCount < 1) {
+      setTopicFeedback("参榜对象数量请填写正整数。");
       return;
     }
 
@@ -467,14 +467,13 @@ export function TopicCreatePanel({
                   id="new-topic-entity-count"
                   type="number"
                   min="1"
-                  max="50"
                   step="1"
                   required
                   value={newEntityCount}
                   onChange={(event) => setNewEntityCount(event.target.value)}
                 />
                 <p className="text-xs text-muted-foreground">
-                  填写 1–50。系统自动查找对象，无需准备实体编号；找不到足量对象时会显示实际名单，由你决定是否使用。
+                  填写任意正整数，没有业务数量上限。数量越大，后台分批查询和核验所需时间越长；公开来源不足时会显示实际名单。
                 </p>
               </div>
             </div>

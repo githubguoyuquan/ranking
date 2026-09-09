@@ -2,7 +2,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import { TopicEntityAutofillService } from './topic-entity-autofill.service';
 
-const candidate = { externalId: 'Q42', name: 'Candidate A', type: 'PERSON', description: 'football player', sourceUrl: 'https://www.wikidata.org/wiki/Q42' };
+const candidate = { externalId: 'Q42', name: 'Candidate A', type: 'PERSON', description: 'public source description', sourceUrl: 'https://www.wikidata.org/wiki/Q42' };
 const auth = { tenantId: 7n, tenantSlug: 'seven', apiKeyId: 1n, apiKeyLabel: 'test', scopes: ['admin'] as ['admin'] };
 
 function fixture(overrides: Record<string, unknown> = {}) {
@@ -12,7 +12,9 @@ function fixture(overrides: Record<string, unknown> = {}) {
     entities: [], topic: { id: 8n, tenantId: 7n, title: '业务对象榜', locale: 'zh-CN' }, ...overrides,
   };
   const tx = {
-    topicEntityAutofill: { updateMany: vi.fn().mockResolvedValue({ count: 1 }), update: vi.fn().mockResolvedValue(record) },
+    topicEntityAutofill: {
+      findUnique: vi.fn().mockResolvedValue({ runToken: 'run-1', status: 'running' }),
+    },
     entity: { upsert: vi.fn().mockImplementation(async (args) => ({ ...args.create, id: 11n })) },
     outboxEvent: { create: vi.fn() },
   };
@@ -25,43 +27,46 @@ function fixture(overrides: Record<string, unknown> = {}) {
     $transaction: vi.fn().mockImplementation(async (fn) => fn(tx)),
   };
   const queue = { add: vi.fn().mockResolvedValue({ id: 'job-1' }) };
-  const discovery = { discover: vi.fn().mockResolvedValue({ source: 'wikidata', strategy: 'Football players', entities: [candidate] }) };
+  const discovery = { discover: vi.fn().mockResolvedValue({ source: 'wikidata', strategy: 'runtime category', entities: [candidate] }) };
   const service = new TopicEntityAutofillService(prisma as never, queue as never, discovery as never, { isEnabled: () => true } as never, { isEnabled: () => false } as never);
   return { record, tx, prisma, queue, discovery, service };
 }
 
 describe('topic entity autofill', () => {
   it('saves a sourced, tenant-specific partial selection and indexes it without creating metrics', async () => {
-    const { service, tx, discovery } = fixture();
+    const { service, tx, prisma, discovery } = fixture();
     await service.process({ topicId: '8', runToken: 'run-1' });
     expect(discovery.discover).toHaveBeenCalledWith({ title: '业务对象榜', locale: 'zh-CN', count: 2 });
     expect(tx.entity.upsert).toHaveBeenCalledWith({
       where: { externalKey: 'wikidata:7:Q42' },
       create: { externalKey: 'wikidata:7:Q42', tenantId: 7n, type: 'PERSON', canonicalName: 'Candidate A' }, update: {},
     });
-    expect(tx.topicEntityAutofill.updateMany.mock.calls[0][0].data.status).toBe('partial');
-    expect(tx.topicEntityAutofill.update).toHaveBeenCalledWith({ where: { topicId: 8n }, data: { entities: [{ ...candidate, id: '11' }] } });
+    expect(prisma.topicEntityAutofill.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'partial', entities: [{ ...candidate, id: '11' }] }),
+    }));
     expect(tx.outboxEvent.create).toHaveBeenCalledOnce();
   });
 
   it('deduplicates QIDs, rejects unsafe sources, caps quantity and isolates public identities', async () => {
-    const { service, tx, discovery } = fixture({ requestedCount: 1, topic: { id: 8n, tenantId: null, title: '业务对象榜', locale: 'zh-CN' } });
-    discovery.discover.mockResolvedValue({ source: 'wikidata', strategy: 'Singers', entities: [
+    const { service, tx, prisma, discovery } = fixture({ requestedCount: 1, topic: { id: 8n, tenantId: null, title: '业务对象榜', locale: 'zh-CN' } });
+    discovery.discover.mockResolvedValue({ source: 'wikidata', strategy: 'runtime category', entities: [
       { ...candidate, externalId: 'Q17', sourceUrl: 'http://localhost/admin' }, candidate, candidate,
       { ...candidate, externalId: 'Q43', sourceUrl: 'https://www.wikidata.org/wiki/Q43' },
     ] });
     await service.process({ topicId: '8', runToken: 'run-1' });
     expect(tx.entity.upsert).toHaveBeenCalledOnce();
     expect(tx.entity.upsert.mock.calls[0][0].where.externalKey).toBe('wikidata:public:Q42');
-    expect(tx.topicEntityAutofill.updateMany.mock.calls[0][0].data.status).toBe('completed');
+    expect(prisma.topicEntityAutofill.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'completed' }),
+    }));
   });
 
   it('does not write when a newer retry supersedes a slow source request', async () => {
-    const { service, tx } = fixture();
-    tx.topicEntityAutofill.updateMany.mockResolvedValue({ count: 0 });
+    const { service, tx, prisma } = fixture();
+    tx.topicEntityAutofill.findUnique.mockResolvedValue({ runToken: 'new-run', status: 'running' });
     await service.process({ topicId: '8', runToken: 'run-1' });
     expect(tx.entity.upsert).not.toHaveBeenCalled();
-    expect(tx.topicEntityAutofill.update).not.toHaveBeenCalled();
+    expect(prisma.topicEntityAutofill.updateMany).toHaveBeenCalledOnce();
   });
 
   it.each([{ status: 'completed' }, { runToken: 'new-run' }])('ignores duplicate or superseded jobs: %j', async (overrides) => {

@@ -96,6 +96,33 @@ describe('domain-independent topic entity discovery', () => {
     expect(result.entities.map((item) => item.externalId)).toEqual(['Q1', 'Q3']);
   });
 
+  it('paginates source lookup and semantic review beyond the former fixed limit', async () => {
+    const firstPage = Array.from({ length: 100 }, (_, index) => row(`Q${index + 1}`, `对象 ${index + 1}`));
+    const secondPage = Array.from({ length: 20 }, (_, index) => row(`Q${index + 101}`, `对象 ${index + 101}`));
+    const intent = {
+      resolve: vi.fn().mockResolvedValue({
+        category: 'runtime category', membership: 'instance', constraints: [], semantic: true,
+      }),
+      review: vi.fn().mockImplementation(async (_title: string, candidates: Array<{ externalId: string }>) =>
+        new Set(candidates.map((candidate) => candidate.externalId))),
+    };
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(Response.json({ search: [exact('Q500', 'runtime category')] }))
+      .mockResolvedValueOnce(Response.json({ results: { bindings: firstPage } }))
+      .mockResolvedValueOnce(Response.json({ results: { bindings: secondPage } }));
+    vi.stubGlobal('fetch', fetcher);
+
+    const result = await new TopicEntityDiscoveryService(intent as never)
+      .discover({ title: '任意话题', locale: 'zh-CN', count: 120 });
+
+    expect(result.entities).toHaveLength(120);
+    expect(intent.review).toHaveBeenCalledTimes(2);
+    const firstQuery = new URL(fetcher.mock.calls[1][0]).searchParams.get('query');
+    const secondQuery = new URL(fetcher.mock.calls[2][0]).searchParams.get('query');
+    expect(firstQuery).toContain('LIMIT 100 OFFSET 0');
+    expect(secondQuery).toContain('LIMIT 100 OFFSET 100');
+  });
+
   it('requires unique exact provider identities and rejects unsafe IDs', async () => {
     const intent = {
       resolve: vi.fn().mockResolvedValue({
@@ -146,7 +173,7 @@ describe('domain-independent topic entity discovery', () => {
     const service = new TopicEntityDiscoveryService(intent as never);
     await expect(service.discover({ title: '', locale: 'en', count: 1 }))
       .rejects.toThrow(BadRequestException);
-    await expect(service.discover({ title: 'topic', locale: 'en', count: 51 }))
+    await expect(service.discover({ title: 'topic', locale: 'en', count: 1.5 }))
       .rejects.toThrow(BadRequestException);
     expect(intent.resolve).not.toHaveBeenCalled();
   });

@@ -426,7 +426,7 @@ export function TopicCreatePanel({
                   onChange={(event) => setNewTitle(event.target.value)}
                 />
                 <p className="text-xs text-muted-foreground">
-                  当前按公开知识库中的完整类别名称或别名查找，不限定预设业务类别。无法匹配时会提示；不会擅自省略范围条件。通用自然语言解析尚未启用。
+                  系统通过语义解析理解对象类别和明确条件，再从公开知识库查找并核验候选；不限定预设业务类别。无法可靠解析时会提示，不会擅自省略条件。
                 </p>
               </div>
               <div className="space-y-2">

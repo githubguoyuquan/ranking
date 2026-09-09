@@ -24,6 +24,7 @@ import { OpsAnalyticsService } from './ops-analytics.service';
 import { TrendAnomalyAlertCronService } from './trend-anomaly-alert-cron.service';
 import { TrendAnomalyService } from './trend-anomaly.service';
 import { TopicEntityDiscoveryService } from './topic-entity-discovery.service';
+import { TopicEntityIntentService } from './topic-entity-intent.service';
 import { TopicEntityAutofillService } from './topic-entity-autofill.service';
 import { TopicEntityAutofillProcessor } from './topic-entity-autofill.processor';
 import { TOPIC_ENTITY_AUTOFILL_QUEUE } from './topic-entity-autofill-job';
@@ -49,6 +50,7 @@ import { TOPIC_ENTITY_AUTOFILL_QUEUE } from './topic-entity-autofill-job';
     TopicRankingQuery, TopicOverviewQuery, SnapshotContextQuery,
     RankingsService,
     TopicEntityDiscoveryService,
+    TopicEntityIntentService,
     TopicEntityAutofillService,
     EntityMetricsService,
     OpsAnalyticsService,

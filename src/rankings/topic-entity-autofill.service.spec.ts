@@ -45,7 +45,7 @@ describe('topic entity autofill', () => {
   });
 
   it('deduplicates QIDs, rejects unsafe sources, caps quantity and isolates public identities', async () => {
-    const { service, tx, discovery } = fixture({ requestedCount: 1, topic: { id: 8n, tenantId: null, title: '歌手榜', locale: 'zh-CN' } });
+    const { service, tx, discovery } = fixture({ requestedCount: 1, topic: { id: 8n, tenantId: null, title: '业务对象榜', locale: 'zh-CN' } });
     discovery.discover.mockResolvedValue({ source: 'wikidata', strategy: 'Singers', entities: [
       { ...candidate, externalId: 'Q17', sourceUrl: 'http://localhost/admin' }, candidate, candidate,
       { ...candidate, externalId: 'Q43', sourceUrl: 'https://www.wikidata.org/wiki/Q43' },
@@ -89,9 +89,9 @@ describe('topic entity autofill', () => {
 
   it('checks tenant access for reads/retries and does not expose the internal token', async () => {
     const { service, prisma, queue } = fixture();
-    expect(await service.get(' football ', auth)).not.toHaveProperty('runToken');
-    expect(prisma.topic.findFirst).toHaveBeenCalledWith({ where: { slug: 'football', tenantId: 7n }, include: { entityAutofill: true } });
-    await service.retry('football', auth);
+    expect(await service.get(' business-topic ', auth)).not.toHaveProperty('runToken');
+    expect(prisma.topic.findFirst).toHaveBeenCalledWith({ where: { slug: 'business-topic', tenantId: 7n }, include: { entityAutofill: true } });
+    await service.retry('business-topic', auth);
     expect(queue.add.mock.calls[0][1].runToken).not.toBe('run-1');
     expect(queue.add.mock.calls[0][1].topicId).toBe('8');
     prisma.topic.findFirst.mockResolvedValue(null);

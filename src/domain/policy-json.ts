@@ -8,6 +8,14 @@ export type RankingPolicyJson = {
   entityIds?: string[];
   weights: Record<string, number>;
   requiredSignalKeys?: string[];
+  /** 指标的运营可读定义；key 必须与 weights 一致。 */
+  metricDefinitions?: Array<{
+    key: string;
+    label: string;
+    description: string;
+    normalizationGuide: string;
+    sourceHints: string[];
+  }>;
   /** 时间衰减；未设时由 TopicKind 预设或 `scoreEntity` 默认 */
   decay?: DecayParams;
 };
@@ -69,6 +77,42 @@ export function parseRankingPolicyJson(raw: unknown): RankingPolicyJson {
     }
   }
 
+  let metricDefinitions: RankingPolicyJson['metricDefinitions'];
+  if (o.metricDefinitions !== undefined) {
+    if (!Array.isArray(o.metricDefinitions)) {
+      throw new Error('metricDefinitions must be an array');
+    }
+    metricDefinitions = o.metricDefinitions.map((entry) => {
+      if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
+        throw new Error('metricDefinitions entries must be objects');
+      }
+      const item = entry as Record<string, unknown>;
+      const key = String(item.key ?? '').trim();
+      const label = String(item.label ?? '').trim();
+      const description = String(item.description ?? '').trim();
+      const normalizationGuide = String(item.normalizationGuide ?? '').trim();
+      if (!key || !(key in weights)) {
+        throw new Error(`metricDefinitions contains unknown key "${key}"`);
+      }
+      if (!label || !description || !normalizationGuide) {
+        throw new Error(`metricDefinitions for "${key}" is incomplete`);
+      }
+      if (!Array.isArray(item.sourceHints)) {
+        throw new Error(`metricDefinitions sourceHints for "${key}" must be an array`);
+      }
+      return {
+        key,
+        label,
+        description,
+        normalizationGuide,
+        sourceHints: item.sourceHints.map(String).map((value) => value.trim()).filter(Boolean),
+      };
+    });
+    if (new Set(metricDefinitions.map((item) => item.key)).size !== metricDefinitions.length) {
+      throw new Error('metricDefinitions contains duplicate keys');
+    }
+  }
+
   let decay: DecayParams | undefined;
   if (o.decay !== undefined) {
     if (o.decay === null || typeof o.decay !== 'object' || Array.isArray(o.decay)) {
@@ -113,6 +157,7 @@ export function parseRankingPolicyJson(raw: unknown): RankingPolicyJson {
   const out: RankingPolicyJson = { weights };
   if (entityIds !== undefined) out.entityIds = entityIds;
   if (requiredSignalKeys !== undefined) out.requiredSignalKeys = requiredSignalKeys;
+  if (metricDefinitions !== undefined) out.metricDefinitions = metricDefinitions;
   if (decay !== undefined) out.decay = decay;
   return out;
 }

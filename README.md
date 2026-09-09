@@ -2,7 +2,7 @@
 
 完整产品愿景、与当前实现的**差距对照**、目标架构（DDD/消息/规模演进）见 **[docs/PLATFORM_ARCHITECTURE.md](docs/PLATFORM_ARCHITECTURE.md)**。
 
-创建话题时可指定参榜对象数量；配置 `OPENAI_API_KEY` 后，后台通用解析话题范围，再从 Wikidata 收集并核验候选名单。仅向 OpenAI 发送话题名称和候选的公开资料。操作、数据边界、来源策略及部署说明见 [话题实体自动填充](docs/ops/TOPIC_ENTITY_AUTOFILL.md)。本功能不修改指标权重、不自动采集指标或跑榜。
+创建话题时可指定参榜对象数量。配置 `OPENAI_API_KEY` 后，系统会按完整话题语义生成 2–6 项动态指标方案，再从 Wikidata 收集并核验候选名单；不会在新话题中固定套用播放量、提及量等业务指标。指标操作和边界见 [动态指标方案](docs/ops/DYNAMIC_TOPIC_METRICS.md)，实体来源见 [话题实体自动填充](docs/ops/TOPIC_ENTITY_AUTOFILL.md)。指标方案不会自动捏造指标值，运营仍需按方案口径导入或采集每个实体的 0–100 分值后才能跑榜。
 
 ## 生产可观测
 

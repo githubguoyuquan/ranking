@@ -62,7 +62,7 @@ export async function entitySourceJson(
     return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
   } catch {
     throw new ServiceUnavailableException(
-      '实体语义解析或公开来源暂时无法访问，请检查网络与服务配置后重试；不会用虚构对象补齐。',
+      '语义解析或公开来源暂时无法访问，请检查网络与服务配置后重试；不会用固定规则或虚构数据补齐。',
     );
   } finally {
     if (dispatcher) await dispatcher.destroy();

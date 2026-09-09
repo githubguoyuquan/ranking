@@ -131,6 +131,8 @@ model Topic {
   title     String
   kind      TopicKind
   locale    String   @default("en")
+  /// 按话题语义生成的动态指标方案；版本创建时复制进 policyJson。
+  metricPlan Json?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

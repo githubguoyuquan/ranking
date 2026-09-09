@@ -22,8 +22,9 @@ import {
   defaultTopicVersionPolicyForm,
   localDateTimeInputNow,
   localDateTimeInputToIso,
-  TOPIC_POLICY_METRIC_KEYS,
+  parseTopicMetricPlan,
   topicVersionPolicyFormFromTemplate,
+  type TopicMetricPlan,
   type TopicVersionPolicyForm,
 } from "@/lib/topic-admin-create";
 import {
@@ -42,16 +43,6 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 const selectClass =
   "flex h-10 w-full rounded-md border border-input bg-transparent px-3 py-2 text-base leading-6 shadow-xs outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
-const METRIC_LABELS: Record<
-  (typeof TOPIC_POLICY_METRIC_KEYS)[number],
-  string
-> = {
-  streams: "播放/使用量",
-  mentions: "提及量",
-  social: "社交热度",
-  news: "新闻热度",
-};
-
 export type CreatedTopic = {
   id: string;
   slug: string;
@@ -59,6 +50,7 @@ export type CreatedTopic = {
   kind: TopicKindValue;
   locale: string;
   kindStrategy?: unknown;
+  metricPlan?: TopicMetricPlan | null;
 };
 
 export type CreatedTopicVersion = {
@@ -70,7 +62,7 @@ export type CreatedTopicVersion = {
 };
 
 type TopicCreatePanelProps = {
-  currentTopic: Pick<CreatedTopic, "id" | "slug" | "title" | "kind"> | null;
+  currentTopic: Pick<CreatedTopic, "id" | "slug" | "title" | "kind" | "metricPlan"> | null;
   existingVersions: CreatedTopicVersion[];
   onTopicCreated: (topic: CreatedTopic) => void;
   onVersionCreated: (version: CreatedTopicVersion) => void;
@@ -107,6 +99,7 @@ function parseCreatedTopic(raw: unknown): CreatedTopic | null {
     kind,
     locale: String(value.locale ?? ""),
     kindStrategy: value.kindStrategy,
+    metricPlan: parseTopicMetricPlan(value.metricPlan),
   };
 }
 
@@ -160,6 +153,7 @@ export function TopicCreatePanel({
   const topicSlug = currentTopic?.slug ?? "";
   const topicId = currentTopic?.id;
   const topicKind = currentTopic?.kind;
+  const topicMetricPlan = currentTopic?.metricPlan;
   const population = populationState?.slug === topicSlug ? populationState.data : null;
   const populationError = populationState?.slug === topicSlug ? populationState.error : "";
   const populationLoading = !!topicSlug && (populationState?.slug !== topicSlug || populationState.loading);
@@ -171,12 +165,12 @@ export function TopicCreatePanel({
   useEffect(() => {
     entityInputMode.current = "automatic";
     setTemplateId("default");
-    setVersionForm(defaultTopicVersionPolicyForm(topicKind ?? "SEMI_OBJECTIVE"));
+    setVersionForm(defaultTopicVersionPolicyForm(topicKind ?? "SEMI_OBJECTIVE", topicMetricPlan));
     setVersionName("");
     setEffectiveFrom("");
     setVersionFeedback("");
     setVersionSucceeded(false);
-  }, [topicId, topicSlug, topicKind]);
+  }, [topicId, topicSlug, topicKind, topicMetricPlan]);
 
   useEffect(() => {
     if (!topicSlug) return;
@@ -302,7 +296,7 @@ export function TopicCreatePanel({
         return;
       }
       setTopicSucceeded(true);
-      setTopicFeedback(`已新建“${topic.title}”，正在自动查找 ${entityCount} 个参榜对象。可在“参榜对象”中查看进度，刷新后仍可继续。`);
+      setTopicFeedback(`已新建“${topic.title}”，已按话题生成 ${topic.metricPlan?.metrics.length ?? 0} 项指标，正在自动查找 ${entityCount} 个参榜对象。`);
       onTopicCreated(topic);
       setNewSlug("");
       setNewTitle("");
@@ -319,7 +313,7 @@ export function TopicCreatePanel({
     if (!currentTopic || nextTemplateId === "default") {
       const selection = population ? entityAutofillSelection(population) : null;
       setVersionForm((current) => ({
-        ...defaultTopicVersionPolicyForm(currentTopic?.kind ?? "SEMI_OBJECTIVE"),
+        ...defaultTopicVersionPolicyForm(currentTopic?.kind ?? "SEMI_OBJECTIVE", currentTopic?.metricPlan),
         entityIdsInput: entityInputMode.current === "manual" ? current.entityIdsInput : selection ?? "",
       }));
       if (entityInputMode.current !== "manual") entityInputMode.current = "automatic";
@@ -397,20 +391,13 @@ export function TopicCreatePanel({
     }
   }
 
-  const preservedRequiredKeys = versionForm.requiredSignalKeys.filter(
-    (key) =>
-      !TOPIC_POLICY_METRIC_KEYS.includes(
-        key as (typeof TOPIC_POLICY_METRIC_KEYS)[number],
-      ),
-  );
-
   return (
     <div className="grid gap-4 xl:grid-cols-2">
       <Card>
         <CardHeader>
           <CardTitle className="text-base">新建话题</CardTitle>
           <CardDescription>
-            填写榜单主题和期望数量，系统会从 Wikidata 公开知识库查找真实对象并保留来源。
+            填写榜单主题和期望数量，系统会生成适合该话题的指标，并从公开知识库查找真实对象。
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -636,7 +623,7 @@ export function TopicCreatePanel({
                   value={templateId}
                   onChange={(event) => selectTemplate(event.target.value)}
                 >
-                  <option value="default">使用该榜单类型的默认规则</option>
+                  <option value="default">使用系统按当前话题生成的指标</option>
                   {existingVersions.map((row) => (
                     <option key={row.id} value={row.id}>
                       复制版本 {row.version}{row.frozen ? "（已冻结）" : ""}
@@ -676,62 +663,76 @@ export function TopicCreatePanel({
 
               <div className="space-y-2">
                 <Label>指标权重</Label>
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                  {TOPIC_POLICY_METRIC_KEYS.map((key) => (
-                    <div key={key} className="space-y-1">
-                      <Label className="text-xs" htmlFor={`new-version-weight-${key}`}>
-                        {METRIC_LABELS[key]}
-                      </Label>
+                {currentTopic?.metricPlan?.rationale && templateId === "default" ? (
+                  <p className="text-sm text-muted-foreground">{currentTopic.metricPlan.rationale}</p>
+                ) : null}
+                {versionForm.usesLegacyFallback ? (
+                  <p className="text-sm text-amber-700 dark:text-amber-300">
+                    这是动态指标功能上线前的话题或旧版本，暂时显示其原有指标；新建话题不会再套用这组固定指标。
+                  </p>
+                ) : null}
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {versionForm.metricDefinitions.map((metric) => (
+                    <div key={metric.key} className="space-y-2 rounded-md border p-3">
+                      <div>
+                        <Label htmlFor={`new-version-weight-${metric.key}`}>
+                          {metric.label}
+                        </Label>
+                        <p className="mt-1 font-mono text-xs text-muted-foreground">{metric.key}</p>
+                      </div>
                       <Input
-                        id={`new-version-weight-${key}`}
+                        id={`new-version-weight-${metric.key}`}
                         type="number"
                         min="0"
                         step="0.01"
-                        value={versionForm.weights[key]}
+                        value={versionForm.weights[metric.key] ?? ""}
                         onChange={(event) =>
                           setVersionForm((current) => ({
                             ...current,
                             weights: {
                               ...current.weights,
-                              [key]: event.target.value,
+                              [metric.key]: event.target.value,
                             },
                           }))
                         }
                       />
+                      <p className="text-xs text-muted-foreground">{metric.description}</p>
+                      <details>
+                        <summary className="cursor-pointer text-xs text-primary">查看数据口径与建议来源</summary>
+                        <p className="mt-1 text-xs text-muted-foreground">统一换算为 0–100 分：{metric.normalizationGuide}</p>
+                        {metric.sourceHints.length > 0 ? (
+                          <p className="mt-1 text-xs text-muted-foreground">建议来源：{metric.sourceHints.join("、")}</p>
+                        ) : null}
+                      </details>
                     </div>
                   ))}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  数字越大，这项数据对最终排名影响越大；不使用可填 0。
+                  权重已经自动归一化为合计 1。数字越大，该指标影响越大；运营人员仍可调整。
                 </p>
               </div>
 
               <div className="space-y-2">
                 <Label>必须有数据的指标</Label>
                 <div className="flex flex-wrap gap-x-4 gap-y-2">
-                  {TOPIC_POLICY_METRIC_KEYS.map((key) => (
-                    <label key={key} className="flex items-center gap-2 text-sm">
+                  {versionForm.metricDefinitions.map((metric) => (
+                    <label key={metric.key} className="flex items-center gap-2 text-sm">
                       <input
                         type="checkbox"
-                        checked={versionForm.requiredSignalKeys.includes(key)}
+                        checked={versionForm.requiredSignalKeys.includes(metric.key)}
                         onChange={(event) =>
                           setVersionForm((current) => ({
                             ...current,
                             requiredSignalKeys: event.target.checked
-                              ? [...new Set([...current.requiredSignalKeys, key])]
-                              : current.requiredSignalKeys.filter((value) => value !== key),
+                              ? [...new Set([...current.requiredSignalKeys, metric.key])]
+                              : current.requiredSignalKeys.filter((value) => value !== metric.key),
                           }))
                         }
                       />
-                      {METRIC_LABELS[key]}
+                      {metric.label}
                     </label>
                   ))}
                 </div>
-                {preservedRequiredKeys.length > 0 ? (
-                  <p className="text-xs text-muted-foreground">
-                    从旧版本保留的自定义必需指标：{preservedRequiredKeys.join("、")}
-                  </p>
-                ) : null}
               </div>
             </fieldset>
 

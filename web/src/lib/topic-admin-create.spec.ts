@@ -14,7 +14,7 @@ describe("topic admin create helpers", () => {
       entityIdsInput: "12, 7，12",
     });
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       ok: true,
       policyJson: {
         weights: {
@@ -27,6 +27,9 @@ describe("topic admin create helpers", () => {
         requiredSignalKeys: ["streams", "mentions", "news"],
       },
     });
+    if (result.ok) {
+      expect(result.policyJson.metricDefinitions).toHaveLength(4);
+    }
   });
 
   it("rejects an empty or invalid entity scope", () => {
@@ -60,6 +63,47 @@ describe("topic admin create helpers", () => {
         weights: { streams: 0.6, custom: 0.4 },
       },
     });
+  });
+
+  it("builds fields from a dynamic topic metric plan without fixed keys", () => {
+    const form = defaultTopicVersionPolicyForm("SEMI_OBJECTIVE", {
+      generatedBy: "openai",
+      rationale: "按当前话题选择。",
+      metrics: [
+        {
+          key: "result_quality",
+          label: "结果质量",
+          description: "衡量结果。",
+          normalizationGuide: "同批百分位换算为 0–100。",
+          sourceHints: ["公开记录"],
+          weight: 0.7,
+          required: true,
+        },
+        {
+          key: "peer_recognition",
+          label: "同行认可",
+          description: "衡量认可。",
+          normalizationGuide: "同一时间窗换算为 0–100。",
+          sourceHints: ["权威档案"],
+          weight: 0.3,
+          required: false,
+        },
+      ],
+    });
+    const result = buildTopicVersionPolicy({ ...form, entityIdsInput: "8, 9" });
+
+    expect(form.usesLegacyFallback).toBe(false);
+    expect(result).toMatchObject({
+      ok: true,
+      policyJson: {
+        weights: { result_quality: 0.7, peer_recognition: 0.3 },
+        requiredSignalKeys: ["result_quality"],
+        entityIds: ["8", "9"],
+      },
+    });
+    if (result.ok) {
+      expect(JSON.stringify(result.policyJson)).not.toContain("streams");
+    }
   });
 
   it("converts a browser-local date value to ISO", () => {

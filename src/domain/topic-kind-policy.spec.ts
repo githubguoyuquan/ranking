@@ -14,7 +14,16 @@ describe('mergePolicyWithTopicKind', () => {
     const merged = mergePolicyWithTopicKind('OBJECTIVE', base);
     expect(merged.decay?.halfLifeDays).toBe(14);
     expect(merged.weights.streams).toBe(1);
-    expect(merged.requiredSignalKeys).toContain('streams');
+    expect(merged.requiredSignalKeys).toEqual(['streams']);
+  });
+
+  it('does not inject unrelated fixed metrics into a dynamic plan', () => {
+    const merged = mergePolicyWithTopicKind('SEMI_OBJECTIVE', {
+      weights: { field_performance: 0.7, honors: 0.3 },
+      requiredSignalKeys: ['field_performance'],
+    });
+    expect(merged.weights).toEqual({ field_performance: 0.7, honors: 0.3 });
+    expect(merged.requiredSignalKeys).toEqual(['field_performance']);
   });
 });
 
@@ -43,9 +52,10 @@ describe('entityHasRequiredSignals', () => {
 });
 
 describe('topicKindStrategyPublic', () => {
-  it('exposes SUBJECTIVE_TREND weights', () => {
+  it('exposes evidence style without fixed metric names', () => {
     const s = topicKindStrategyPublic('SUBJECTIVE_TREND');
-    expect(s.requiredSignalKeys).toEqual(['mentions', 'social']);
-    expect(s.weights.social).toBeGreaterThan(s.weights.news);
+    expect(s.description).toContain('动态决定');
+    expect(s).not.toHaveProperty('weights');
+    expect(s).not.toHaveProperty('requiredSignalKeys');
   });
 });

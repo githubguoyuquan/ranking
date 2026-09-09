@@ -47,4 +47,25 @@ describe('parseRankingPolicyJson', () => {
     });
     expect(p.decay?.halfLifeDays).toBe(21);
   });
+
+  it('preserves validated dynamic metric definitions', () => {
+    const parsed = parseRankingPolicyJson({
+      weights: { result_quality: 1 },
+      metricDefinitions: [{
+        key: 'result_quality',
+        label: '结果质量',
+        description: '衡量结果。',
+        normalizationGuide: '换算为 0–100。',
+        sourceHints: ['公开权威记录'],
+      }],
+    });
+    expect(parsed.metricDefinitions?.[0].key).toBe('result_quality');
+    expect(() => parseRankingPolicyJson({
+      weights: { result_quality: 1 },
+      metricDefinitions: [{
+        key: 'unrelated', label: 'x', description: 'x',
+        normalizationGuide: 'x', sourceHints: [],
+      }],
+    })).toThrow('unknown key');
+  });
 });

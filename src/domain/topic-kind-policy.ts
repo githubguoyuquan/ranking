@@ -2,16 +2,7 @@ import type { TopicKind } from '@prisma/client';
 import type { DecayParams } from './scoring';
 import type { RankingPolicyJson } from './policy-json';
 
-const BASE_WEIGHTS: Record<string, number> = {
-  streams: 0.35,
-  mentions: 0.25,
-  social: 0.2,
-  news: 0.2,
-};
-
 export type TopicKindPreset = {
-  weights: Record<string, number>;
-  requiredSignalKeys: string[];
   decay: DecayParams;
   /** 参与排行所需信号覆盖率（required 键中有数据的比例） */
   minCoverageToRank: number;
@@ -20,25 +11,19 @@ export type TopicKindPreset = {
 
 const PRESETS: Record<TopicKind, TopicKindPreset> = {
   OBJECTIVE: {
-    weights: { streams: 0.45, mentions: 0.2, social: 0.15, news: 0.2 },
-    requiredSignalKeys: ['streams', 'mentions'],
     decay: { halfLifeDays: 14 },
     minCoverageToRank: 1,
-    description: '客观榜：必须有 streams 与 mentions 观测；偏重播放量与提及',
+    description: '客观榜：优先可复核的直接数据；具体指标由话题动态决定',
   },
   SEMI_OBJECTIVE: {
-    weights: BASE_WEIGHTS,
-    requiredSignalKeys: ['streams', 'mentions', 'news'],
     decay: { halfLifeDays: 10 },
     minCoverageToRank: 0.67,
-    description: '半客观榜：至少 2/3 核心信号；均衡四维权重',
+    description: '半客观榜：允许多类证据互相补充；具体指标由话题动态决定',
   },
   SUBJECTIVE_TREND: {
-    weights: { streams: 0.25, mentions: 0.35, social: 0.3, news: 0.1 },
-    requiredSignalKeys: ['mentions', 'social'],
     decay: { halfLifeDays: 5 },
     minCoverageToRank: 1,
-    description: '主观趋势榜：必须有 mentions 与 social；短半衰期捕捉舆情',
+    description: '主观趋势榜：强调近期变化并使用较短衰减；具体指标由话题动态决定',
   },
 };
 
@@ -73,7 +58,10 @@ export function signalCoverage(
   return hit / requiredKeys.length;
 }
 
-/** 将 TopicKind 默认权重/decay 与版本 policy 合并（显式 policy 优先） */
+/**
+ * TopicVersion 的显式指标是权威规则。TopicKind 只补充缺失的衰减和必需信号，
+ * 绝不能把固定指标混入一个已经按话题生成的动态方案。
+ */
 export function mergePolicyWithTopicKind(
   kind: TopicKind,
   policy: RankingPolicyJson,
@@ -81,8 +69,8 @@ export function mergePolicyWithTopicKind(
   const preset = PRESETS[kind];
   return {
     ...policy,
-    weights: { ...preset.weights, ...policy.weights },
-    requiredSignalKeys: policy.requiredSignalKeys ?? preset.requiredSignalKeys,
+    weights: { ...policy.weights },
+    requiredSignalKeys: policy.requiredSignalKeys ?? Object.keys(policy.weights),
     decay: policy.decay ?? preset.decay,
   };
 }
@@ -97,8 +85,6 @@ export function topicKindStrategyPublic(kind: TopicKind) {
   return {
     kind,
     description: p.description,
-    weights: p.weights,
-    requiredSignalKeys: p.requiredSignalKeys,
     minCoverageToRank: p.minCoverageToRank,
     decay: p.decay,
   };

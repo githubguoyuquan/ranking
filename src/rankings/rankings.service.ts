@@ -85,6 +85,7 @@ import { buildClickhouseRankingSnapshotOutboxPayload } from './clickhouse-rankin
 import { buildRankingSnapshotCompletedOutboxPayload } from './ranking-snapshot-completed-outbox-payload';
 import { randomUUID } from 'node:crypto';
 import { TopicEntityAutofillService, publicEntityAutofill } from './topic-entity-autofill.service';
+import { TopicMetricPlanService } from './topic-metric-plan.service';
 
 const defaultWeights: Record<string, number> = {
   streams: 0.35,
@@ -151,6 +152,7 @@ export class RankingsService {
     @Optional() private readonly clickhouse?: ClickhouseService,
     @Optional() private readonly prismaRead?: PrismaReadService,
     @Optional() private readonly entityAutofill?: TopicEntityAutofillService,
+    @Optional() private readonly metricPlanning?: TopicMetricPlanService,
   ) {}
 
   /** 读多路径优先只读副本（`DATABASE_READ_URL`） */
@@ -230,6 +232,9 @@ export class RankingsService {
       throw new BadRequestException('自动填充服务尚未启用。');
     }
     const runToken = args.entityCount !== undefined ? randomUUID() : undefined;
+    const metricPlan = this.metricPlanning
+      ? await this.metricPlanning.suggest({ title, kind: args.kind, locale })
+      : undefined;
 
     try {
       const topic = await this.prisma.topic.create({
@@ -238,6 +243,9 @@ export class RankingsService {
           title,
           kind: args.kind,
           locale,
+          ...(metricPlan
+            ? { metricPlan: metricPlan as unknown as Prisma.InputJsonValue }
+            : {}),
           ...(runToken ? { entityAutofill: { create: { requestedCount: args.entityCount!, runToken } } } : {}),
           ...(auth?.tenantId != null
             ? { tenant: { connect: { id: auth.tenantId } } }
@@ -250,6 +258,7 @@ export class RankingsService {
       return toPlainJson({
         ...topic,
         kindStrategy: topicKindStrategyPublic(topic.kind),
+        metricPlan,
         entityAutofill,
       });
     } catch (e) {
@@ -540,6 +549,7 @@ export class RankingsService {
         title: true,
         kind: true,
         locale: true,
+        metricPlan: true,
         tenantId: true,
         createdAt: true,
         updatedAt: true,
@@ -555,6 +565,7 @@ export class RankingsService {
       kind: topic.kind,
       kindStrategy: topicKindStrategyPublic(topic.kind),
       locale: topic.locale,
+      metricPlan: topic.metricPlan,
       tenantId: topic.tenantId?.toString() ?? null,
       createdAt: topic.createdAt.toISOString(),
       updatedAt: topic.updatedAt.toISOString(),
@@ -581,6 +592,15 @@ export class RankingsService {
       if (!title) throw new BadRequestException('title must be non-empty');
       data.title = title;
     }
+    if (this.metricPlanning && (patch.title !== undefined || patch.kind !== undefined)) {
+      const nextTitle = patch.title?.trim() || topic.title;
+      const nextKind = patch.kind ?? topic.kind;
+      data.metricPlan = await this.metricPlanning.suggest({
+        title: nextTitle,
+        kind: nextKind,
+        locale: topic.locale,
+      }) as unknown as Prisma.InputJsonValue;
+    }
     if (Object.keys(data).length === 0) {
       throw new BadRequestException('no fields to update');
     }
@@ -594,6 +614,7 @@ export class RankingsService {
         title: true,
         kind: true,
         locale: true,
+        metricPlan: true,
         tenantId: true,
         updatedAt: true,
       },
@@ -604,6 +625,7 @@ export class RankingsService {
       title: updated.title,
       kind: updated.kind,
       locale: updated.locale,
+      metricPlan: updated.metricPlan,
       tenantId: updated.tenantId?.toString() ?? null,
       updatedAt: updated.updatedAt.toISOString(),
     });

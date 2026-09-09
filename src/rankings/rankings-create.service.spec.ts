@@ -22,7 +22,7 @@ function makeService(prisma: Record<string, unknown>): RankingsService {
 describe('RankingsService admin topic creation', () => {
   it.each([0, -1, 51, 1.5, true, '10'])('rejects invalid entityCount %j at the API boundary', async (entityCount) => {
     const dto = plainToInstance(CreateTopicAdminDto, {
-      slug: 'football', title: '足球球星榜', kind: 'SEMI_OBJECTIVE', entityCount,
+      slug: 'runtime-topic', title: '运行时业务对象榜', kind: 'SEMI_OBJECTIVE', entityCount,
     }, { enableImplicitConversion: true });
     expect((await validate(dto)).some((error) => error.property === 'entityCount')).toBe(true);
   });
@@ -35,7 +35,7 @@ describe('RankingsService admin topic creation', () => {
       {} as never, {} as never, {} as never, {} as never,
       undefined, undefined, { enqueue } as never,
     );
-    const result = await service.createTopic({ slug: 'football', title: '足球球星榜', kind: TopicKind.SEMI_OBJECTIVE, entityCount: 5 });
+    const result = await service.createTopic({ slug: 'runtime-topic', title: '运行时业务对象榜', kind: TopicKind.SEMI_OBJECTIVE, entityCount: 5 });
     const population = create.mock.calls[0][0].data.entityAutofill.create;
     expect(population.requestedCount).toBe(5);
     expect(enqueue).toHaveBeenCalledWith(11n, population.runToken);
@@ -79,6 +79,47 @@ describe('RankingsService admin topic creation', () => {
       },
     });
     expect(result).toMatchObject({ id: '11', slug: 'ai-tools' });
+  });
+
+  it('persists the runtime metric plan instead of assigning fixed topic-kind metrics', async () => {
+    const metricPlan = {
+      generatedBy: 'openai' as const,
+      rationale: '按运行时话题生成。',
+      metrics: [
+        {
+          key: 'result_quality', label: '结果质量', description: '结果质量。',
+          normalizationGuide: '同批换算为 0–100。', sourceHints: ['公开记录'],
+          weight: 0.7, required: true,
+        },
+        {
+          key: 'peer_recognition', label: '同行认可', description: '同行认可。',
+          normalizationGuide: '同周期换算为 0–100。', sourceHints: ['权威档案'],
+          weight: 0.3, required: false,
+        },
+      ],
+    };
+    const create = vi.fn().mockResolvedValue({
+      id: 12n, slug: 'runtime-topic', title: '运行时业务对象榜',
+      kind: TopicKind.SEMI_OBJECTIVE, locale: 'zh-CN',
+    });
+    const suggest = vi.fn().mockResolvedValue(metricPlan);
+    const service = new RankingsService(
+      { topic: { create } } as never, {} as never, {} as never, {} as never,
+      {} as never, {} as never, {} as never, {} as never,
+      undefined, undefined, undefined, { suggest } as never,
+    );
+
+    const result = await service.createTopic({
+      slug: 'runtime-topic', title: '运行时业务对象榜',
+      kind: TopicKind.SEMI_OBJECTIVE, locale: 'zh-CN',
+    });
+
+    expect(suggest).toHaveBeenCalledWith({
+      title: '运行时业务对象榜', kind: TopicKind.SEMI_OBJECTIVE, locale: 'zh-CN',
+    });
+    expect(create.mock.calls[0][0].data.metricPlan).toEqual(metricPlan);
+    expect(JSON.stringify(create.mock.calls[0][0].data.metricPlan)).not.toContain('streams');
+    expect(result).toMatchObject({ id: '12', metricPlan });
   });
 
   it('creates an unfrozen version only after tenant-scoped entity validation', async () => {

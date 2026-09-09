@@ -43,6 +43,10 @@ import {
   type TopicKindValue,
   isTopicKindValue,
 } from "@/lib/topic-kind";
+import {
+  parseTopicMetricPlan,
+  type TopicMetricPlan,
+} from "@/lib/topic-admin-create";
 import { unifiedSearchAdminPathFromQuery } from "@/lib/unified-search-admin-path";
 import { isIsoDateString } from "@/lib/iso-date";
 import { TIME_WINDOW_SET } from "@/lib/time-window";
@@ -51,17 +55,8 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-const POLICY_METRIC_KEYS = ["streams", "mentions", "social", "news"] as const;
-type PolicyMetricKey = (typeof POLICY_METRIC_KEYS)[number];
-
-type QuickWeightsState = Record<PolicyMetricKey, string>;
-
-const EMPTY_QUICK_WEIGHTS: QuickWeightsState = {
-  streams: "",
-  mentions: "",
-  social: "",
-  news: "",
-};
+type QuickWeightsState = Record<string, string>;
+const EMPTY_QUICK_WEIGHTS: QuickWeightsState = {};
 
 const selectClass =
   "flex h-10 w-full rounded-md border border-input bg-transparent px-3 py-2 text-base leading-6 shadow-xs outline-none focus-visible:ring-2 focus-visible:ring-ring";
@@ -69,8 +64,6 @@ const selectClass =
 type KindStrategy = {
   kind: string;
   description: string;
-  weights: Record<string, number>;
-  requiredSignalKeys: string[];
   minCoverageToRank: number;
   decay?: { halfLifeDays?: number };
 };
@@ -82,24 +75,16 @@ type TopicMeta = {
   kind: TopicKindValue;
   locale: string;
   kindStrategy?: KindStrategy;
+  metricPlan?: TopicMetricPlan | null;
 };
 
 function parseKindStrategy(raw: unknown): KindStrategy | undefined {
   if (raw === null || typeof raw !== "object") return undefined;
   const o = raw as Record<string, unknown>;
   if (typeof o.description !== "string") return undefined;
-  const weights =
-    o.weights && typeof o.weights === "object" && !Array.isArray(o.weights)
-      ? (o.weights as Record<string, number>)
-      : {};
-  const requiredSignalKeys = Array.isArray(o.requiredSignalKeys)
-    ? o.requiredSignalKeys.map(String)
-    : [];
   return {
     kind: String(o.kind ?? ""),
     description: o.description,
-    weights,
-    requiredSignalKeys,
     minCoverageToRank: Number(o.minCoverageToRank) || 0,
     decay:
       o.decay && typeof o.decay === "object"
@@ -123,6 +108,7 @@ function parseTopicMetaFromJson(
     kind,
     locale: String(j.locale ?? ""),
     kindStrategy: parseKindStrategy(j.kindStrategy),
+    metricPlan: parseTopicMetricPlan(j.metricPlan),
   };
 }
 
@@ -377,12 +363,9 @@ function TopicsPageInner() {
         wraw && typeof wraw === "object" && !Array.isArray(wraw)
           ? (wraw as Record<string, unknown>)
           : {};
-      setQuickWeights({
-        streams: w.streams != null ? String(w.streams) : "",
-        mentions: w.mentions != null ? String(w.mentions) : "",
-        social: w.social != null ? String(w.social) : "",
-        news: w.news != null ? String(w.news) : "",
-      });
+      setQuickWeights(Object.fromEntries(
+        Object.entries(w).map(([key, value]) => [key, String(value)]),
+      ));
       const ids = o.entityIds;
       if (Array.isArray(ids)) {
         setQuickEntityIds(
@@ -415,22 +398,15 @@ function TopicsPageInner() {
     } catch {
       base = {};
     }
-    const prevWeights =
-      base.weights &&
-      typeof base.weights === "object" &&
-      !Array.isArray(base.weights)
-        ? { ...(base.weights as Record<string, unknown>) }
-        : {};
-    for (const k of POLICY_METRIC_KEYS) {
-      const raw = quickWeights[k].trim();
-      if (raw === "") {
-        delete prevWeights[k];
-      } else {
+    const nextWeights: Record<string, number> = {};
+    for (const [key, input] of Object.entries(quickWeights)) {
+      const raw = input.trim();
+      if (raw !== "") {
         const n = Number(raw);
-        if (Number.isFinite(n) && n >= 0) prevWeights[k] = n;
+        if (Number.isFinite(n) && n >= 0) nextWeights[key] = n;
       }
     }
-    base.weights = prevWeights;
+    base.weights = nextWeights;
 
     const idsPart = quickEntityIds
       .split(/[\s,]+/)
@@ -840,6 +816,7 @@ function TopicsPageInner() {
             kind: created.kind,
             locale: created.locale,
             kindStrategy: parseKindStrategy(created.kindStrategy),
+            metricPlan: created.metricPlan,
           };
           setSlug(created.slug);
           router.replace(topicsAdminPath(created.slug), { scroll: false });
@@ -920,8 +897,7 @@ function TopicsPageInner() {
                 话题属性（TopicKind）
               </h2>
               <p className="mt-1 text-xs text-muted-foreground">
-                物化排行时与 <code className="rounded bg-muted px-1">policyJson</code>{" "}
-                合并默认权重与衰减；显式 policy 字段仍优先。
+                话题类型控制证据风格、覆盖率与时间衰减；指标名称和权重来自当前话题的动态方案。
                 {topicMeta ? (
                   <span className="ml-1 font-mono text-xs">
                     topicId={topicMeta.id}
@@ -956,9 +932,6 @@ function TopicsPageInner() {
                 {topicMeta?.kindStrategy ? (
                   <div className="mt-2 rounded-md border border-border/80 bg-background/80 p-2 text-xs text-muted-foreground">
                     <p>{topicMeta.kindStrategy.description}</p>
-                    <p className="mt-1 font-mono">
-                      必选: {topicMeta.kindStrategy.requiredSignalKeys.join(", ")}
-                    </p>
                     <p className="font-mono">
                       覆盖率 ≥ {topicMeta.kindStrategy.minCoverageToRank} · 半衰期{" "}
                       {topicMeta.kindStrategy.decay?.halfLifeDays ?? "—"}d
@@ -1361,11 +1334,10 @@ function TopicsPageInner() {
             <div className="space-y-3 rounded-md border border-border bg-muted/20 p-3">
               <p className="text-xs font-medium text-foreground">快捷编辑</p>
               <p className="text-xs leading-relaxed text-muted-foreground">
-                四路权重与演示 seed 一致；其它 <code className="text-xs">weights</code> 键请用下方
-                JSON。先改表单再点「表单 → 写入 JSON」，或改 JSON 后点「JSON → 读回表单」。
+                这里按该版本实际保存的指标动态显示，不再限定固定四项。先改表单再点「表单 → 写入 JSON」，或改 JSON后点「JSON → 读回表单」。
               </p>
               <div className="grid gap-2 sm:grid-cols-2">
-                {POLICY_METRIC_KEYS.map((key) => (
+                {Object.keys(quickWeights).map((key) => (
                   <div key={key} className="space-y-1">
                     <Label htmlFor={`policy-w-${key}`} className="text-xs capitalize">
                       weight · {key}
@@ -1404,7 +1376,7 @@ function TopicsPageInner() {
                   requiredSignalKeys
                 </legend>
                 <div className="flex flex-wrap gap-x-4 gap-y-1">
-                  {POLICY_METRIC_KEYS.map((key) => (
+                  {Object.keys(quickWeights).map((key) => (
                     <label
                       key={key}
                       className="inline-flex cursor-pointer items-center gap-1.5 text-xs"

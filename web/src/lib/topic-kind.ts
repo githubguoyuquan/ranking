@@ -1,4 +1,4 @@
-/** 与 Prisma `TopicKind` 及 `src/domain/topic-kind-policy.ts` 预设一致 */
+/** 与 Prisma `TopicKind` 一致；类型只影响证据风格和时间衰减，不再绑定固定指标。 */
 export const TOPIC_KIND_VALUES = [
   "OBJECTIVE",
   "SEMI_OBJECTIVE",
@@ -15,17 +15,17 @@ export const TOPIC_KIND_OPTIONS: Array<{
   {
     value: "OBJECTIVE",
     label: "客观榜",
-    hint: "偏 streams / mentions；衰减半衰期 14 天",
+    hint: "优先可复核的直接数据；半衰期 14 天",
   },
   {
     value: "SEMI_OBJECTIVE",
     label: "半客观榜",
-    hint: "默认演示权重；半衰期 10 天",
+    hint: "允许多类证据互相补充；半衰期 10 天",
   },
   {
     value: "SUBJECTIVE_TREND",
     label: "主观趋势榜",
-    hint: "偏 mentions / social；半衰期 5 天",
+    hint: "强调近期变化；半衰期 5 天",
   },
 ];
 

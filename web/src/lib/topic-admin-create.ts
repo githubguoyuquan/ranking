@@ -4,21 +4,27 @@ import {
 } from "./decimal-id";
 import type { TopicKindValue } from "./topic-kind";
 
-export const TOPIC_POLICY_METRIC_KEYS = [
-  "streams",
-  "mentions",
-  "social",
-  "news",
-] as const;
+export type TopicMetricDefinition = {
+  key: string;
+  label: string;
+  description: string;
+  normalizationGuide: string;
+  sourceHints: string[];
+};
 
-export type TopicPolicyMetricKey = (typeof TOPIC_POLICY_METRIC_KEYS)[number];
-export type TopicPolicyWeightInputs = Record<TopicPolicyMetricKey, string>;
+export type TopicMetricPlan = {
+  generatedBy: "openai";
+  rationale: string;
+  metrics: Array<TopicMetricDefinition & { weight: number; required: boolean }>;
+};
 
+export type TopicPolicyWeightInputs = Record<string, string>;
 type PolicyRecord = Record<string, unknown>;
 
-const DEFAULTS: Record<
+// Compatibility only for topics created before dynamic metric plans existed.
+const LEGACY_DEFAULTS: Record<
   TopicKindValue,
-  { weights: Record<TopicPolicyMetricKey, number>; requiredSignalKeys: string[] }
+  { weights: Record<string, number>; requiredSignalKeys: string[] }
 > = {
   OBJECTIVE: {
     weights: { streams: 0.45, mentions: 0.2, social: 0.15, news: 0.2 },
@@ -34,24 +40,92 @@ const DEFAULTS: Record<
   },
 };
 
+const LEGACY_LABELS: Record<string, string> = {
+  streams: "播放/使用量",
+  mentions: "提及量",
+  social: "社交热度",
+  news: "新闻热度",
+};
+
 export type TopicVersionPolicyForm = {
   basePolicy: PolicyRecord;
   weights: TopicPolicyWeightInputs;
+  metricDefinitions: TopicMetricDefinition[];
   requiredSignalKeys: string[];
   entityIdsInput: string;
+  usesLegacyFallback: boolean;
 };
+
+function recordOf(raw: unknown): Record<string, unknown> | null {
+  return raw !== null && typeof raw === "object" && !Array.isArray(raw)
+    ? (raw as Record<string, unknown>)
+    : null;
+}
+
+export function parseTopicMetricPlan(raw: unknown): TopicMetricPlan | null {
+  const value = recordOf(raw);
+  if (!value || value.generatedBy !== "openai" || typeof value.rationale !== "string" || !Array.isArray(value.metrics)) {
+    return null;
+  }
+  const metrics: TopicMetricPlan["metrics"] = [];
+  for (const entry of value.metrics) {
+    const item = recordOf(entry);
+    if (!item) return null;
+    const key = String(item.key ?? "").trim();
+    const label = String(item.label ?? "").trim();
+    const description = String(item.description ?? "").trim();
+    const normalizationGuide = String(item.normalizationGuide ?? "").trim();
+    const weight = Number(item.weight);
+    if (!/^[a-z][a-z0-9_]{1,63}$/.test(key) || !label || !description || !normalizationGuide || !Number.isFinite(weight) || weight < 0 || !Array.isArray(item.sourceHints)) {
+      return null;
+    }
+    metrics.push({
+      key,
+      label,
+      description,
+      normalizationGuide,
+      sourceHints: item.sourceHints.map(String).map((hint) => hint.trim()).filter(Boolean),
+      weight,
+      required: item.required === true,
+    });
+  }
+  if (metrics.length < 2 || new Set(metrics.map((metric) => metric.key)).size !== metrics.length) return null;
+  return { generatedBy: "openai", rationale: value.rationale, metrics };
+}
+
+function definitionsForKeys(keys: string[]): TopicMetricDefinition[] {
+  return keys.map((key) => ({
+    key,
+    label: LEGACY_LABELS[key] ?? key,
+    description: "旧版本保存的指标。",
+    normalizationGuide: "沿用旧版本的数据口径。",
+    sourceHints: [],
+  }));
+}
 
 export function defaultTopicVersionPolicyForm(
   kind: TopicKindValue,
+  rawMetricPlan?: unknown,
 ): TopicVersionPolicyForm {
-  const preset = DEFAULTS[kind];
+  const plan = parseTopicMetricPlan(rawMetricPlan);
+  if (plan) {
+    return {
+      basePolicy: {},
+      weights: Object.fromEntries(plan.metrics.map((metric) => [metric.key, String(metric.weight)])),
+      metricDefinitions: plan.metrics.map(({ weight: _weight, required: _required, ...definition }) => definition),
+      requiredSignalKeys: plan.metrics.filter((metric) => metric.required).map((metric) => metric.key),
+      entityIdsInput: "",
+      usesLegacyFallback: false,
+    };
+  }
+  const preset = LEGACY_DEFAULTS[kind];
   return {
     basePolicy: {},
-    weights: Object.fromEntries(
-      TOPIC_POLICY_METRIC_KEYS.map((key) => [key, String(preset.weights[key])]),
-    ) as TopicPolicyWeightInputs,
+    weights: Object.fromEntries(Object.entries(preset.weights).map(([key, value]) => [key, String(value)])),
+    metricDefinitions: definitionsForKeys(Object.keys(preset.weights)),
     requiredSignalKeys: [...preset.requiredSignalKeys],
     entityIdsInput: "",
+    usesLegacyFallback: true,
   };
 }
 
@@ -59,30 +133,44 @@ export function topicVersionPolicyFormFromTemplate(
   raw: unknown,
   fallbackKind: TopicKindValue,
 ): TopicVersionPolicyForm {
-  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
-    return defaultTopicVersionPolicyForm(fallbackKind);
-  }
-  const basePolicy = { ...(raw as PolicyRecord) };
-  const defaults = defaultTopicVersionPolicyForm(fallbackKind);
-  const rawWeights =
-    basePolicy.weights !== null &&
-    typeof basePolicy.weights === "object" &&
-    !Array.isArray(basePolicy.weights)
-      ? (basePolicy.weights as Record<string, unknown>)
-      : {};
-  const weights = { ...defaults.weights };
-  for (const key of TOPIC_POLICY_METRIC_KEYS) {
-    if (rawWeights[key] != null) weights[key] = String(rawWeights[key]);
-  }
+  const basePolicy = recordOf(raw);
+  if (!basePolicy) return defaultTopicVersionPolicyForm(fallbackKind);
+  const rawWeights = recordOf(basePolicy.weights) ?? {};
+  const weights = Object.fromEntries(
+    Object.entries(rawWeights).map(([key, value]) => [key, String(value)]),
+  );
+  const rawDefinitions = Array.isArray(basePolicy.metricDefinitions)
+    ? basePolicy.metricDefinitions
+    : [];
+  const parsedDefinitions = rawDefinitions.flatMap((entry) => {
+    const item = recordOf(entry);
+    if (!item) return [];
+    const key = String(item.key ?? "").trim();
+    if (!key || !(key in weights)) return [];
+    return [{
+      key,
+      label: String(item.label ?? key),
+      description: String(item.description ?? ""),
+      normalizationGuide: String(item.normalizationGuide ?? ""),
+      sourceHints: Array.isArray(item.sourceHints) ? item.sourceHints.map(String) : [],
+    }];
+  });
+  const defined = new Set(parsedDefinitions.map((item) => item.key));
+  const metricDefinitions = [
+    ...parsedDefinitions,
+    ...definitionsForKeys(Object.keys(weights).filter((key) => !defined.has(key))),
+  ];
   return {
-    basePolicy,
+    basePolicy: { ...basePolicy },
     weights,
+    metricDefinitions,
     requiredSignalKeys: Array.isArray(basePolicy.requiredSignalKeys)
       ? basePolicy.requiredSignalKeys.map(String)
-      : defaults.requiredSignalKeys,
+      : Object.keys(weights),
     entityIdsInput: Array.isArray(basePolicy.entityIds)
       ? basePolicy.entityIds.map(String).join(", ")
       : "",
+    usesLegacyFallback: rawDefinitions.length === 0,
   };
 }
 
@@ -90,23 +178,11 @@ export type BuildTopicVersionPolicyResult =
   | { ok: true; policyJson: PolicyRecord }
   | { ok: false; message: string };
 
-export function buildTopicVersionPolicy(args: {
-  basePolicy: PolicyRecord;
-  weights: TopicPolicyWeightInputs;
-  requiredSignalKeys: string[];
-  entityIdsInput: string;
-}): BuildTopicVersionPolicyResult {
+export function buildTopicVersionPolicy(args: TopicVersionPolicyForm): BuildTopicVersionPolicyResult {
   const entityIds = [
-    ...new Set(
-      args.entityIdsInput
-        .split(/[\s,，]+/)
-        .map((value) => value.trim())
-        .filter(Boolean),
-    ),
+    ...new Set(args.entityIdsInput.split(/[\s,，]+/).map((value) => value.trim()).filter(Boolean)),
   ];
-  if (entityIds.length === 0) {
-    return { ok: false, message: "请至少填写一个参榜实体编号。" };
-  }
+  if (entityIds.length === 0) return { ok: false, message: "请至少填写一个参榜实体编号。" };
   const invalidIds = entityIds.filter((id) => !isDecimalBigIntIdString(id));
   if (invalidIds.length > 0) {
     return {
@@ -115,45 +191,30 @@ export function buildTopicVersionPolicy(args: {
     };
   }
 
-  const previousWeights =
-    args.basePolicy.weights !== null &&
-    typeof args.basePolicy.weights === "object" &&
-    !Array.isArray(args.basePolicy.weights)
-      ? { ...(args.basePolicy.weights as Record<string, unknown>) }
-      : {};
-  for (const key of TOPIC_POLICY_METRIC_KEYS) {
-    const value = Number(args.weights[key].trim());
-    if (!Number.isFinite(value) || value < 0) {
-      return { ok: false, message: `${key} 权重必须是大于或等于 0 的数字。` };
-    }
-    previousWeights[key] = value;
+  const weights: Record<string, number> = {};
+  for (const [key, raw] of Object.entries(args.weights)) {
+    if (!/^[a-z][a-z0-9_]{1,63}$/.test(key)) return { ok: false, message: `指标键 ${key} 不合法。` };
+    const value = Number(raw.trim());
+    if (!Number.isFinite(value) || value < 0) return { ok: false, message: `${key} 权重必须是大于或等于 0 的数字。` };
+    weights[key] = value;
   }
-  if (
-    Object.values(previousWeights).every(
-      (value) => typeof value !== "number" || value === 0,
-    )
-  ) {
+  if (Object.keys(weights).length === 0 || Object.values(weights).every((value) => value === 0)) {
     return { ok: false, message: "至少一个指标权重必须大于 0。" };
   }
 
   const requiredSignalKeys = [...new Set(args.requiredSignalKeys)];
-  const missingWeight = requiredSignalKeys.find(
-    (key) => !(key in previousWeights),
-  );
-  if (missingWeight) {
-    return {
-      ok: false,
-      message: `必需指标 ${missingWeight} 没有对应权重。`,
-    };
-  }
+  const missingWeight = requiredSignalKeys.find((key) => !(key in weights));
+  if (missingWeight) return { ok: false, message: `必需指标 ${missingWeight} 没有对应权重。` };
 
+  const metricDefinitions = args.metricDefinitions.filter((item) => item.key in weights);
   return {
     ok: true,
     policyJson: {
       ...args.basePolicy,
-      weights: previousWeights,
+      weights,
       entityIds,
       requiredSignalKeys,
+      metricDefinitions,
     },
   };
 }

@@ -9,7 +9,7 @@ function fixture(overrides: Record<string, unknown> = {}) {
   const record = {
     topicId: 8n, requestedCount: 2, status: 'queued', runToken: 'run-1',
     strategy: null, message: null, updatedAt: new Date('2026-09-08T00:00:00Z'),
-    entities: [], topic: { id: 8n, tenantId: 7n, title: '足球球星榜', locale: 'zh-CN' }, ...overrides,
+    entities: [], topic: { id: 8n, tenantId: 7n, title: '业务对象榜', locale: 'zh-CN' }, ...overrides,
   };
   const tx = {
     topicEntityAutofill: { updateMany: vi.fn().mockResolvedValue({ count: 1 }), update: vi.fn().mockResolvedValue(record) },
@@ -34,7 +34,7 @@ describe('topic entity autofill', () => {
   it('saves a sourced, tenant-specific partial selection and indexes it without creating metrics', async () => {
     const { service, tx, discovery } = fixture();
     await service.process({ topicId: '8', runToken: 'run-1' });
-    expect(discovery.discover).toHaveBeenCalledWith({ title: '足球球星榜', locale: 'zh-CN', count: 2 });
+    expect(discovery.discover).toHaveBeenCalledWith({ title: '业务对象榜', locale: 'zh-CN', count: 2 });
     expect(tx.entity.upsert).toHaveBeenCalledWith({
       where: { externalKey: 'wikidata:7:Q42' },
       create: { externalKey: 'wikidata:7:Q42', tenantId: 7n, type: 'PERSON', canonicalName: 'Candidate A' }, update: {},
@@ -72,9 +72,9 @@ describe('topic entity autofill', () => {
 
   it('retains prior candidates on failed retry with an actionable message', async () => {
     const { service, prisma, tx, discovery } = fixture({ entities: [{ ...candidate, id: '11' }] });
-    discovery.discover.mockRejectedValue(new BadRequestException('请明确足球或篮球。'));
+    discovery.discover.mockRejectedValue(new BadRequestException('请明确对象类别。'));
     await service.process({ topicId: '8', runToken: 'run-1' });
-    expect(prisma.topicEntityAutofill.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({ data: { status: 'failed', message: '请明确足球或篮球。' } }));
+    expect(prisma.topicEntityAutofill.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({ data: { status: 'failed', message: '请明确对象类别。' } }));
     expect(tx.entity.upsert).not.toHaveBeenCalled();
   });
 

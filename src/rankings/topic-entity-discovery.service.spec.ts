@@ -1,64 +1,81 @@
 import { BadRequestException, ServiceUnavailableException } from '@nestjs/common';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TopicEntityDiscoveryService } from './topic-entity-discovery.service';
 
-const row = (qid: string, name = '真实来源名称') => ({ item: { value: `http://www.wikidata.org/entity/${qid}` }, itemLabel: { value: name }, itemDescription: { value: '来源描述' } });
+const row = (qid: string, name = '来源对象名称') => ({ item: { value: `http://www.wikidata.org/entity/${qid}` }, itemLabel: { value: name }, itemDescription: { value: '来源描述' } });
 const service = new TopicEntityDiscoveryService();
-afterEach(() => vi.unstubAllGlobals());
+beforeEach(() => {
+  vi.stubEnv('ENTITY_DISCOVERY_HTTP_PROXY', '');
+  vi.stubEnv('CRAWL_HTTP_PROXY', '');
+});
+afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
-describe('Wikidata topic discovery', () => {
-  it('enforces football, nationality and gender in the source query, returns canonical identity', async () => {
-    const fetcher = vi.fn().mockResolvedValue(Response.json({ results: { bindings: [row('Q1')] } }));
-    vi.stubGlobal('fetch', fetcher);
-    const result = await service.discover({ title: '中国女子足球球星榜', locale: 'zh-CN', count: 1 });
-    const query = new URL(fetcher.mock.calls[0][0]).searchParams.get('query');
-    expect(query).toContain('wd:Q937857');
-    expect(query).toContain('wdt:P2446 ?playerProfile');
-    expect(query).toContain('REGEX(STR(?profession), "football|soccer", "i")');
-    expect(query).toContain('wdt:P27 wd:Q148');
-    expect(query).toContain('wdt:P21 wd:Q6581072');
-    expect(query).toContain('zh-hans,zh,zh-hant,en');
-    expect(result.entities[0]).toMatchObject({ externalId: 'Q1', type: 'PERSON', sourceUrl: 'https://www.wikidata.org/wiki/Q1' });
-  });
-
-  it('keeps real partial results, deduplicates source IDs and drops malformed rows', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ results: { bindings: [row('Q1'), row('Q1'), row('Q2', 'Q2'), row('invalid'), row('Q3')] } })));
-    const result = await service.discover({ title: '全球女歌手榜', locale: 'zh-CN', count: 5 });
-    expect(result.entities.map((item) => item.externalId)).toEqual(['Q1', 'Q3']);
-    expect(result.warning).toContain('不包含指标数据');
-  });
-
-  it('does not silently interpret ambiguous ball stars as football or ignore unsupported constraints', async () => {
-    const fetcher = vi.fn().mockResolvedValue(Response.json({ search: [] }));
-    vi.stubGlobal('fetch', fetcher);
-    await expect(service.discover({ title: '球星榜', locale: 'zh-CN', count: 2 })).rejects.toThrow(BadRequestException);
-    expect(fetcher).not.toHaveBeenCalled();
-    await expect(service.discover({ title: '现役NBA篮球球星榜', locale: 'zh-CN', count: 2 })).rejects.toThrow('无法准确识别');
-    expect(fetcher).toHaveBeenCalledOnce();
-    expect(new URL(fetcher.mock.calls[0][0]).hostname).toBe('www.wikidata.org');
-  });
-
-  it('uses an exact class match for unfamiliar categories, rejecting fuzzy-only results', async () => {
+describe('domain-independent Wikidata discovery', () => {
+  it.each([['任意类别甲', 'Q812345'], ['任意类别乙', 'Q934567']])('resolves %s only from external search data', async (label, id) => {
     const fetcher = vi.fn()
-      .mockResolvedValueOnce(Response.json({ search: [{ id: 'Q500', label: '机器人' }] }))
+      .mockResolvedValueOnce(Response.json({ search: [{ id, label }] }))
+      .mockResolvedValueOnce(Response.json({ results: { bindings: [row('Q1')] } }));
+    vi.stubGlobal('fetch', fetcher);
+    const result = await service.discover({ title: label + '榜', locale: 'zh-CN', count: 1 });
+    expect(new URL(fetcher.mock.calls[0][0]).searchParams.get('search')).toBe(label);
+    const query = new URL(fetcher.mock.calls[1][0]).searchParams.get('query')!;
+    expect(query).toContain(`wd:${id}`);
+    expect(query).toContain('wdt:P31/wdt:P279*');
+    expect(query).toContain('wdt:P106/wdt:P279*');
+    expect(query).toContain('zh-hans,zh,zh-hant,en');
+    expect(query.match(/wd:Q[0-9]+/g)).toEqual([`wd:${id}`, `wd:${id}`]);
+    expect(result.entities[0]).toMatchObject({ externalId: 'Q1', type: 'ENTITY', sourceUrl: 'https://www.wikidata.org/wiki/Q1' });
+    expect(result.strategy).toContain('完整名称精确匹配');
+  });
+
+  it('keeps real partial results without padding and deduplicates source identities', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(Response.json({ search: [{ id: 'Q500', label: '自定义类别' }] }))
+      .mockResolvedValueOnce(Response.json({ results: { bindings: [row('Q1'), row('Q1'), row('Q2', 'Q2'), row('invalid'), row('Q3')] } }));
+    vi.stubGlobal('fetch', fetcher);
+    const result = await service.discover({ title: '自定义类别榜', locale: 'zh-CN', count: 5 });
+    expect(result.entities.map(item => item.externalId)).toEqual(['Q1', 'Q3']);
+  });
+
+  it('preserves qualifiers and never falls back to a broader fuzzy match', async () => {
+    const fetcher = vi.fn().mockResolvedValue(Response.json({ search: [{ id: 'Q500', label: '某类对象' }] }));
+    vi.stubGlobal('fetch', fetcher);
+    await expect(service.discover({ title: '某地区当前某类对象榜', locale: 'zh-CN', count: 2 })).rejects.toThrow('无法唯一匹配');
+    expect(new URL(fetcher.mock.calls[0][0]).searchParams.get('search')).toBe('某地区当前某类对象');
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
+  it('accepts a unique exact source alias, but rejects ambiguous and unsafe IDs', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(Response.json({ search: [{ id: 'Q500', label: '类别标准名', match: { text: '类别别名' } }] }))
       .mockResolvedValueOnce(Response.json({ results: { bindings: [row('Q11')] } }));
     vi.stubGlobal('fetch', fetcher);
-    expect((await service.discover({ title: '机器人榜', locale: 'zh-CN', count: 1 })).entities).toHaveLength(1);
-    expect(new URL(fetcher.mock.calls[1][0]).searchParams.get('query')).toContain('wd:Q500');
-    fetcher.mockResolvedValueOnce(Response.json({ search: [{ id: 'Q500', label: '其他机器人' }] }));
-    await expect(service.discover({ title: '机器人榜', locale: 'zh-CN', count: 1 })).rejects.toThrow(BadRequestException);
+    expect((await service.discover({ title: '类别别名榜', locale: 'zh-CN', count: 1 })).entities).toHaveLength(1);
+    fetcher.mockResolvedValueOnce(Response.json({ search: [{ id: 'Q1', label: '类别' }, { id: 'Q2', label: '类别' }] }));
+    await expect(service.discover({ title: '类别榜', locale: 'zh-CN', count: 1 })).rejects.toThrow(BadRequestException);
+    fetcher.mockResolvedValueOnce(Response.json({ search: [{ id: 'Q1 } SERVICE <https://evil.test> {', label: '类别' }] }));
+    await expect(service.discover({ title: '类别榜', locale: 'zh-CN', count: 1 })).rejects.toThrow(BadRequestException);
   });
 
-  it('reports timeout/unavailable sources without making up identities', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('timeout')));
-    await expect(service.discover({ title: '足球榜', locale: 'zh-CN', count: 3 })).rejects.toThrow(ServiceUnavailableException);
-  });
-
-  it('rejects empty sources and invalid counts', async () => {
-    const fetcher = vi.fn().mockResolvedValue(Response.json({ results: { bindings: [] } }));
+  it('removes only a final presentation suffix, preserving business text in the middle', async () => {
+    const fetcher = vi.fn().mockResolvedValue(Response.json({ search: [] }));
     vi.stubGlobal('fetch', fetcher);
-    await expect(service.discover({ title: '足球榜', locale: 'zh-CN', count: 1 })).rejects.toThrow('没有找到');
-    await expect(service.discover({ title: '足球榜', locale: 'zh-CN', count: 51 })).rejects.toThrow(BadRequestException);
-    expect(fetcher).toHaveBeenCalledOnce();
+    await expect(service.discover({ title: '榜样人物榜', locale: 'zh-CN', count: 1 })).rejects.toThrow(BadRequestException);
+    expect(new URL(fetcher.mock.calls[0][0]).searchParams.get('search')).toBe('榜样人物');
+  });
+
+  it('reports unavailable sources without inventing identities', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('timeout')));
+    await expect(service.discover({ title: '类别榜', locale: 'zh-CN', count: 3 })).rejects.toThrow(ServiceUnavailableException);
+  });
+
+  it('rejects empty results and invalid counts before sourcing', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(Response.json({ search: [{ id: 'Q500', label: '类别' }] }))
+      .mockResolvedValueOnce(Response.json({ results: { bindings: [] } }));
+    vi.stubGlobal('fetch', fetcher);
+    await expect(service.discover({ title: '类别榜', locale: 'zh-CN', count: 1 })).rejects.toThrow('没有找到');
+    await expect(service.discover({ title: '类别榜', locale: 'zh-CN', count: 51 })).rejects.toThrow(BadRequestException);
+    expect(fetcher).toHaveBeenCalledTimes(2);
   });
 });

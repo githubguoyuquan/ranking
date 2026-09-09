@@ -421,12 +421,12 @@ export function TopicCreatePanel({
                 <Input
                   id="new-topic-title"
                   maxLength={200}
-                  placeholder="例如：足球球星榜、全球女歌手榜"
+                  placeholder="填写你的榜单主题和对象范围"
                   value={newTitle}
                   onChange={(event) => setNewTitle(event.target.value)}
                 />
                 <p className="text-xs text-muted-foreground">
-                  请写清参榜对象，例如“足球球星榜”；“球星榜”可能无法区分足球与篮球。
+                  当前按公开知识库中的完整类别名称或别名查找，不限定预设业务类别。无法匹配时会提示；不会擅自省略范围条件。通用自然语言解析尚未启用。
                 </p>
               </div>
               <div className="space-y-2">

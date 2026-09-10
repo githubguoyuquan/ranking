@@ -81,7 +81,7 @@ function parseBigIntParam(raw: string | undefined, label: string): bigint {
 export class RecommendationsController {
   constructor(private readonly recommendations: RecommendationsService) {}
 
-  /** 基于 TopicEmbedding / OpenAI 的余弦相似话题（Qdrant 或 PG） */
+  /** 基于 TopicEmbedding 本地向量的余弦相似话题（Qdrant 或 PG） */
   @Get('v1/recommendations/similar-topics')
   async similarTopics(
     @Query('topicId') topicIdRaw: string,

@@ -4,7 +4,6 @@ import { ProxyAgent, fetch as proxyFetch } from 'undici';
 const ALLOWED_ENDPOINTS = new Set([
   'https://www.wikidata.org/w/api.php',
   'https://query.wikidata.org/sparql',
-  'https://api.openai.com/v1/chat/completions',
 ]);
 const MAX_RESPONSE_BYTES = 1_048_576;
 
@@ -17,12 +16,10 @@ export function sourceRecord(value: unknown): Record<string, unknown> | undefine
 /** Fixed providers only: neither topic text nor provider output can choose a destination. */
 export async function entitySourceJson(
   url: URL,
-  options: { body?: Record<string, unknown>; apiKey?: string } = {},
+  options: { body?: Record<string, unknown> } = {},
 ): Promise<unknown> {
   const endpoint = `${url.origin}${url.pathname}`;
-  const isOpenAi = endpoint === 'https://api.openai.com/v1/chat/completions';
-  if (!ALLOWED_ENDPOINTS.has(endpoint) || url.username || url.password
-    || (options.apiKey && !isOpenAi)) {
+  if (!ALLOWED_ENDPOINTS.has(endpoint) || url.username || url.password) {
     throw new Error('Unsupported entity discovery endpoint');
   }
   let dispatcher: ProxyAgent | undefined;
@@ -36,10 +33,9 @@ export async function entitySourceJson(
         Accept: 'application/json',
         'User-Agent': 'RankingPlatform/0.1 (entity discovery)',
         ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-        ...(isOpenAi && options.apiKey ? { Authorization: `Bearer ${options.apiKey}` } : {}),
       },
       body: options.body ? JSON.stringify(options.body) : undefined,
-      signal: AbortSignal.timeout(options.apiKey ? 30_000 : 15_000),
+      signal: AbortSignal.timeout(15_000),
       redirect: 'error' as const,
     };
     const response = dispatcher
@@ -62,7 +58,7 @@ export async function entitySourceJson(
     return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
   } catch {
     throw new ServiceUnavailableException(
-      '语义解析或公开来源暂时无法访问，请检查网络与服务配置后重试；不会用固定规则或虚构数据补齐。',
+      'Wikidata 公开来源暂时无法访问，请检查网络或代理配置后重试；不会用虚构数据补齐。',
     );
   } finally {
     if (dispatcher) await dispatcher.destroy();

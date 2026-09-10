@@ -47,6 +47,7 @@ export class RecommendationsService {
       select: { id: true, title: true, slug: true },
     });
     const embedded = await this.prisma.topicEmbedding.findMany({
+      where: { model: DEFAULT_EMBEDDING_MODEL },
       select: { topicId: true },
     });
     const have = new Set(embedded.map((e) => e.topicId.toString()));
@@ -61,15 +62,22 @@ export class RecommendationsService {
         source: AI_AUDIT_SOURCE_EMBEDDING_RECOMMEND,
         operation: 'topic_embedding_hydrate_batch',
       });
-      await this.prisma.topicEmbedding.createMany({
-        data: part.map((t, j) => ({
-          topicId: t.id,
-          model: DEFAULT_EMBEDDING_MODEL,
-          dims: vecs[j].length,
-          vector: vecs[j],
-        })),
-        skipDuplicates: true,
-      });
+      await this.prisma.$transaction(part.map((topic, index) =>
+        this.prisma.topicEmbedding.upsert({
+          where: { topicId: topic.id },
+          create: {
+            topicId: topic.id,
+            model: DEFAULT_EMBEDDING_MODEL,
+            dims: vecs[index].length,
+            vector: vecs[index],
+          },
+          update: {
+            model: DEFAULT_EMBEDDING_MODEL,
+            dims: vecs[index].length,
+            vector: vecs[index],
+          },
+        }),
+      ));
     }
   }
 
@@ -77,7 +85,7 @@ export class RecommendationsService {
     const row = await this.prisma.topicEmbedding.findUnique({
       where: { topicId },
     });
-    if (row) {
+    if (row?.model === DEFAULT_EMBEDDING_MODEL) {
       const v = this.vectorFromJson(row.vector);
       if (v) return v;
     }
@@ -123,7 +131,7 @@ export class RecommendationsService {
   async similarTopics(topicId: bigint, limit: number): Promise<SimilarTopicHit[]> {
     if (!this.embedding.isConfigured()) {
       throw new ServiceUnavailableException(
-        'OPENAI_API_KEY required for similar-topics (embeddings)',
+        'local embedding service is unavailable for similar-topics',
       );
     }
     const exists = await this.prisma.topic.findUnique({
@@ -163,7 +171,7 @@ export class RecommendationsService {
     }
 
     const others = await this.prisma.topicEmbedding.findMany({
-      where: { NOT: { topicId } },
+      where: { NOT: { topicId }, model: DEFAULT_EMBEDDING_MODEL },
       include: { topic: { select: { id: true, title: true, slug: true } } },
     });
 
@@ -192,7 +200,7 @@ export class RecommendationsService {
     }
     if (!this.embedding.isConfigured()) {
       throw new ServiceUnavailableException(
-        'OPENAI_API_KEY required for similar-entities (embeddings)',
+        'local embedding service is unavailable for similar-entities',
       );
     }
     const entity = await this.prisma.entity.findUnique({ where: { id: entityId } });

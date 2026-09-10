@@ -67,7 +67,7 @@ describe("topic admin create helpers", () => {
 
   it("builds fields from a dynamic topic metric plan without fixed keys", () => {
     const form = defaultTopicVersionPolicyForm("SEMI_OBJECTIVE", {
-      generatedBy: "openai",
+      generatedBy: "local_algorithm",
       rationale: "按当前话题选择。",
       metrics: [
         {

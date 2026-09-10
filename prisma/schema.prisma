@@ -151,10 +151,10 @@ model Topic {
   @@index([tenantId])
 }
 
-/// 话题语义向量（OpenAI embedding；用于相似话题推荐）
+/// 话题本地特征向量（用于相似话题推荐）
 model TopicEmbedding {
   topicId   BigInt   @id
-  model     String   @default("text-embedding-3-small")
+  model     String   @default("local-hash-embedding-v1")
   dims      Int
   vector    Json
   updatedAt DateTime @updatedAt

@@ -124,7 +124,7 @@ export function SnapshotAnalyzeActions(props: SnapshotAnalyzeActionsProps) {
         <CopyTextButton text={analyzePostUrl} idleLabel="复制 POST URL" className="h-7" />
         <span className="text-xs text-muted-foreground">
           POST {BACKEND_ADMIN_DOC.snapshotAnalyze}；body 可选 agent（≤{AGENT_MAX}）、topN（{TOPN_MIN}–{TOPN_MAX}）、chainContext（≤{CHAIN_CONTEXT_MAX}）；
-          可选 OPENAI_API_KEY 润色；约定 agent：rules-v1、post-snapshot-summary-v1、trend-v1、credibility-v1
+          使用项目内规则生成；约定 agent：rules-v1、post-snapshot-summary-v1、trend-v1、credibility-v1
         </span>
       </div>
       <div className="mt-3 flex flex-wrap items-end gap-4">
@@ -161,7 +161,7 @@ export function SnapshotAnalyzeActions(props: SnapshotAnalyzeActionsProps) {
           value={chainContext}
           onChange={(e) => setChainContext(e.target.value)}
           maxLength={CHAIN_CONTEXT_MAX}
-          placeholder="留空则无；有 OPENAI_API_KEY 时拼入 user 消息前缀"
+          placeholder="留空则无；填写后作为项目内分析步骤的前序摘要"
           disabled={loading}
           autoComplete="off"
           rows={3}

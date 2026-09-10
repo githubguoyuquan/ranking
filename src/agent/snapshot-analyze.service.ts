@@ -10,10 +10,7 @@ import { AiAuditService } from '../ai-audit/ai-audit.service';
 import { parseTenantSettings } from '../compliance/tenant-settings';
 import { PrismaService } from '../prisma/prisma.service';
 import {
-  AI_AGENT_CREDIBILITY_V1,
-  AI_AGENT_POST_SNAPSHOT_SUMMARY_V1,
   AI_AGENT_RULES_V1,
-  AI_AGENT_TREND_V1,
   LIST_ANALYSES_AGENT_KINDS,
   resolveAiAnalysisAgentKind,
   type ListAnalysesAgentKind,
@@ -130,7 +127,7 @@ export class SnapshotAnalyzeService {
         await this.audit.recordChatAttempt({
           category: 'CHAT_COMPLETION',
           operation: 'analyzeSnapshot',
-          model: process.env.OPENAI_MODEL?.trim() ?? null,
+          model: null,
           snapshotId,
           aiAnalysisId: null,
           success: false,
@@ -165,7 +162,7 @@ export class SnapshotAnalyzeService {
     );
     const names = snap.items.map((i) => i.entity.canonicalName);
     const baseline = `本榜前 ${snap.items.length} 名：${names.join('、')}。`;
-    const llm = await this.maybeOpenAiSummary(
+    const llm = await this.localSummary(
       lines.join('\n'),
       baseline,
       agentResolved,
@@ -211,7 +208,7 @@ export class SnapshotAnalyzeService {
             usedChainContext: Boolean(opts.chainContext?.trim()),
             auditRequestId: requestId,
           },
-          confidence: process.env.OPENAI_API_KEY?.trim() ? 0.85 : 0.55,
+          confidence: 0.55,
         },
       });
 
@@ -316,109 +313,14 @@ export class SnapshotAnalyzeService {
     return tx.aiAnalysis.count({ where: { createdAt: { gte: since } } });
   }
 
-  private buildUserPromptRankingBlock(rankingLines: string, chainContext?: string): string {
-    const ctx = chainContext?.trim();
-    if (!ctx) return rankingLines;
-    return [
-      '以下为流水线中前序步骤已生成的摘要（供衔接；请勿逐句复述。若与下列结构化榜单数据抵触，以榜单元数据为准。）',
-      ctx,
-      '',
-      '---',
-      '',
-      '榜单元数据（名次、trendType、popularity）：',
-      rankingLines,
-    ].join('\n');
-  }
-
-  private systemPromptForAgent(agent: string): string {
-    if (agent === AI_AGENT_POST_SNAPSHOT_SUMMARY_V1) {
-      return (
-        '你是排行榜运营助手。根据下列名次与趋势标签，用 2～3 句中文写出运营可读摘要，语气客观，不得编造未出现的实体名；可略提名次分布特点。'
-      );
-    }
-    if (agent === AI_AGENT_TREND_V1) {
-      return (
-        '你是数据分析师。仅依据下列名次、trendType 与 popularity，用 2～4 句中文解读当前榜单的「位置—标签」模式：可点名具体位次上的实体，说明哪些趋势标签集中出现在前列/后列；不得编造未出现的名称或外部数据。'
-      );
-    }
-    if (agent === AI_AGENT_CREDIBILITY_V1) {
-      return (
-        '你是风险语感助手。仅基于下列结构化排名与趋势标签，用 2～3 句中文说明该结果在可解释性上的边界：可提及榜样条权重或标签同质性等「榜单内」线索；避免断言真实世界真伪或引用未提供来源，不得编造实体或事件。'
-      );
-    }
-    return '你是排行榜运营助手。请用 2～4 句中文概括下列排名信息，语气客观，不要编造未出现的名字。';
-  }
-
-  private async maybeOpenAiSummary(
-    context: string,
+  private async localSummary(
+    _context: string,
     fallback: string,
-    agent: string,
-    chainContext?: string,
+    _agent: string,
+    _chainContext?: string,
   ): Promise<LlmSummaryResult> {
-    const key = process.env.OPENAI_API_KEY?.trim();
-    const model = process.env.OPENAI_MODEL?.trim() || 'gpt-4o-mini';
-    if (!key) {
-      return {
-        text: fallback,
-        usedLlm: false,
-        model: null,
-        usage: null,
-      };
-    }
-
-    const userContent = this.buildUserPromptRankingBlock(context, chainContext);
-    try {
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${key}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model,
-          messages: [
-            {
-              role: 'system',
-              content: this.systemPromptForAgent(agent),
-            },
-            { role: 'user', content: userContent },
-          ],
-          max_tokens: 300,
-          temperature: 0.4,
-        }),
-      });
-      if (!res.ok) {
-        return { text: fallback, usedLlm: false, model, usage: null };
-      }
-      const data = (await res.json()) as {
-        choices?: { message?: { content?: string } }[];
-        usage?: {
-          prompt_tokens?: number;
-          completion_tokens?: number;
-          total_tokens?: number;
-        };
-      };
-      const text = data.choices?.[0]?.message?.content?.trim();
-      const u = data.usage;
-      const usage =
-        u &&
-        typeof u.prompt_tokens === 'number' &&
-        typeof u.completion_tokens === 'number' &&
-        typeof u.total_tokens === 'number'
-          ? {
-              prompt: u.prompt_tokens,
-              completion: u.completion_tokens,
-              total: u.total_tokens,
-            }
-          : null;
-      return {
-        text: text && text.length > 0 ? text : fallback,
-        usedLlm: Boolean(text && text.length > 0),
-        model,
-        usage,
-      };
-    } catch {
-      return { text: fallback, usedLlm: false, model, usage: null };
-    }
+    void _agent;
+    void _chainContext;
+    return { text: fallback, usedLlm: false, model: null, usage: null };
   }
 }

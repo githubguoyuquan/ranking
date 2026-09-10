@@ -56,7 +56,7 @@ export class TopicEntityDiscoveryService {
 
     const languages = languageCodes(args.locale);
     const plan = await this.intent.resolve(title);
-    const sourceLanguage = plan.semantic ? 'en' : languages[0];
+    const sourceLanguage = languages[0];
     const category = await this.resolveIdentity(plan.category, 'item', sourceLanguage);
     const constraints = await Promise.all(plan.constraints.map(async (constraint) => ({
       property: await this.resolveIdentity(constraint.property, 'property', sourceLanguage),
@@ -126,15 +126,13 @@ export class TopicEntityDiscoveryService {
     }
     return {
       source: 'wikidata',
-      strategy: `${plan.semantic ? 'OpenAI 语义解析' : '完整名称精确匹配'}：${category.label}（${category.id}）`
+      strategy: `本地清理话题名称并精确匹配：${category.label}（${category.id}）`
         + constraints.map((constraint) =>
           `；${constraint.property.label}（${constraint.property.id}）=${constraint.value.label}（${constraint.value.id}）`,
         ).join('')
-        + (plan.semantic ? '；Wikidata 取数；OpenAI 候选语义核验' : '；Wikidata 取数'),
+        + '；Wikidata 公开取数；项目内来源边界校验',
       entities,
-      warning: plan.semantic
-        ? '实体身份来自 Wikidata；OpenAI 仅解析范围并核验公开候选相关性。结果可能遗漏或误判，顺序不代表排名，也不包含指标数据，请在跑榜前核对。'
-        : '未配置语义服务，本次仅按完整类别名称或别名匹配 Wikidata。顺序不代表排名，也不包含指标数据，请核对名单。',
+      warning: '本次仅按完整类别名称或别名匹配 Wikidata，并在项目内校验来源边界。顺序不代表排名，也不包含指标数据，请核对名单。',
     };
   }
 

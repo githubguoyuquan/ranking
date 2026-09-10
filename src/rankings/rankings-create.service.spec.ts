@@ -90,7 +90,7 @@ describe('RankingsService admin topic creation', () => {
 
   it('persists the runtime metric plan instead of assigning fixed topic-kind metrics', async () => {
     const metricPlan = {
-      generatedBy: 'openai' as const,
+      generatedBy: 'local_algorithm' as const,
       rationale: '按运行时话题生成。',
       metrics: [
         {

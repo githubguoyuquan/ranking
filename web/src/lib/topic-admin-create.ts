@@ -13,7 +13,7 @@ export type TopicMetricDefinition = {
 };
 
 export type TopicMetricPlan = {
-  generatedBy: "openai";
+  generatedBy: "local_algorithm" | "openai";
   rationale: string;
   metrics: Array<TopicMetricDefinition & { weight: number; required: boolean }>;
 };
@@ -64,7 +64,7 @@ function recordOf(raw: unknown): Record<string, unknown> | null {
 
 export function parseTopicMetricPlan(raw: unknown): TopicMetricPlan | null {
   const value = recordOf(raw);
-  if (!value || value.generatedBy !== "openai" || typeof value.rationale !== "string" || !Array.isArray(value.metrics)) {
+  if (!value || !["local_algorithm", "openai"].includes(String(value.generatedBy)) || typeof value.rationale !== "string" || !Array.isArray(value.metrics)) {
     return null;
   }
   const metrics: TopicMetricPlan["metrics"] = [];
@@ -90,7 +90,7 @@ export function parseTopicMetricPlan(raw: unknown): TopicMetricPlan | null {
     });
   }
   if (metrics.length < 2 || new Set(metrics.map((metric) => metric.key)).size !== metrics.length) return null;
-  return { generatedBy: "openai", rationale: value.rationale, metrics };
+  return { generatedBy: value.generatedBy as TopicMetricPlan["generatedBy"], rationale: value.rationale, metrics };
 }
 
 function definitionsForKeys(keys: string[]): TopicMetricDefinition[] {

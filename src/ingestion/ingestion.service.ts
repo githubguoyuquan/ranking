@@ -670,7 +670,7 @@ export class IngestionService {
   }
 
   /**
-   * OpenAI 向量与同信源近期 canonical 行比对；命中则返回 canonical `CrawledUrl.id`，否则返回本页向量供写入。
+   * 本地向量与同信源近期 canonical 行比对；命中则返回 canonical `CrawledUrl.id`，否则返回本页向量供写入。
    */
   private async resolveSemanticMeta(
     sourceId: bigint,

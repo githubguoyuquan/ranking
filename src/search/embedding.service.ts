@@ -1,22 +1,49 @@
-import {
-  Injectable,
-  Logger,
-  ServiceUnavailableException,
-} from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
-import { AiAuditService } from '../ai-audit/ai-audit.service';
-import {
-  AI_AUDIT_SOURCE_EMBEDDING_SEARCH,
-} from '../ai-audit/ai-audit.constants';
-import { DEFAULT_EMBEDDING_MODEL, EMBEDDING_DIMS } from './embedding.constants';
+import { AI_AUDIT_SOURCE_EMBEDDING_SEARCH } from '../ai-audit/ai-audit.constants';
+import { EMBEDDING_DIMS } from './embedding.constants';
 
 function aliasesToText(aliases: Prisma.JsonValue | null | undefined): string {
   if (aliases === null || aliases === undefined) return '';
   if (Array.isArray(aliases)) {
-    return aliases.filter((x): x is string => typeof x === 'string').join(' ');
+    return aliases.filter((value): value is string => typeof value === 'string').join(' ');
   }
   if (typeof aliases === 'object') return JSON.stringify(aliases);
   return String(aliases);
+}
+
+function hashToken(value: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+/**
+ * 项目内确定性特征哈希：不联网、不需要密钥，同一文本始终得到同一向量。
+ * 单字、双字和词特征兼顾中文与以空格分词的语言。
+ */
+export function localTextEmbedding(input: string): number[] {
+  const normalized = input.normalize('NFKC').toLocaleLowerCase().trim().slice(0, 8_000);
+  const vector = new Array<number>(EMBEDDING_DIMS).fill(0);
+  if (!normalized) return vector;
+
+  const compact = [...normalized].filter((char) => /[\p{L}\p{N}]/u.test(char));
+  const tokens = normalized.match(/[\p{L}\p{N}]+/gu) ?? [];
+  const features = [
+    ...tokens.map((token) => `w:${token}`),
+    ...compact.map((char) => `c:${char}`),
+    ...compact.slice(0, -1).map((char, index) => `b:${char}${compact[index + 1]}`),
+  ];
+  for (const feature of features) {
+    const hash = hashToken(feature);
+    const slot = hash % EMBEDDING_DIMS;
+    vector[slot] += (hash & 0x80000000) === 0 ? 1 : -1;
+  }
+  const norm = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
+  return norm > 0 ? vector.map((value) => value / norm) : vector;
 }
 
 export type EmbeddingAuditContext = {
@@ -26,147 +53,18 @@ export type EmbeddingAuditContext = {
 
 @Injectable()
 export class EmbeddingService {
-  private readonly logger = new Logger(EmbeddingService.name);
-
-  constructor(private readonly audit: AiAuditService) {}
-
   isConfigured(): boolean {
-    return Boolean(process.env.OPENAI_API_KEY?.trim());
+    return true;
   }
 
-  private embeddingAuditEnabled(): boolean {
-    return process.env.AI_EMBEDDING_AUDIT !== 'false';
+  async embedText(input: string, _auditCtx?: EmbeddingAuditContext): Promise<number[]> {
+    void _auditCtx;
+    return localTextEmbedding(input);
   }
 
-  private async assertEmbeddingDailyCap(): Promise<void> {
-    const raw = process.env.AI_EMBEDDING_DAILY_CAP?.trim();
-    if (!raw) return;
-    const cap = Number(raw);
-    if (!Number.isFinite(cap) || cap < 0) return;
-    const { start } = this.audit.utcDayBounds();
-    const n = await this.audit.countSuccessfulEmbeddingsSince(start);
-    if (n >= cap) {
-      throw new ServiceUnavailableException(
-        `Embedding quota: daily cap ${cap} (UTC) successful batches reached`,
-      );
-    }
-  }
-
-  async embedText(input: string, auditCtx?: EmbeddingAuditContext): Promise<number[]> {
-    const vectors = await this.embedMany([input], auditCtx);
-    return vectors[0] ?? [];
-  }
-
-  /** 批量嵌入（单次请求，适合话题全量灌库） */
-  async embedMany(
-    inputs: string[],
-    auditCtx?: EmbeddingAuditContext,
-  ): Promise<number[][]> {
-    const key = process.env.OPENAI_API_KEY?.trim();
-    if (!key) {
-      throw new ServiceUnavailableException(
-        'OPENAI_API_KEY not set (required for semantic / vector search)',
-      );
-    }
-    if (inputs.length === 0) return [];
-
-    await this.assertEmbeddingDailyCap();
-
-    const trimmed = inputs.map((s) => s.trim().slice(0, 8000));
-    const model = DEFAULT_EMBEDDING_MODEL;
-
-    let res: Response;
-    try {
-      res = await fetch('https://api.openai.com/v1/embeddings', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${key}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ model, input: trimmed }),
-      });
-    } catch (e) {
-      if (this.embeddingAuditEnabled() && auditCtx) {
-        await this.audit.recordEmbeddingBatch({
-          operation: auditCtx.operation ?? 'openai.embeddings',
-          model,
-          inputCount: trimmed.length,
-          success: false,
-          errorMessage: e instanceof Error ? e.message : String(e),
-          source: auditCtx.source,
-        });
-      }
-      throw e;
-    }
-
-    if (!res.ok) {
-      const err = await res.text();
-      this.logger.warn(`OpenAI embeddings ${res.status}: ${err}`);
-      if (this.embeddingAuditEnabled() && auditCtx) {
-        await this.audit.recordEmbeddingBatch({
-          operation: auditCtx.operation ?? 'openai.embeddings',
-          model,
-          inputCount: trimmed.length,
-          success: false,
-          errorMessage: err.slice(0, 2000),
-          source: auditCtx.source,
-        });
-      }
-      throw new ServiceUnavailableException(
-        `OpenAI embeddings failed: HTTP ${res.status}`,
-      );
-    }
-
-    const body = (await res.json()) as {
-      data?: Array<{ index: number; embedding: number[] }>;
-      usage?: { total_tokens?: number };
-    };
-    const rows = body.data;
-    if (!rows?.length) {
-      if (this.embeddingAuditEnabled() && auditCtx) {
-        await this.audit.recordEmbeddingBatch({
-          operation: auditCtx.operation ?? 'openai.embeddings',
-          model,
-          inputCount: trimmed.length,
-          success: false,
-          errorMessage: 'empty data',
-          source: auditCtx.source,
-        });
-      }
-      throw new ServiceUnavailableException('OpenAI embeddings: empty data');
-    }
-
-    const sorted = [...rows].sort((a, b) => a.index - b.index);
-    for (const r of sorted) {
-      if (!r.embedding || r.embedding.length !== EMBEDDING_DIMS) {
-        if (this.embeddingAuditEnabled() && auditCtx) {
-          await this.audit.recordEmbeddingBatch({
-            operation: auditCtx.operation ?? 'openai.embeddings',
-            model,
-            inputCount: trimmed.length,
-            success: false,
-            errorMessage: `dim ${r.embedding?.length}`,
-            source: auditCtx.source,
-          });
-        }
-        throw new ServiceUnavailableException(
-          `unexpected embedding dim: ${r.embedding?.length} (expected ${EMBEDDING_DIMS})`,
-        );
-      }
-    }
-
-    if (this.embeddingAuditEnabled() && auditCtx) {
-      await this.audit.recordEmbeddingBatch({
-        operation: auditCtx.operation ?? 'openai.embeddings',
-        model,
-        inputCount: trimmed.length,
-        success: true,
-        totalTokens: body.usage?.total_tokens ?? null,
-        source: auditCtx.source,
-      });
-    }
-
-    return sorted.map((r) => r.embedding);
+  async embedMany(inputs: string[], _auditCtx?: EmbeddingAuditContext): Promise<number[][]> {
+    void _auditCtx;
+    return inputs.map(localTextEmbedding);
   }
 
   async embedForEntity(
@@ -174,12 +72,11 @@ export class EmbeddingService {
     aliases: Prisma.JsonValue | null | undefined,
     auditCtx?: EmbeddingAuditContext,
   ): Promise<number[]> {
-    const a = aliasesToText(aliases);
-    const text =
-      a.length > 0 ? `${canonicalName.trim()}\n${a}` : canonicalName.trim();
+    const aliasText = aliasesToText(aliases);
+    const text = aliasText.length > 0 ? `${canonicalName.trim()}\n${aliasText}` : canonicalName.trim();
     return this.embedText(text, auditCtx ?? {
       source: AI_AUDIT_SOURCE_EMBEDDING_SEARCH,
-      operation: 'entity_embed',
+      operation: 'entity_embed_local',
     });
   }
 }

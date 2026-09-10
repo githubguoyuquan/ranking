@@ -64,7 +64,7 @@ class SearchDslQueryDto {
   @MaxLength(64)
   until?: string;
 
-  /** 全文 + 向量 RRF 融合（需 OPENAI_API_KEY + qdrant/es） */
+  /** 全文 + 本地向量 RRF 融合（需 qdrant/es） */
   @IsOptional()
   @Transform(
     ({ value }) => value === true || value === 'true' || value === '1' || value === 1,
@@ -94,7 +94,7 @@ class SearchEntitiesQueryDto extends SearchDslQueryDto {
   @IsIn(['qdrant', 'es', 'pg', 'auto'])
   engine?: 'qdrant' | 'es' | 'pg' | 'auto';
 
-  /** `true` / `1`：对查询句做 embedding，走 ES kNN（需 OPENAI_API_KEY + ELASTICSEARCH_NODE） */
+  /** `true` / `1`：对查询句做本地 embedding，走 ES kNN（需 ELASTICSEARCH_NODE） */
   @IsOptional()
   @Transform(
     ({ value }) => value === true || value === 'true' || value === '1' || value === 1,
@@ -163,7 +163,7 @@ class UnifiedSearchQueryDto extends SearchDslQueryDto {
   @IsIn(['auto', 'qdrant', 'es', 'pg'])
   entityIndex?: 'auto' | 'qdrant' | 'es' | 'pg';
 
-  /** 实体块走向量 kNN（需 OPENAI_API_KEY + ES；与 `entityIndex=pg` 互斥时以语义检索优先报错见响应 detail） */
+  /** 实体块走本地向量 kNN（需 ES；与 `entityIndex=pg` 互斥时以语义检索优先报错见响应 detail） */
   @IsOptional()
   @Transform(
     ({ value }) => value === true || value === 'true' || value === '1' || value === 1,
@@ -354,7 +354,7 @@ export class SearchController {
       }
       if (!this.embedding.isConfigured()) {
         throw new ServiceUnavailableException(
-          'semantic search requires OPENAI_API_KEY',
+          'semantic search requires local embeddings',
         );
       }
       const vec = await this.embedding.embedText(parsed.text || rawQ, {
@@ -656,7 +656,7 @@ export class SearchController {
         return {
           source: 'off',
           hits: [],
-          detail: 'entitySemantic requires OPENAI_API_KEY',
+          detail: 'entitySemantic requires local embeddings',
           vectorSearch: true,
         };
       }

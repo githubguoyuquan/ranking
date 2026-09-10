@@ -71,7 +71,7 @@ export class HybridSearchService {
         );
       }
       if (!this.embedding.isConfigured()) {
-        throw new ServiceUnavailableException('hybrid search requires OPENAI_API_KEY');
+        throw new ServiceUnavailableException('hybrid search requires local embeddings');
       }
       const vec = await this.embedding.embedText(q || 'entity', {
         source: AI_AUDIT_SOURCE_EMBEDDING_SEARCH,

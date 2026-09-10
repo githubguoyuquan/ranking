@@ -20,7 +20,7 @@ class AnalyzeSnapshotDto {
   @Max(50)
   topN?: number;
 
-  /** 注入 user 消息前缀，模拟流水线「前序摘要」（需 OPENAI_API_KEY 才影响 LLM） */
+  /** 注入流水线前序摘要，供项目内规则步骤记录上下文。 */
   @IsOptional()
   @IsString()
   @MaxLength(8192)
@@ -68,7 +68,7 @@ function parseSnapshotId(raw: string): bigint {
 export class AgentController {
   constructor(private readonly snapshotAnalyze: SnapshotAnalyzeService) {}
 
-  /** 基于快照排行生成 `AiAnalysis`（规则摘要；配置 OPENAI_API_KEY 时可选调用 GPT 润色） */
+  /** 基于快照排行生成项目内规则摘要。 */
   @Post('admin/snapshots/:snapshotId/analyze')
   async analyzeSnapshot(
     @Param('snapshotId') snapshotId: string,

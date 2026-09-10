@@ -20,7 +20,7 @@ afterEach(() => {
 });
 
 describe('domain-independent topic entity discovery', () => {
-  it('builds a source query only from the runtime semantic plan and verified Wikidata IDs', async () => {
+  it('builds a source query only from the runtime plan and verified Wikidata IDs', async () => {
     const intent = {
       resolve: vi.fn().mockResolvedValue({
         category: 'runtime category',
@@ -54,7 +54,7 @@ describe('domain-independent topic entity discovery', () => {
       expect.objectContaining({ externalId: 'Q2' }),
     ]));
     expect(result.entities.map((item) => item.externalId)).toEqual(['Q1']);
-    expect(result.strategy).toContain('OpenAI 语义解析');
+    expect(result.strategy).toContain('项目内来源边界校验');
   });
 
   it.each([
@@ -96,7 +96,7 @@ describe('domain-independent topic entity discovery', () => {
     expect(result.entities.map((item) => item.externalId)).toEqual(['Q1', 'Q3']);
   });
 
-  it('paginates source lookup and semantic review beyond the former fixed limit', async () => {
+  it('paginates source lookup and local review beyond the former fixed limit', async () => {
     const firstPage = Array.from({ length: 100 }, (_, index) => row(`Q${index + 1}`, `对象 ${index + 1}`));
     const secondPage = Array.from({ length: 20 }, (_, index) => row(`Q${index + 101}`, `对象 ${index + 101}`));
     const intent = {
@@ -168,7 +168,7 @@ describe('domain-independent topic entity discovery', () => {
       .rejects.toThrow('没有找到能确认符合');
   });
 
-  it('rejects invalid input before calling semantic or source providers', async () => {
+  it('rejects invalid input before calling local planning or source providers', async () => {
     const intent = { resolve: vi.fn(), review: vi.fn() };
     const service = new TopicEntityDiscoveryService(intent as never);
     await expect(service.discover({ title: '', locale: 'en', count: 1 }))
@@ -178,7 +178,7 @@ describe('domain-independent topic entity discovery', () => {
     expect(intent.resolve).not.toHaveBeenCalled();
   });
 
-  it('labels the no-key exact-match fallback honestly', async () => {
+  it('labels exact-match discovery honestly', async () => {
     const intent = {
       resolve: vi.fn().mockResolvedValue({
         category: 'runtime category', membership: 'both', constraints: [], semantic: false,
@@ -191,8 +191,7 @@ describe('domain-independent topic entity discovery', () => {
     vi.stubGlobal('fetch', fetcher);
     const result = await new TopicEntityDiscoveryService(intent as never)
       .discover({ title: '任意话题', locale: 'en', count: 1 });
-    expect(result.strategy).toContain('完整名称精确匹配');
-    expect(result.strategy).not.toContain('OpenAI');
-    expect(result.warning).toContain('未配置语义服务');
+    expect(result.strategy).toContain('精确匹配');
+    expect(result.warning).toContain('项目内校验');
   });
 });

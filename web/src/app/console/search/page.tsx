@@ -369,7 +369,7 @@ function SearchPageInner() {
           <code className="rounded bg-muted px-1">entityIndex</code>）与爬取（
           <code className="rounded bg-muted px-1">crawlIndex</code>）。内联 DSL 如{" "}
           <code className="text-xs">type:PERSON since:7d</code>；<code className="text-xs">hybrid=1</code>{" "}
-          启用全文+向量 RRF（需 OPENAI + qdrant/es）。
+          启用全文+本地向量 RRF（需 qdrant/es）。
         </p>
         <p className="mt-2 text-xs text-muted-foreground">
           Elasticsearch{" "}

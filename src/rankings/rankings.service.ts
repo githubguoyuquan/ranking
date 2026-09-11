@@ -217,6 +217,50 @@ export class RankingsService {
   }
 
   /** 运营台手工创建话题；slug 全局唯一，租户来自当前鉴权上下文。 */
+  async listTopics(
+    args: { q?: string; limit?: number },
+    auth?: AuthenticatedRequestContext,
+  ) {
+    const q = args.q?.trim();
+    const limit = Math.min(Math.max(args.limit ?? 100, 1), 200);
+    const topics = await this.readPrisma.topic.findMany({
+      where: {
+        ...topicWhereForAuth(auth),
+        ...(q
+          ? {
+              OR: [
+                { title: { contains: q, mode: 'insensitive' as const } },
+                { slug: { contains: q, mode: 'insensitive' as const } },
+                { entityScope: { contains: q, mode: 'insensitive' as const } },
+              ],
+            }
+          : {}),
+      },
+      orderBy: { updatedAt: 'desc' },
+      take: limit,
+      select: {
+        id: true,
+        slug: true,
+        title: true,
+        entityScope: true,
+        kind: true,
+        locale: true,
+        createdAt: true,
+        updatedAt: true,
+        _count: { select: { versions: true } },
+      },
+    });
+    return toPlainJson({
+      count: topics.length,
+      topics: topics.map((topic) => ({
+        ...topic,
+        versionCount: topic._count.versions,
+        _count: undefined,
+      })),
+    });
+  }
+
+  /** 运营台手工创建话题；slug 全局唯一，租户来自当前鉴权上下文。 */
   async createTopic(
     args: CreateTopicArgs,
     auth?: AuthenticatedRequestContext,

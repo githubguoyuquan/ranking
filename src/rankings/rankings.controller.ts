@@ -353,6 +353,20 @@ export class TopicOverviewQueryDto extends LeaderboardQueryDto {
   recentLimit?: number;
 }
 
+export class AdminTopicListQueryDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(160)
+  q?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(200)
+  limit?: number;
+}
+
 @Controller()
 export class RankingsController {
   constructor(
@@ -366,6 +380,19 @@ export class RankingsController {
   @Post('admin/seed-demo')
   async seedDemo(@Body() body: SeedDemoDto) {
     return this.rankings.seedDemo(body.slug);
+  }
+
+  /** 运营台话题管理首页：列出当前租户可访问的话题。 */
+  @Get('admin/topics')
+  @RequireScopes('admin')
+  async listTopics(
+    @Query() query: AdminTopicListQueryDto,
+    @Req() req: Request,
+  ) {
+    return this.rankings.listTopics(
+      { q: query.q, limit: query.limit },
+      getAuthFromRequest(req),
+    );
   }
 
   /** 运营台手工创建话题；正式写操作要求 admin scope。 */

@@ -97,7 +97,8 @@ export class TopicEntityAutofillService {
 
     try {
       const result = await this.discovery.discover({
-        title: record.topic.title, locale: record.topic.locale, count: record.requestedCount,
+        title: record.topic.entityScope ?? record.topic.title,
+        locale: record.topic.locale, count: record.requestedCount,
       });
       // Defense at the persistence boundary: only actual Wikidata identities with
       // a canonical source URL may be saved; never pad a short result.

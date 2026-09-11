@@ -197,6 +197,12 @@ export class PatchTopicBodyDto {
   @MinLength(1)
   @MaxLength(200)
   title?: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(160)
+  entityScope?: string;
 }
 
 export class CreateTopicAdminDto {
@@ -212,6 +218,12 @@ export class CreateTopicAdminDto {
   @MinLength(1)
   @MaxLength(200)
   title!: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(160)
+  entityScope?: string;
 
   @IsEnum(TopicKind)
   kind!: TopicKind;
@@ -367,6 +379,7 @@ export class RankingsController {
       {
         slug: body.slug,
         title: body.title,
+        entityScope: body.entityScope,
         kind: body.kind,
         locale: body.locale,
         entityCount: body.entityCount,
@@ -568,12 +581,12 @@ export class RankingsController {
     @Body() body: PatchTopicBodyDto,
     @Req() req: Request,
   ) {
-    if (body.kind === undefined && body.title === undefined) {
-      throw new BadRequestException('provide kind and/or title');
+    if (body.kind === undefined && body.title === undefined && body.entityScope === undefined) {
+      throw new BadRequestException('provide kind, title and/or entityScope');
     }
     return await this.rankings.updateTopicBySlug(
       slug,
-      { kind: body.kind, title: body.title },
+      { kind: body.kind, title: body.title, entityScope: body.entityScope },
       getAuthFromRequest(req),
     );
   }

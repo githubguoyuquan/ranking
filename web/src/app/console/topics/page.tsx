@@ -72,6 +72,7 @@ type TopicMeta = {
   id: string;
   slug: string;
   title: string;
+  entityScope: string | null;
   kind: TopicKindValue;
   locale: string;
   kindStrategy?: KindStrategy;
@@ -105,6 +106,7 @@ function parseTopicMetaFromJson(
     id: String(j.id ?? ""),
     slug: String(j.slug ?? slugFallback),
     title: String(j.title ?? ""),
+    entityScope: j.entityScope == null ? null : String(j.entityScope),
     kind,
     locale: String(j.locale ?? ""),
     kindStrategy: parseKindStrategy(j.kindStrategy),
@@ -341,6 +343,7 @@ function TopicsPageInner() {
   const [topicKindDraft, setTopicKindDraft] =
     useState<TopicKindValue>("SEMI_OBJECTIVE");
   const [topicTitleDraft, setTopicTitleDraft] = useState("");
+  const [topicEntityScopeDraft, setTopicEntityScopeDraft] = useState("");
   const [topicSaving, setTopicSaving] = useState(false);
   const [topicMsg, setTopicMsg] = useState("");
   const [loading, setLoading] = useState(false);
@@ -668,6 +671,7 @@ function TopicsPageInner() {
       setTopicMeta(meta);
       setTopicKindDraft(meta.kind);
       setTopicTitleDraft(meta.title);
+      setTopicEntityScopeDraft(meta.entityScope ?? "");
     } catch (e) {
       setTopicMeta(null);
       setTopicMsg(e instanceof Error ? e.message : String(e));
@@ -678,11 +682,13 @@ function TopicsPageInner() {
     setTopicSaving(true);
     setTopicMsg("");
     try {
-      const body: { kind: TopicKindValue; title?: string } = {
+    const body: { kind: TopicKindValue; title?: string; entityScope?: string } = {
         kind: topicKindDraft,
       };
       const title = topicTitleDraft.trim();
-      if (title) body.title = title;
+    if (title) body.title = title;
+    const entityScope = topicEntityScopeDraft.trim();
+    if (entityScope) body.entityScope = entityScope;
       const res = await fetch(nestTopicUrl(slugForApi), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -719,6 +725,7 @@ function TopicsPageInner() {
           setTopicMeta(meta);
           setTopicKindDraft(meta.kind);
           setTopicTitleDraft(meta.title);
+          setTopicEntityScopeDraft(meta.entityScope ?? "");
           setTopicMsg("");
         } catch {
           setTopicMeta(null);
@@ -813,6 +820,7 @@ function TopicsPageInner() {
             id: created.id,
             slug: created.slug,
             title: created.title,
+            entityScope: created.entityScope,
             kind: created.kind,
             locale: created.locale,
             kindStrategy: parseKindStrategy(created.kindStrategy),
@@ -823,6 +831,7 @@ function TopicsPageInner() {
           setTopicMeta(meta);
           setTopicKindDraft(created.kind);
           setTopicTitleDraft(created.title);
+          setTopicEntityScopeDraft(created.entityScope ?? "");
           setVersionRows([]);
           setPolicyTargetId(null);
           setResult("");
@@ -948,6 +957,19 @@ function TopicsPageInner() {
                   onChange={(e) => setTopicTitleDraft(e.target.value)}
                   placeholder={topicMeta?.title ?? "话题展示名"}
                 />
+              </div>
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="topic-entity-scope">参榜实体类别</Label>
+                <Input
+                  id="topic-entity-scope"
+                  maxLength={160}
+                  value={topicEntityScopeDraft}
+                  onChange={(e) => setTopicEntityScopeDraft(e.target.value)}
+                  placeholder="例如：电影"
+                />
+                <p className="text-xs text-muted-foreground">
+                  用于自动填充参榜对象；修改后点击“保存话题属性”，再点“重试自动填充”。
+                </p>
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">

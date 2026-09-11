@@ -129,6 +129,8 @@ model Topic {
   tenantId  BigInt?
   slug      String   @unique
   title     String
+  /// 用于公开知识库查询的实体类别，与对外展示名称分离。
+  entityScope String?
   kind      TopicKind
   locale    String   @default("en")
   /// 按话题语义生成的动态指标方案；版本创建时复制进 policyJson。

@@ -47,6 +47,7 @@ export type CreatedTopic = {
   id: string;
   slug: string;
   title: string;
+  entityScope: string | null;
   kind: TopicKindValue;
   locale: string;
   kindStrategy?: unknown;
@@ -62,7 +63,7 @@ export type CreatedTopicVersion = {
 };
 
 type TopicCreatePanelProps = {
-  currentTopic: Pick<CreatedTopic, "id" | "slug" | "title" | "kind" | "metricPlan"> | null;
+  currentTopic: Pick<CreatedTopic, "id" | "slug" | "title" | "entityScope" | "kind" | "metricPlan"> | null;
   existingVersions: CreatedTopicVersion[];
   onTopicCreated: (topic: CreatedTopic) => void;
   onVersionCreated: (version: CreatedTopicVersion) => void;
@@ -96,6 +97,7 @@ function parseCreatedTopic(raw: unknown): CreatedTopic | null {
     id: String(value.id),
     slug: String(value.slug),
     title: String(value.title),
+    entityScope: value.entityScope == null ? null : String(value.entityScope),
     kind,
     locale: String(value.locale ?? ""),
     kindStrategy: value.kindStrategy,
@@ -125,6 +127,7 @@ export function TopicCreatePanel({
 }: TopicCreatePanelProps) {
   const [newSlug, setNewSlug] = useState("");
   const [newTitle, setNewTitle] = useState("");
+  const [newEntityScope, setNewEntityScope] = useState("");
   const [newKind, setNewKind] = useState<TopicKindValue>("SEMI_OBJECTIVE");
   const [newLocale, setNewLocale] = useState("zh-CN");
   const [newEntityCount, setNewEntityCount] = useState("10");
@@ -257,6 +260,7 @@ export function TopicCreatePanel({
     event.preventDefault();
     const slug = newSlug.trim();
     const title = newTitle.trim();
+    const entityScope = newEntityScope.trim();
     const locale = newLocale.trim();
     setTopicSucceeded(false);
     if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
@@ -265,6 +269,10 @@ export function TopicCreatePanel({
     }
     if (!title) {
       setTopicFeedback("请填写对外展示名称。");
+      return;
+    }
+    if (!entityScope) {
+      setTopicFeedback("请填写参榜实体类别，例如“电影”。");
       return;
     }
     if (!locale) {
@@ -283,7 +291,7 @@ export function TopicCreatePanel({
       const response = await fetch(adminTopicsUrl(), {
         method: "POST",
         headers: { ...adminApiHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify({ slug, title, kind: newKind, locale, entityCount }),
+        body: JSON.stringify({ slug, title, entityScope, kind: newKind, locale, entityCount }),
       });
       const text = await response.text();
       if (!response.ok) {
@@ -300,6 +308,7 @@ export function TopicCreatePanel({
       onTopicCreated(topic);
       setNewSlug("");
       setNewTitle("");
+      setNewEntityScope("");
     } catch (error) {
       setTopicFeedback(error instanceof Error ? error.message : String(error));
     } finally {
@@ -414,6 +423,19 @@ export function TopicCreatePanel({
                 />
                 <p className="text-xs text-muted-foreground">
                   系统先匹配完整名称；无法匹配时使用本地分词寻找公开知识库中的对象类别。不会调用收费 AI，也不会在代码中预设电影、足球等业务类别。
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="new-topic-entity-scope">参榜实体类别</Label>
+                <Input
+                  id="new-topic-entity-scope"
+                  maxLength={160}
+                  placeholder="例如：电影"
+                  value={newEntityScope}
+                  onChange={(event) => setNewEntityScope(event.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  仅用于从公开知识库找参榜对象，不会改变上面的对外展示名称。
                 </p>
               </div>
               <div className="space-y-2">

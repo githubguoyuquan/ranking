@@ -123,6 +123,7 @@ export type RunRankingArgs = {
 export type CreateTopicArgs = {
   slug: string;
   title: string;
+  entityScope?: string;
   kind: TopicKind;
   locale?: string;
   entityCount?: number;
@@ -222,6 +223,7 @@ export class RankingsService {
   ) {
     const slug = args.slug.trim();
     const title = args.title.trim();
+    const entityScope = args.entityScope?.trim() || undefined;
     const locale = args.locale?.trim() || 'en';
     if (!slug) throw new BadRequestException('topic slug is required');
     if (!title) throw new BadRequestException('topic title is required');
@@ -230,6 +232,9 @@ export class RankingsService {
     }
     if (args.entityCount !== undefined && !this.entityAutofill) {
       throw new BadRequestException('自动填充服务尚未启用。');
+    }
+    if (args.entityCount !== undefined && !entityScope) {
+      throw new BadRequestException('自动填充实体时请填写参榜实体类别。');
     }
     const runToken = args.entityCount !== undefined ? randomUUID() : undefined;
     const metricPlan = this.metricPlanning
@@ -241,6 +246,7 @@ export class RankingsService {
         data: {
           slug,
           title,
+          ...(entityScope ? { entityScope } : {}),
           kind: args.kind,
           locale,
           ...(metricPlan
@@ -547,6 +553,7 @@ export class RankingsService {
         id: true,
         slug: true,
         title: true,
+        entityScope: true,
         kind: true,
         locale: true,
         metricPlan: true,
@@ -562,6 +569,7 @@ export class RankingsService {
       id: topic.id.toString(),
       slug: topic.slug,
       title: topic.title,
+      entityScope: topic.entityScope,
       kind: topic.kind,
       kindStrategy: topicKindStrategyPublic(topic.kind),
       locale: topic.locale,
@@ -575,7 +583,7 @@ export class RankingsService {
 
   async updateTopicBySlug(
     slug: string,
-    patch: { kind?: TopicKind; title?: string },
+    patch: { kind?: TopicKind; title?: string; entityScope?: string },
     auth?: AuthenticatedRequestContext,
   ) {
     const s = slug.trim();
@@ -591,6 +599,11 @@ export class RankingsService {
       const title = patch.title.trim();
       if (!title) throw new BadRequestException('title must be non-empty');
       data.title = title;
+    }
+    if (patch.entityScope !== undefined) {
+      const entityScope = patch.entityScope.trim();
+      if (!entityScope) throw new BadRequestException('entityScope must be non-empty');
+      data.entityScope = entityScope;
     }
     if (this.metricPlanning && (patch.title !== undefined || patch.kind !== undefined)) {
       const nextTitle = patch.title?.trim() || topic.title;
@@ -612,6 +625,7 @@ export class RankingsService {
         id: true,
         slug: true,
         title: true,
+        entityScope: true,
         kind: true,
         locale: true,
         metricPlan: true,
@@ -623,6 +637,7 @@ export class RankingsService {
       id: updated.id.toString(),
       slug: updated.slug,
       title: updated.title,
+      entityScope: updated.entityScope,
       kind: updated.kind,
       locale: updated.locale,
       metricPlan: updated.metricPlan,

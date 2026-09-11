@@ -42,11 +42,26 @@ describe('RankingsService admin topic creation', () => {
       {} as never, {} as never, {} as never, {} as never,
       undefined, undefined, { enqueue } as never,
     );
-    const result = await service.createTopic({ slug: 'runtime-topic', title: '运行时业务对象榜', kind: TopicKind.SEMI_OBJECTIVE, entityCount: 5 });
+    const result = await service.createTopic({
+      slug: 'runtime-topic', title: '运行时业务对象榜', entityScope: '运行时对象类别',
+      kind: TopicKind.SEMI_OBJECTIVE, entityCount: 5,
+    });
     const population = create.mock.calls[0][0].data.entityAutofill.create;
+    expect(create.mock.calls[0][0].data.entityScope).toBe('运行时对象类别');
     expect(population.requestedCount).toBe(5);
     expect(enqueue).toHaveBeenCalledWith(11n, population.runToken);
     expect(result).toMatchObject({ id: '11', entityAutofill: { requestedCount: 5 } });
+  });
+
+  it('requires a separate entity category when automatic filling is requested', async () => {
+    const service = new RankingsService(
+      { topic: { create: vi.fn() } } as never, {} as never, {} as never, {} as never,
+      {} as never, {} as never, {} as never, {} as never,
+      undefined, undefined, { enqueue: vi.fn() } as never,
+    );
+    await expect(service.createTopic({
+      slug: 'runtime-topic', title: '全球最佳电影', kind: TopicKind.SEMI_OBJECTIVE, entityCount: 10,
+    })).rejects.toThrow('参榜实体类别');
   });
 
   it('creates a topic in the authenticated tenant', async () => {

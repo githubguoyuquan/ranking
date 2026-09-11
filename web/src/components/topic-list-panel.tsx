@@ -19,6 +19,7 @@ type TopicListItem = {
   entityScope: string | null;
   kind: string;
   locale: string;
+  isOnline: boolean;
   versionCount: number;
   updatedAt: string;
 };
@@ -27,7 +28,9 @@ export function TopicListPanel() {
   const [query, setQuery] = useState("");
   const [topics, setTopics] = useState<TopicListItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [actionSlug, setActionSlug] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [feedback, setFeedback] = useState("");
 
   async function loadTopics(q = query) {
     setLoading(true);
@@ -49,6 +52,49 @@ export function TopicListPanel() {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function changeOnline(topic: TopicListItem, isOnline: boolean) {
+    setActionSlug(topic.slug);
+    setError("");
+    setFeedback("");
+    try {
+      const response = await fetch(
+        `${adminTopicsUrl()}/${encodeURIComponent(topic.slug)}/status`,
+        {
+          method: "PATCH",
+          headers: { ...adminApiHeaders(), "Content-Type": "application/json" },
+          body: JSON.stringify({ isOnline }),
+        },
+      );
+      if (!response.ok) throw new Error(`操作失败（HTTP ${response.status}）`);
+      setFeedback(`话题“${topic.title}”已${isOnline ? "上线" : "下线"}。`);
+      await loadTopics();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setActionSlug(null);
+    }
+  }
+
+  async function deleteTopic(topic: TopicListItem) {
+    if (!window.confirm(`确认删除“${topic.title}”吗？\n\n删除后会隐藏话题，但历史版本和快照会保留。`)) return;
+    setActionSlug(topic.slug);
+    setError("");
+    setFeedback("");
+    try {
+      const response = await fetch(
+        `${adminTopicsUrl()}/${encodeURIComponent(topic.slug)}`,
+        { method: "DELETE", headers: adminApiHeaders() },
+      );
+      if (!response.ok) throw new Error(`删除失败（HTTP ${response.status}）`);
+      setFeedback(`话题“${topic.title}”已删除。`);
+      await loadTopics();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setActionSlug(null);
     }
   }
 
@@ -97,6 +143,7 @@ export function TopicListPanel() {
           </div>
 
           {error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null}
+          {feedback ? <p className="text-sm text-emerald-700" role="status">{feedback}</p> : null}
           {!loading && !error && topics.length === 0 ? (
             <p className="text-sm text-muted-foreground">没有找到话题。</p>
           ) : null}
@@ -109,6 +156,7 @@ export function TopicListPanel() {
                     <th scope="col" className="px-3 py-2">话题</th>
                     <th scope="col" className="px-3 py-2">参榜实体类别</th>
                     <th scope="col" className="px-3 py-2">榜单类型</th>
+                    <th scope="col" className="px-3 py-2">状态</th>
                     <th scope="col" className="px-3 py-2">版本数</th>
                     <th scope="col" className="px-3 py-2">更新时间</th>
                     <th scope="col" className="px-3 py-2 text-right">操作</th>
@@ -123,14 +171,39 @@ export function TopicListPanel() {
                       </th>
                       <td className="px-3 py-3">{topic.entityScope || "—"}</td>
                       <td className="px-3 py-3">{topic.kind}</td>
+                      <td className="px-3 py-3">
+                        <span className={topic.isOnline ? "text-emerald-700" : "text-muted-foreground"}>
+                          {topic.isOnline ? "已上线" : "已下线"}
+                        </span>
+                      </td>
                       <td className="px-3 py-3">{topic.versionCount}</td>
                       <td className="px-3 py-3 text-muted-foreground">
                         {new Date(topic.updatedAt).toLocaleString("zh-CN")}
                       </td>
                       <td className="px-3 py-3 text-right">
-                        <Link href={topicsAdminPath(topic.slug)} className="text-primary underline-offset-4 hover:underline">
-                          进入话题
-                        </Link>
+                        <span className="inline-flex flex-wrap justify-end gap-2">
+                          <Link href={topicsAdminPath(topic.slug)} className="self-center text-primary underline-offset-4 hover:underline">
+                            进入话题
+                          </Link>
+                          <Button
+                            type="button"
+                            size="xs"
+                            variant="secondary"
+                            disabled={actionSlug === topic.slug}
+                            onClick={() => void changeOnline(topic, !topic.isOnline)}
+                          >
+                            {topic.isOnline ? "下线" : "上线"}
+                          </Button>
+                          <Button
+                            type="button"
+                            size="xs"
+                            variant="destructive"
+                            disabled={actionSlug === topic.slug}
+                            onClick={() => void deleteTopic(topic)}
+                          >
+                            删除
+                          </Button>
+                        </span>
                       </td>
                     </tr>
                   ))}

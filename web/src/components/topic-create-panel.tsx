@@ -692,7 +692,7 @@ export function TopicCreatePanel({
                 {currentTopic?.metricPlan?.rationale && templateId === "default" ? (
                   <p className="text-sm text-muted-foreground">{currentTopic.metricPlan.rationale}</p>
                 ) : null}
-                {versionForm.usesLegacyFallback ? (
+                {currentTopic && versionForm.usesLegacyFallback ? (
                   <p className="text-sm text-amber-700 dark:text-amber-300">
                     这是动态指标功能上线前的话题或旧版本，暂时显示其原有指标；新建话题不会再套用这组固定指标。
                   </p>

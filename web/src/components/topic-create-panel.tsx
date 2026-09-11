@@ -413,7 +413,7 @@ export function TopicCreatePanel({
                   onChange={(event) => setNewTitle(event.target.value)}
                 />
                 <p className="text-xs text-muted-foreground">
-                  系统通过语义解析理解对象类别和明确条件，再从公开知识库查找并核验候选；不限定预设业务类别。无法可靠解析时会提示，不会擅自省略条件。
+                  系统先匹配完整名称；无法匹配时使用本地分词寻找公开知识库中的对象类别。不会调用收费 AI，也不会在代码中预设电影、足球等业务类别。
                 </p>
               </div>
               <div className="space-y-2">
@@ -553,7 +553,7 @@ export function TopicCreatePanel({
                   ) : null}
                   {population.status === "failed" ? (
                     <p className="text-sm text-muted-foreground">
-                      话题已保存。请按提示处理后重试；如主题不明确，可在下方修改展示名称，使参榜对象更明确。
+                      话题已保存。请按上方具体原因处理后重试；无需重复创建话题。
                     </p>
                   ) : null}
                   <div className="flex flex-wrap gap-2">

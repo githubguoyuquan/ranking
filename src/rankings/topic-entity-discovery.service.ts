@@ -57,7 +57,7 @@ export class TopicEntityDiscoveryService {
     const languages = languageCodes(args.locale);
     const plan = await this.intent.resolve(title);
     const sourceLanguage = languages[0];
-    const category = await this.resolveIdentity(plan.category, 'item', sourceLanguage);
+    const category = await this.resolveCategory(plan.category, sourceLanguage);
     const constraints = await Promise.all(plan.constraints.map(async (constraint) => ({
       property: await this.resolveIdentity(constraint.property, 'property', sourceLanguage),
       value: await this.resolveIdentity(constraint.value, 'item', sourceLanguage),
@@ -141,6 +141,44 @@ export class TopicEntityDiscoveryService {
     type: 'item' | 'property',
     language: string,
   ): Promise<SourceIdentity> {
+    const matches = await this.searchExactIdentities(term, type, language);
+    if (matches.size !== 1) {
+      throw new BadRequestException(
+        `无法在 Wikidata 中唯一核验“${term}”的${type === 'item' ? '对象范围' : '筛选属性'}。请调整话题名称后重试。`,
+      );
+    }
+    return [...matches.values()][0];
+  }
+
+  private async resolveCategory(term: string, language: string): Promise<SourceIdentity> {
+    const Segmenter = (Intl as unknown as {
+      Segmenter?: new (
+        locale: string,
+        options: { granularity: 'word' },
+      ) => { segment(input: string): Iterable<{ segment: string; isWordLike?: boolean }> };
+    }).Segmenter;
+    const segments = Segmenter
+      ? [...new Segmenter(language, { granularity: 'word' }).segment(term)]
+      .filter((segment) => segment.isWordLike && [...segment.segment].length >= 2)
+      .map((segment) => segment.segment.trim())
+      .filter(Boolean)
+      .reverse()
+      : [];
+    const attempts = [...new Set([term, ...segments])];
+    for (const candidate of attempts) {
+      const matches = await this.searchExactIdentities(candidate, 'item', language);
+      if (matches.size === 1) return [...matches.values()][0];
+    }
+    throw new BadRequestException(
+      `无法从“${term}”中找到可唯一核验的 Wikidata 对象类别。请使用更明确的类别名称后重试。`,
+    );
+  }
+
+  private async searchExactIdentities(
+    term: string,
+    type: 'item' | 'property',
+    language: string,
+  ): Promise<Map<string, SourceIdentity>> {
     const url = new URL(API_ENDPOINT);
     url.search = new URLSearchParams({
       action: 'wbsearchentities',
@@ -170,12 +208,7 @@ export class TopicEntityDiscoveryService {
         label: typeof item?.label === 'string' ? item.label : term,
       });
     }
-    if (matches.size !== 1) {
-      throw new BadRequestException(
-        `无法在 Wikidata 中唯一核验“${term}”的${type === 'item' ? '对象范围' : '筛选属性'}。请调整话题名称后重试。`,
-      );
-    }
-    return [...matches.values()][0];
+    return matches;
   }
 
   private buildQuery(args: {

@@ -20,6 +20,28 @@ afterEach(() => {
 });
 
 describe('domain-independent topic entity discovery', () => {
+  it('uses local word segmentation when a display title is not itself a Wikidata category', async () => {
+    const intent = {
+      resolve: vi.fn().mockResolvedValue({
+        category: '全球最佳电影', membership: 'both', constraints: [], semantic: false,
+      }),
+      review: vi.fn().mockResolvedValue(new Set(['Q1'])),
+    };
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(Response.json({ search: [] }))
+      .mockResolvedValueOnce(Response.json({ search: [exact('Q11424', '电影')] }))
+      .mockResolvedValueOnce(Response.json({ results: { bindings: [row('Q1', '公开来源电影')] } }));
+    vi.stubGlobal('fetch', fetcher);
+
+    const result = await new TopicEntityDiscoveryService(intent as never)
+      .discover({ title: '全球最佳电影', locale: 'zh-CN', count: 1 });
+
+    expect(new URL(fetcher.mock.calls[0][0]).searchParams.get('search')).toBe('全球最佳电影');
+    expect(new URL(fetcher.mock.calls[1][0]).searchParams.get('search')).toBe('电影');
+    expect(result.entities.map((entity) => entity.externalId)).toEqual(['Q1']);
+    expect(result.strategy).toContain('电影（Q11424）');
+  });
+
   it('builds a source query only from the runtime plan and verified Wikidata IDs', async () => {
     const intent = {
       resolve: vi.fn().mockResolvedValue({

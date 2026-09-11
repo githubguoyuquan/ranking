@@ -695,6 +695,16 @@ function TopicDetailPage({ initialSlug }: { initialSlug: string }) {
     }
   }
 
+  const loadRef = useRef(load);
+  loadRef.current = load;
+  const autoLoadedSlugRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!slugForApi || autoLoadedSlugRef.current === slugForApi) return;
+    autoLoadedSlugRef.current = slugForApi;
+    void loadRef.current();
+  }, [slugForApi]);
+
   async function savePolicyJson() {
     if (!policyTargetId?.trim()) {
       setPolicyMsg("先点某一行的「policy」选中 topicVersionId");

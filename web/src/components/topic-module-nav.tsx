@@ -15,10 +15,9 @@ const items: Array<{
   key: TopicModulePage;
   label: string;
 }> = [
-  { key: "versions", label: "话题版本" },
-  { key: "new", label: "新建话题" },
-  { key: "manage", label: "管理话题" },
-];
+    { key: "versions", label: "话题版本" },
+    { key: "manage", label: "管理话题" },
+  ];
 
 export function TopicModuleNav({
   current,

@@ -3,6 +3,7 @@
 import { AdminFooterNav } from "@/components/admin-footer-nav";
 import { CopyTextButton } from "@/components/copy-snapshot-id-button";
 import { TopicCreatePanel } from "@/components/topic-create-panel";
+import { TopicListPanel } from "@/components/topic-list-panel";
 import { TopicModuleNav } from "@/components/topic-module-nav";
 import { Button } from "@/components/ui/button";
 import {
@@ -329,10 +330,12 @@ function parseTrendPayloadPreview(payload: unknown): {
   };
 }
 
-function TopicsPageInner() {
+function TopicDetailPage({ initialSlug }: { initialSlug: string }) {
   const { abs } = useAdminAppUrl();
   const searchParams = useSearchParams();
-  const [slug, setSlug] = useState("global-female-singers");
+  const [slug, setSlug] = useState(() =>
+    clampQueryParam(initialSlug, TOPIC_SLUG_MAX_LEN),
+  );
   const [topicMeta, setTopicMeta] = useState<TopicMeta | null>(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<string>("");
@@ -731,7 +734,7 @@ function TopicsPageInner() {
   return (
     <div className="w-full max-w-none space-y-6">
       <div>
-        <h1 className="text-[22px] font-semibold tracking-tight">话题版本</h1>
+        <h1 className="text-[22px] font-semibold tracking-tight">话题详情</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           在这里查询话题、确认自动填充的参榜对象并新建版本。话题本身请在“新建话题”或“管理话题”中处理。
           <span className="sr-only">接口：</span>
@@ -742,6 +745,10 @@ function TopicsPageInner() {
           <code className="rounded bg-muted px-1">GET {NEST_V1_DOC.topicsSnapshots}</code>
         </p>
       </div>
+
+      <Link href={ADMIN_HREF.topics} className="text-sm text-primary underline-offset-4 hover:underline">
+        ← 返回全部话题
+      </Link>
 
       <TopicModuleNav current="versions" slug={slugForApi} />
 
@@ -1593,6 +1600,12 @@ function TopicsPageInner() {
   );
 }
 
+function TopicsPageRouter() {
+  const searchParams = useSearchParams();
+  const slug = searchParams.get("slug")?.trim() ?? "";
+  return slug ? <TopicDetailPage initialSlug={slug} /> : <TopicListPanel />;
+}
+
 export default function TopicsPage() {
   return (
     <Suspense
@@ -1602,7 +1615,7 @@ export default function TopicsPage() {
         </div>
       }
     >
-      <TopicsPageInner />
+      <TopicsPageRouter />
     </Suspense>
   );
 }

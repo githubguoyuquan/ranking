@@ -3,6 +3,7 @@
 import { AdminFooterNav } from "@/components/admin-footer-nav";
 import { CopyTextButton } from "@/components/copy-snapshot-id-button";
 import { TopicCreatePanel } from "@/components/topic-create-panel";
+import { TopicModuleNav } from "@/components/topic-module-nav";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -24,6 +25,7 @@ import {
   ADMIN_HREF,
   rankingsRunAdminPath,
   snapshotDetailAdminPath,
+  topicManageAdminPath,
   topicsAdminPath,
 } from "@/lib/admin-web-paths";
 import { useAdminAppUrl } from "@/hooks/use-admin-app-url";
@@ -38,11 +40,7 @@ import {
   nestTopicVersionPolicyUrl,
   nestSnapshotScoreBreakdownsUrl,
 } from "@/lib/nest-api-urls";
-import {
-  TOPIC_KIND_OPTIONS,
-  type TopicKindValue,
-  isTopicKindValue,
-} from "@/lib/topic-kind";
+import { type TopicKindValue, isTopicKindValue } from "@/lib/topic-kind";
 import {
   parseTopicMetricPlan,
   type TopicMetricPlan,
@@ -52,14 +50,11 @@ import { isIsoDateString } from "@/lib/iso-date";
 import { TIME_WINDOW_SET } from "@/lib/time-window";
 import { useRankingRealtimeSse } from "@/hooks/use-ranking-realtime-sse";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type QuickWeightsState = Record<string, string>;
 const EMPTY_QUICK_WEIGHTS: QuickWeightsState = {};
-
-const selectClass =
-  "flex h-10 w-full rounded-md border border-input bg-transparent px-3 py-2 text-base leading-6 shadow-xs outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 type KindStrategy = {
   kind: string;
@@ -336,16 +331,9 @@ function parseTrendPayloadPreview(payload: unknown): {
 
 function TopicsPageInner() {
   const { abs } = useAdminAppUrl();
-  const router = useRouter();
   const searchParams = useSearchParams();
   const [slug, setSlug] = useState("global-female-singers");
   const [topicMeta, setTopicMeta] = useState<TopicMeta | null>(null);
-  const [topicKindDraft, setTopicKindDraft] =
-    useState<TopicKindValue>("SEMI_OBJECTIVE");
-  const [topicTitleDraft, setTopicTitleDraft] = useState("");
-  const [topicEntityScopeDraft, setTopicEntityScopeDraft] = useState("");
-  const [topicSaving, setTopicSaving] = useState(false);
-  const [topicMsg, setTopicMsg] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<string>("");
   const [versionRows, setVersionRows] = useState<TopicVersionRow[]>([]);
@@ -656,58 +644,6 @@ function TopicsPageInner() {
     },
   });
 
-  async function loadTopicMeta() {
-    setTopicMsg("");
-    try {
-      const res = await fetch(nestTopicUrl(slugForApi), { cache: "no-store" });
-      const text = await res.text();
-      if (!res.ok) {
-        setTopicMeta(null);
-        setTopicMsg(`话题 ${res.status}: ${text.slice(0, 400)}`);
-        return;
-      }
-      const j = JSON.parse(text) as Record<string, unknown>;
-      const meta = parseTopicMetaFromJson(j, slugForApi);
-      setTopicMeta(meta);
-      setTopicKindDraft(meta.kind);
-      setTopicTitleDraft(meta.title);
-      setTopicEntityScopeDraft(meta.entityScope ?? "");
-    } catch (e) {
-      setTopicMeta(null);
-      setTopicMsg(e instanceof Error ? e.message : String(e));
-    }
-  }
-
-  async function saveTopicMeta() {
-    setTopicSaving(true);
-    setTopicMsg("");
-    try {
-    const body: { kind: TopicKindValue; title?: string; entityScope?: string } = {
-        kind: topicKindDraft,
-      };
-      const title = topicTitleDraft.trim();
-    if (title) body.title = title;
-    const entityScope = topicEntityScopeDraft.trim();
-    if (entityScope) body.entityScope = entityScope;
-      const res = await fetch(nestTopicUrl(slugForApi), {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const text = await res.text();
-      if (!res.ok) {
-        setTopicMsg(`${res.status} ${text.slice(0, 2000)}`);
-        return;
-      }
-      setTopicMsg("已保存 TopicKind / 标题");
-      await loadTopicMeta();
-    } catch (e) {
-      setTopicMsg(e instanceof Error ? e.message : String(e));
-    } finally {
-      setTopicSaving(false);
-    }
-  }
-
   async function load() {
     setLoading(true);
     setResult("");
@@ -723,16 +659,11 @@ function TopicsPageInner() {
           const j = JSON.parse(topicText) as Record<string, unknown>;
           const meta = parseTopicMetaFromJson(j, slugForApi);
           setTopicMeta(meta);
-          setTopicKindDraft(meta.kind);
-          setTopicTitleDraft(meta.title);
-          setTopicEntityScopeDraft(meta.entityScope ?? "");
-          setTopicMsg("");
         } catch {
           setTopicMeta(null);
         }
       } else {
         setTopicMeta(null);
-        setTopicMsg(`话题 ${topicRes.status}: ${topicText.slice(0, 400)}`);
       }
 
       const text = await versionsRes.text();
@@ -802,41 +733,23 @@ function TopicsPageInner() {
       <div>
         <h1 className="text-[22px] font-semibold tracking-tight">话题版本</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          <code className="rounded bg-muted px-1">GET {NEST_V1_DOC.topic}</code> ·{" "}
-          <code className="rounded bg-muted px-1">PATCH {NEST_V1_DOC.topic}</code> ·{" "}
-          <code className="rounded bg-muted px-1">GET {NEST_V1_DOC.topicsVersions}</code> ·{" "}
+          在这里查询话题、确认自动填充的参榜对象并新建版本。话题本身请在“新建话题”或“管理话题”中处理。
+          <span className="sr-only">接口：</span>
+          <code className="sr-only">GET {NEST_V1_DOC.topicsVersions}</code>
+          {" "}
           <code className="rounded bg-muted px-1">GET {NEST_V1_DOC.topicsLeaderboard}</code> ·{" "}
           <code className="rounded bg-muted px-1">GET {NEST_V1_DOC.topicsTrendAnalyses}</code> ·{" "}
-          <code className="rounded bg-muted px-1">GET {NEST_V1_DOC.topicsSnapshots}</code> ·{" "}
-          <code className="rounded bg-muted px-1">PATCH {NEST_V1_DOC.topicVersionPolicy}</code>
+          <code className="rounded bg-muted px-1">GET {NEST_V1_DOC.topicsSnapshots}</code>
         </p>
       </div>
 
+      <TopicModuleNav current="versions" slug={slugForApi} />
+
       <TopicCreatePanel
+        mode="version"
         currentTopic={topicMeta}
         existingVersions={versionRows}
-        onTopicCreated={(created) => {
-          const meta: TopicMeta = {
-            id: created.id,
-            slug: created.slug,
-            title: created.title,
-            entityScope: created.entityScope,
-            kind: created.kind,
-            locale: created.locale,
-            kindStrategy: parseKindStrategy(created.kindStrategy),
-            metricPlan: created.metricPlan,
-          };
-          setSlug(created.slug);
-          router.replace(topicsAdminPath(created.slug), { scroll: false });
-          setTopicMeta(meta);
-          setTopicKindDraft(created.kind);
-          setTopicTitleDraft(created.title);
-          setTopicEntityScopeDraft(created.entityScope ?? "");
-          setVersionRows([]);
-          setPolicyTargetId(null);
-          setResult("");
-          setTopicMsg("");
-        }}
+        onTopicCreated={() => undefined}
         onVersionCreated={(created) => {
           setVersionRows((rows) => [
             created,
@@ -894,105 +807,19 @@ function TopicsPageInner() {
             </Button>
           </div>
 
-          <div
-            className="space-y-3 rounded-lg border border-border/80 bg-muted/20 p-4"
-            aria-labelledby="topic-kind-heading"
-          >
-            <div>
-              <h2
-                id="topic-kind-heading"
-                className="text-sm font-medium text-foreground"
+          {topicMeta ? (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-border/80 bg-muted/20 p-3 text-sm">
+              <span>
+                当前话题：<strong>{topicMeta.title}</strong>（{topicMeta.slug}）
+              </span>
+              <Link
+                href={topicManageAdminPath(topicMeta.slug)}
+                className="text-primary underline-offset-4 hover:underline"
               >
-                话题属性（TopicKind）
-              </h2>
-              <p className="mt-1 text-xs text-muted-foreground">
-                话题类型控制证据风格、覆盖率与时间衰减；指标名称和权重来自当前话题的动态方案。
-                {topicMeta ? (
-                  <span className="ml-1 font-mono text-xs">
-                    topicId={topicMeta.id}
-                  </span>
-                ) : null}
-              </p>
+                管理话题属性
+              </Link>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              <div className="space-y-2 sm:col-span-2 lg:col-span-1">
-                <Label htmlFor="topic-kind">TopicKind</Label>
-                <select
-                  id="topic-kind"
-                  className={selectClass}
-                  value={topicKindDraft}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (isTopicKindValue(v)) setTopicKindDraft(v);
-                  }}
-                >
-                  {TOPIC_KIND_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label} ({o.value})
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-muted-foreground">
-                  {
-                    TOPIC_KIND_OPTIONS.find((o) => o.value === topicKindDraft)
-                      ?.hint
-                  }
-                </p>
-                {topicMeta?.kindStrategy ? (
-                  <div className="mt-2 rounded-md border border-border/80 bg-background/80 p-2 text-xs text-muted-foreground">
-                    <p>{topicMeta.kindStrategy.description}</p>
-                    <p className="font-mono">
-                      覆盖率 ≥ {topicMeta.kindStrategy.minCoverageToRank} · 半衰期{" "}
-                      {topicMeta.kindStrategy.decay?.halfLifeDays ?? "—"}d
-                    </p>
-                  </div>
-                ) : null}
-              </div>
-              <div className="space-y-2 sm:col-span-2">
-                <Label htmlFor="topic-title">标题 title</Label>
-                <Input
-                  id="topic-title"
-                  maxLength={200}
-                  value={topicTitleDraft}
-                  onChange={(e) => setTopicTitleDraft(e.target.value)}
-                  placeholder={topicMeta?.title ?? "话题展示名"}
-                />
-              </div>
-              <div className="space-y-2 sm:col-span-2">
-                <Label htmlFor="topic-entity-scope">参榜实体类别</Label>
-                <Input
-                  id="topic-entity-scope"
-                  maxLength={160}
-                  value={topicEntityScopeDraft}
-                  onChange={(e) => setTopicEntityScopeDraft(e.target.value)}
-                  placeholder="例如：电影"
-                />
-                <p className="text-xs text-muted-foreground">
-                  用于自动填充参榜对象；修改后点击“保存话题属性”，再点“重试自动填充”。
-                </p>
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={topicSaving || !topicMeta}
-                onClick={() => void saveTopicMeta()}
-              >
-                {topicSaving ? "保存中…" : "保存话题属性"}
-              </Button>
-              <CopyTextButton
-                text={nestTopicUrl(slugForApi)}
-                idleLabel="复制 GET topic URL"
-                className="h-8"
-              />
-              {topicMsg ? (
-                <span className="text-xs text-muted-foreground" role="status">
-                  {topicMsg}
-                </span>
-              ) : null}
-            </div>
-          </div>
+          ) : null}
 
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="space-y-2">

@@ -67,6 +67,7 @@ type TopicCreatePanelProps = {
   existingVersions: CreatedTopicVersion[];
   onTopicCreated: (topic: CreatedTopic) => void;
   onVersionCreated: (version: CreatedTopicVersion) => void;
+  mode?: "all" | "topic" | "version";
 };
 
 function responseMessage(status: number, text: string): string {
@@ -124,6 +125,7 @@ export function TopicCreatePanel({
   existingVersions,
   onTopicCreated,
   onVersionCreated,
+  mode = "all",
 }: TopicCreatePanelProps) {
   const [newSlug, setNewSlug] = useState("");
   const [newTitle, setNewTitle] = useState("");
@@ -401,8 +403,8 @@ export function TopicCreatePanel({
   }
 
   return (
-    <div className="grid gap-4 xl:grid-cols-2">
-      <Card>
+    <div className={mode === "all" ? "grid gap-4 xl:grid-cols-2" : "grid gap-4"}>
+      {mode !== "version" ? <Card>
         <CardHeader>
           <CardTitle className="text-base">新建话题</CardTitle>
           <CardDescription>
@@ -514,9 +516,9 @@ export function TopicCreatePanel({
             </div>
           </form>
         </CardContent>
-      </Card>
+      </Card> : null}
 
-      <Card>
+      {mode !== "topic" ? <Card>
         <CardHeader>
           <CardTitle className="text-base">新建版本</CardTitle>
           <CardDescription>
@@ -772,7 +774,7 @@ export function TopicCreatePanel({
             </div>
           </form>
         </CardContent>
-      </Card>
+      </Card> : null}
     </div>
   );
 }

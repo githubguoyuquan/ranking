@@ -10,6 +10,8 @@ export const ADMIN_SNAPSHOTS_ROUTE_PREFIX = `${CONSOLE_PREFIX}/snapshots/`;
 export const ADMIN_HREF = {
   home: CONSOLE_PREFIX,
   topics: `${CONSOLE_PREFIX}/topics`,
+  topicsNew: `${CONSOLE_PREFIX}/topics/new`,
+  topicsManage: `${CONSOLE_PREFIX}/topics/manage`,
   entities: `${CONSOLE_PREFIX}/entities`,
   entityRankHistory: `${CONSOLE_PREFIX}/entities/rank-history`,
   entityTimeline: `${CONSOLE_PREFIX}/entities/timeline`,
@@ -38,6 +40,15 @@ export function topicsAdminPath(rawSlug: string): string {
   const slug =
     s.length > TOPIC_SLUG_MAX_LEN ? s.slice(0, TOPIC_SLUG_MAX_LEN) : s;
   return `${ADMIN_HREF.topics}?${new URLSearchParams({ slug }).toString()}`;
+}
+
+/** `/topics/manage` 话题属性管理页，可预填当前话题 slug。 */
+export function topicManageAdminPath(rawSlug: string): string {
+  const s = rawSlug.trim();
+  if (s === "") return ADMIN_HREF.topicsManage;
+  const slug =
+    s.length > TOPIC_SLUG_MAX_LEN ? s.slice(0, TOPIC_SLUG_MAX_LEN) : s;
+  return `${ADMIN_HREF.topicsManage}?${new URLSearchParams({ slug }).toString()}`;
 }
 
 /** `/rankings/run` 预填 topicVersionId（十进制字符串由调用方保证） */

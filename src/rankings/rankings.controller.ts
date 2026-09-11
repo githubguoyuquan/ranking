@@ -4,6 +4,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   NotFoundException,
   Param,
@@ -203,6 +204,11 @@ export class PatchTopicBodyDto {
   @MinLength(1)
   @MaxLength(160)
   entityScope?: string;
+}
+
+export class PatchTopicStatusBodyDto {
+  @IsBoolean()
+  isOnline!: boolean;
 }
 
 export class CreateTopicAdminDto {
@@ -435,6 +441,26 @@ export class RankingsController {
       },
       getAuthFromRequest(req),
     );
+  }
+
+  @Patch('admin/topics/:slug/status')
+  @RequireScopes('admin')
+  async patchTopicStatus(
+    @Param('slug') slug: string,
+    @Body() body: PatchTopicStatusBodyDto,
+    @Req() req: Request,
+  ) {
+    return this.rankings.setTopicOnline(
+      slug,
+      body.isOnline,
+      getAuthFromRequest(req),
+    );
+  }
+
+  @Delete('admin/topics/:slug')
+  @RequireScopes('admin')
+  async deleteTopic(@Param('slug') slug: string, @Req() req: Request) {
+    return this.rankings.softDeleteTopic(slug, getAuthFromRequest(req));
   }
 
   @Get('v1/topics/:slug/entities')

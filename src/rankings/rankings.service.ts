@@ -226,6 +226,7 @@ export class RankingsService {
     const topics = await this.readPrisma.topic.findMany({
       where: {
         ...topicWhereForAuth(auth),
+        deletedAt: null,
         ...(q
           ? {
               OR: [
@@ -245,6 +246,7 @@ export class RankingsService {
         entityScope: true,
         kind: true,
         locale: true,
+        isOnline: true,
         createdAt: true,
         updatedAt: true,
         _count: { select: { versions: true } },
@@ -688,6 +690,44 @@ export class RankingsService {
       tenantId: updated.tenantId?.toString() ?? null,
       updatedAt: updated.updatedAt.toISOString(),
     });
+  }
+
+  async setTopicOnline(
+    slug: string,
+    isOnline: boolean,
+    auth?: AuthenticatedRequestContext,
+  ) {
+    const topic = await this.prisma.topic.findFirst({
+      where: { slug: slug.trim(), deletedAt: null, ...topicWhereForAuth(auth) },
+      select: { id: true, tenantId: true },
+    });
+    if (!topic) throw new NotFoundException('topic not found');
+    await assertTopicAccessible(topic, auth);
+    const updated = await this.prisma.topic.update({
+      where: { id: topic.id },
+      data: { isOnline },
+      select: { id: true, slug: true, isOnline: true, updatedAt: true },
+    });
+    return toPlainJson(updated);
+  }
+
+  async softDeleteTopic(
+    slug: string,
+    auth?: AuthenticatedRequestContext,
+  ) {
+    const topic = await this.prisma.topic.findFirst({
+      where: { slug: slug.trim(), deletedAt: null, ...topicWhereForAuth(auth) },
+      select: { id: true, tenantId: true },
+    });
+    if (!topic) throw new NotFoundException('topic not found');
+    await assertTopicAccessible(topic, auth);
+    const deletedAt = new Date();
+    const updated = await this.prisma.topic.update({
+      where: { id: topic.id },
+      data: { isOnline: false, deletedAt },
+      select: { id: true, slug: true, isOnline: true, deletedAt: true },
+    });
+    return toPlainJson(updated);
   }
 
   /** Cache immutable snapshot data; attach current AI statistics and redact only the response. */

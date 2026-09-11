@@ -135,6 +135,10 @@ model Topic {
   locale    String   @default("en")
   /// 按话题语义生成的动态指标方案；版本创建时复制进 policyJson。
   metricPlan Json?
+  /// 下线后保留管理数据，但不再参与公开访问和新跑榜。
+  isOnline  Boolean  @default(true)
+  /// 软删除时间；保留历史版本、快照和审计链路。
+  deletedAt DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -151,6 +155,7 @@ model Topic {
   mergesAsTarget    TopicMergeAudit[] @relation("TopicMergeTarget")
 
   @@index([tenantId])
+  @@index([tenantId, deletedAt, updatedAt])
 }
 
 /// 话题本地特征向量（用于相似话题推荐）

@@ -16,7 +16,7 @@ import {
   adminTopicEntitiesRetryUrl,
   topicEntitiesUrl,
 } from "@/lib/backend-api-urls";
-import { adminApiHeaders } from "@/lib/query-http";
+import { adminApiHeaders, apiRequest } from "@/lib/query-http";
 import {
   buildTopicVersionPolicy,
   defaultTopicVersionPolicyForm,
@@ -290,19 +290,22 @@ export function TopicCreatePanel({
     setTopicSubmitting(true);
     setTopicFeedback("");
     try {
-      const response = await fetch(adminTopicsUrl(), {
+      const response = await apiRequest(adminTopicsUrl(), {
         method: "POST",
         headers: { ...adminApiHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({ slug, title, entityScope, kind: newKind, locale, entityCount }),
       });
       const text = await response.text();
-      if (!response.ok) {
-        setTopicFeedback(responseMessage(response.status, text));
+      let raw: unknown;
+      try {
+        raw = JSON.parse(text);
+      } catch {
+        setTopicFeedback("服务器已接受创建请求，但返回的数据格式异常。请先到话题管理确认是否已创建，避免重复提交。");
         return;
       }
-      const topic = parseCreatedTopic(JSON.parse(text) as unknown);
+      const topic = parseCreatedTopic(raw);
       if (!topic) {
-        setTopicFeedback("话题已提交，但返回内容无法识别，请用下方查询框重新加载。");
+        setTopicFeedback("服务器已接受创建请求，但返回内容无法识别。请先到话题管理确认是否已创建，避免重复提交。");
         return;
       }
       setTopicSucceeded(true);

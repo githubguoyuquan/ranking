@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ADMIN_HREF, topicsAdminPath } from "@/lib/admin-web-paths";
 import { adminTopicsUrl } from "@/lib/backend-api-urls";
-import { adminApiHeaders } from "@/lib/query-http";
+import { apiRequest, queryJson } from "@/lib/query-http";
 
 type TopicListItem = {
   id: string;
@@ -39,14 +39,9 @@ export function TopicListPanel() {
       const url = new URL(adminTopicsUrl());
       if (q.trim()) url.searchParams.set("q", q.trim());
       url.searchParams.set("limit", "200");
-      const response = await fetch(url, {
-        headers: adminApiHeaders(),
-        cache: "no-store",
-      });
-      const text = await response.text();
-      if (!response.ok) throw new Error(`查询失败（HTTP ${response.status}）：${text}`);
-      const body = JSON.parse(text) as { topics?: TopicListItem[] };
-      setTopics(Array.isArray(body.topics) ? body.topics : []);
+      const body = await queryJson<{ topics?: TopicListItem[] }>(url.toString());
+      if (!body || !Array.isArray(body.topics)) throw new Error("后台返回的话题列表格式异常，请稍后重试。");
+      setTopics(body.topics);
     } catch (cause) {
       setTopics([]);
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -60,15 +55,14 @@ export function TopicListPanel() {
     setError("");
     setFeedback("");
     try {
-      const response = await fetch(
+      await apiRequest(
         `${adminTopicsUrl()}/${encodeURIComponent(topic.slug)}/status`,
         {
           method: "PATCH",
-          headers: { ...adminApiHeaders(), "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ isOnline }),
         },
       );
-      if (!response.ok) throw new Error(`操作失败（HTTP ${response.status}）`);
       setFeedback(`话题“${topic.title}”已${isOnline ? "上线" : "下线"}。`);
       await loadTopics();
     } catch (cause) {
@@ -84,11 +78,10 @@ export function TopicListPanel() {
     setError("");
     setFeedback("");
     try {
-      const response = await fetch(
+      await apiRequest(
         `${adminTopicsUrl()}/${encodeURIComponent(topic.slug)}`,
-        { method: "DELETE", headers: adminApiHeaders() },
+        { method: "DELETE" },
       );
-      if (!response.ok) throw new Error(`删除失败（HTTP ${response.status}）`);
       setFeedback(`话题“${topic.title}”已删除。`);
       await loadTopics();
     } catch (cause) {

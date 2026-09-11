@@ -1,5 +1,25 @@
 # Ranking platform
 
+## 固定启动地址
+
+运营页面固定为 **http://localhost:3001/console**，API 固定为 **http://localhost:3000**。这是两个服务，各自占用一个端口。API 不再读取 `PORT` 来改变端口；前端开发和生产启动命令均显式指定 `3001`。端口占用时启动失败，不自动改用其他端口。
+
+在两个终端分别执行以下命令（都从项目根目录开始）：
+
+```bash
+cd /Users/guoyuququan/projects/ranking
+npm run dev:api
+```
+
+```bash
+cd /Users/guoyuququan/projects/ranking
+npm run dev:web
+```
+
+根目录的 `npm run dev` 也启动前端。原来的 `npm run start:dev` 仍启动 API。请使用上述 npm 命令，不直接执行未指定端口的 `npx next dev`。启动后浏览器统一打开 3001 的运营页面。Worker 是后台任务进程，不提供这两个页面端口。
+
+代码更新不会改变已经运行的进程；请自行停止旧进程并按上述命令重启。Elasticsearch 等依赖服务的连接错误需要单独处理，固定 HTTP 端口不会修复这些错误。
+
 完整产品愿景、与当前实现的**差距对照**、目标架构（DDD/消息/规模演进）见 **[docs/PLATFORM_ARCHITECTURE.md](docs/PLATFORM_ARCHITECTURE.md)**。
 
 创建话题时可指定参榜对象数量。系统在项目内按榜单证据类型生成指标方案，再从免费的 Wikidata 公开接口收集并校验候选名单；不需要收费 AI 或 API Key，也不会在所有话题中固定套用播放量。指标操作和边界见 [动态指标方案](docs/ops/DYNAMIC_TOPIC_METRICS.md)，实体来源见 [话题实体自动填充](docs/ops/TOPIC_ENTITY_AUTOFILL.md)。指标方案不会自动捏造指标值，运营仍需按方案口径导入或采集每个实体的 0–100 分值后才能跑榜。
